@@ -1,4 +1,9 @@
 import { createClient, type Client } from "@libsql/client";
+import { randomUUID } from "crypto";
+import { hashPassword } from "@/lib/auth";
+
+const ADMIN_USERNAME = "walli";
+const ADMIN_PASSWORD = "821202";
 
 let client: Client | null = null;
 let ready: Promise<void> | null = null;
@@ -61,6 +66,24 @@ export async function db(): Promise<Client> {
       await c.execute(
         `CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)`
       );
+
+      // hard-coded admin account: always present, always logs in with this password
+      const existingAdmin = await c.execute({
+        sql: "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
+        args: [ADMIN_USERNAME],
+      });
+      const adminHash = hashPassword(ADMIN_PASSWORD);
+      if (existingAdmin.rows.length === 0) {
+        await c.execute({
+          sql: "INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES (?, ?, ?, 1, ?)",
+          args: [randomUUID(), ADMIN_USERNAME, adminHash, new Date().toISOString()],
+        });
+      } else {
+        await c.execute({
+          sql: "UPDATE users SET password_hash = ?, is_admin = 1 WHERE username = ? COLLATE NOCASE",
+          args: [adminHash, ADMIN_USERNAME],
+        });
+      }
     })();
   }
   await ready;

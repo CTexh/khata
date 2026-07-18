@@ -28,12 +28,11 @@ export async function POST(req: Request) {
 
   const c = await db();
   const id = randomUUID();
-  const isAdmin = username.toLowerCase() === "walli";
   await c.execute({
-    sql: "INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)",
-    args: [id, username, hashPassword(password), isAdmin ? 1 : 0, new Date().toISOString()],
+    sql: "INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES (?, ?, ?, 0, ?)",
+    args: [id, username, hashPassword(password), new Date().toISOString()],
   });
 
-  await createSession({ id, username, is_admin: isAdmin });
-  return NextResponse.json({ id, username, isAdmin }, { status: 201 });
+  await createSession({ id, username, is_admin: false });
+  return NextResponse.json({ id, username, isAdmin: false }, { status: 201 });
 }

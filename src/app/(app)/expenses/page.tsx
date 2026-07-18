@@ -131,11 +131,6 @@ function ExpenseRow({
         <p className="text-[14px] truncate font-medium">{expense.note || "Expense"}</p>
         <p className="text-[12px]" style={{ color: "var(--muted)" }}>
           {fmtDateLabel(expense.expense_date)}
-          {" · logged "}
-          {new Date(expense.created_at).toLocaleTimeString("en-PK", {
-            hour: "numeric",
-            minute: "2-digit",
-          })}
         </p>
       </div>
       <span className="tabular text-[14px] font-semibold shrink-0">
