@@ -299,29 +299,3 @@ export async function yearlyExpenseTotals(userId: string, year: number): Promise
   });
 }
 
-export type AllTimeStats = {
-  total: number;
-  count: number;
-  highest: number;
-  firstYear: number | null;
-};
-
-export async function allTimeExpenseStats(userId: string): Promise<AllTimeStats> {
-  const c = await db();
-  const rs = await c.execute({
-    sql: `
-      SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS count,
-             COALESCE(MAX(amount),0) AS highest,
-             MIN(substr(expense_date,1,4)) AS first_year
-      FROM expenses WHERE user_id = ?
-    `,
-    args: [userId],
-  });
-  const r = rs.rows[0];
-  return {
-    total: Number(r?.total ?? 0),
-    count: Number(r?.count ?? 0),
-    highest: Number(r?.highest ?? 0),
-    firstYear: r?.first_year ? Number(r.first_year) : null,
-  };
-}

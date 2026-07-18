@@ -105,8 +105,9 @@ body::after {
   position: fixed;
   z-index: -1;
   border-radius: 50%;
-  filter: blur(90px);
+  filter: blur(60px);
   pointer-events: none;
+  will-change: transform;
 }
 body::before {
   width: 55vmax;
@@ -277,6 +278,16 @@ body::after {
   box-shadow: 0 10px 26px rgba(210, 60, 70, 0.45), inset 0 -2px 6px rgba(60, 0, 10, 0.28);
 }
 
+/* liquid glass icon button — for nav arrows etc; keeps the specular sheen + shine sweep */
+.btn-nav {
+  background: linear-gradient(135deg, var(--surface-2), var(--surface));
+  border: 1px solid var(--ring);
+  color: var(--ink-2);
+  box-shadow: var(--glass-shadow), inset 0 -1px 3px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
 /* ---- wordmark ---- */
 .wordmark {
   font-weight: 900;
@@ -330,23 +341,10 @@ body::after {
   border-radius: 46% 54% 52% 48% / 48% 46% 56% 52%;
   box-shadow: inset 0 1.5px 2px rgba(255, 255, 255, 0.6),
     inset 0 -3px 6px rgba(0, 0, 30, 0.18), 0 3px 8px rgba(31, 45, 90, 0.18);
-  animation: morph 9s ease-in-out infinite alternate;
+  transition: border-radius 400ms ease;
 }
-@keyframes morph {
-  0% {
-    border-radius: 46% 54% 52% 48% / 48% 46% 56% 52%;
-  }
-  50% {
-    border-radius: 54% 46% 44% 56% / 52% 56% 44% 48%;
-  }
-  100% {
-    border-radius: 48% 52% 56% 44% / 46% 52% 48% 54%;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .avatar-liquid {
-    animation: none;
-  }
+.avatar-liquid:hover {
+  border-radius: 54% 46% 44% 56% / 52% 56% 44% 48%;
 }
 
 .tabular {

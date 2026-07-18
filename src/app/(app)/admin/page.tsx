@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { UserSummary } from "@/lib/db";
-import { AppShell } from "@/components/AppShell";
 import { Avatar } from "@/components/Avatar";
 import { fmtWhen } from "@/lib/format";
 
@@ -51,7 +50,7 @@ export default function AdminPage() {
   };
 
   return (
-    <AppShell>
+    <>
       <div className="flex items-center justify-between -mt-2">
         <h2 className="text-[17px] font-bold">🛠️ Admin — Users</h2>
       </div>
@@ -109,6 +108,6 @@ export default function AdminPage() {
       <footer className="text-center text-[12px] py-4" style={{ color: "var(--muted)" }}>
         {users?.length ?? 0} registered user{users?.length === 1 ? "" : "s"}
       </footer>
-    </AppShell>
+    </>
   );
 }

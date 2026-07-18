@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Person, Tx } from "@/lib/db";
 import { fmtRs, fmtWhen, fmtFull } from "@/lib/format";
-import { AppShell } from "@/components/AppShell";
 import { Avatar } from "@/components/Avatar";
 
 /* ---------- small components ---------- */
@@ -437,7 +436,7 @@ export default function Home() {
   }, [people, query]);
 
   return (
-    <AppShell>
+    <>
       <div className="flex items-center justify-end -mt-2">
         {!adding && people !== null && (
           <button className="btn btn-primary" onClick={() => setAdding(true)}>
@@ -497,6 +496,6 @@ export default function Home() {
       <footer className="text-center text-[12px] py-4" style={{ color: "var(--muted)" }}>
         Khata · synced across your devices
       </footer>
-    </AppShell>
+    </>
   );
 }

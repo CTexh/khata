@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Expense, YearlyPoint, AllTimeStats } from "@/lib/db";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Expense, YearlyPoint } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES, todayLocalYMD } from "@/lib/format";
-import { AppShell } from "@/components/AppShell";
 
-type View = "month" | "year" | "all";
+type View = "month" | "year";
 
 /* ---------- quick add / edit form ---------- */
 
@@ -128,12 +127,6 @@ function ExpenseRow({
       className="flex items-center gap-3 py-3 border-b last:border-b-0"
       style={{ borderColor: "var(--hairline)" }}
     >
-      <span
-        className="w-9 h-9 rounded-full flex items-center justify-center text-[15px] shrink-0"
-        style={{ background: "var(--bad-soft)" }}
-      >
-        🧾
-      </span>
       <div className="min-w-0 flex-1">
         <p className="text-[14px] truncate font-medium">{expense.note || "Expense"}</p>
         <p className="text-[12px]" style={{ color: "var(--muted)" }}>
@@ -197,7 +190,6 @@ function MonthView({
   }, [load, refreshKey, bump]);
 
   const total = expenses?.reduce((s, e) => s + e.amount, 0) ?? 0;
-  const count = expenses?.length ?? 0;
 
   return (
     <>
@@ -206,7 +198,7 @@ function MonthView({
           <button
             onClick={() => onNav(-1)}
             aria-label="Previous month"
-            className="btn btn-ghost !p-0 w-9 h-9"
+            className="btn btn-nav !p-0 w-9 h-9"
           >
             ←
           </button>
@@ -216,7 +208,7 @@ function MonthView({
           <button
             onClick={() => onNav(1)}
             aria-label="Next month"
-            className="btn btn-ghost !p-0 w-9 h-9"
+            className="btn btn-nav !p-0 w-9 h-9"
           >
             →
           </button>
@@ -228,15 +220,6 @@ function MonthView({
         <p className="hero-num text-4xl font-bold tracking-tight mt-1 tabular">
           {fmtRs(total)}
         </p>
-
-        <div className="tile px-3 py-2.5 mt-4 inline-flex">
-          <div>
-            <p className="text-[11px] font-medium" style={{ color: "var(--muted)" }}>
-              Expenses logged
-            </p>
-            <p className="text-sm font-semibold tabular mt-0.5">{count}</p>
-          </div>
-        </div>
       </div>
 
       <section className="card p-5 sm:p-6 rise">
@@ -321,9 +304,7 @@ function YearView({
   onNav: (dir: -1 | 1) => void;
   refreshKey: number;
 }) {
-  const [data, setData] = useState<{ yearly: YearlyPoint[]; allTime: AllTimeStats } | null>(
-    null
-  );
+  const [data, setData] = useState<{ yearly: YearlyPoint[] } | null>(null);
 
   useEffect(() => {
     setData(null);
@@ -344,7 +325,7 @@ function YearView({
         <button
           onClick={() => onNav(-1)}
           aria-label="Previous year"
-          className="btn btn-ghost !p-0 w-9 h-9"
+          className="btn btn-nav !p-0 w-9 h-9"
         >
           ←
         </button>
@@ -352,7 +333,7 @@ function YearView({
         <button
           onClick={() => onNav(1)}
           aria-label="Next year"
-          className="btn btn-ghost !p-0 w-9 h-9"
+          className="btn btn-nav !p-0 w-9 h-9"
         >
           →
         </button>
@@ -376,54 +357,6 @@ function YearView({
             </p>
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-/* ---------- all-time view ---------- */
-
-function AllTimeView({ refreshKey }: { refreshKey: number }) {
-  const [data, setData] = useState<AllTimeStats | null>(null);
-
-  useEffect(() => {
-    fetch(`/api/expenses/stats?year=${new Date().getFullYear()}`)
-      .then((r) => r.json())
-      .then((d) => setData(d.allTime));
-  }, [refreshKey]);
-
-  return (
-    <div className="card p-5 sm:p-6 rise">
-      <p className="text-[13px] font-medium" style={{ color: "var(--muted)" }}>
-        All-time spending
-      </p>
-      <p className="hero-num text-4xl sm:text-5xl font-bold tracking-tight mt-1 tabular">
-        {data ? fmtRs(data.total) : "…"}
-      </p>
-
-      <div className="grid grid-cols-2 gap-3 mt-5">
-        <div className="tile px-3 py-2.5">
-          <p className="text-[11px] font-medium" style={{ color: "var(--muted)" }}>
-            Expenses logged
-          </p>
-          <p className="text-sm sm:text-base font-semibold tabular mt-0.5">
-            {data?.count ?? "…"}
-          </p>
-        </div>
-        <div className="tile px-3 py-2.5">
-          <p className="text-[11px] font-medium" style={{ color: "var(--muted)" }}>
-            Highest expense
-          </p>
-          <p className="text-sm sm:text-base font-semibold tabular truncate mt-0.5">
-            {data ? fmtRs(data.highest) : "…"}
-          </p>
-        </div>
-      </div>
-
-      {data?.firstYear && (
-        <p className="text-[12px] mt-4" style={{ color: "var(--muted)" }}>
-          Tracking expenses since {data.firstYear}
-        </p>
       )}
     </div>
   );
@@ -460,11 +393,10 @@ export default function ExpensesPage() {
   const views: { id: View; label: string }[] = [
     { id: "month", label: "This month" },
     { id: "year", label: "Yearly" },
-    { id: "all", label: "All-time" },
   ];
 
   return (
-    <AppShell>
+    <>
       <div className="flex items-center justify-between -mt-2">
         <h2 className="text-[17px] font-bold">🧾 Mera Khata</h2>
         {!adding && !editing && (
@@ -517,11 +449,10 @@ export default function ExpensesPage() {
           refreshKey={refreshKey}
         />
       )}
-      {view === "all" && <AllTimeView refreshKey={refreshKey} />}
 
       <footer className="text-center text-[12px] py-4" style={{ color: "var(--muted)" }}>
         Mera Khata · your everyday spending, sorted
       </footer>
-    </AppShell>
+    </>
   );
 }
