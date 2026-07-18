@@ -10,7 +10,7 @@ import { Avatar } from "@/components/Avatar";
 type CurrentUser = { id: string; username: string; isAdmin: boolean };
 
 const NAV_ITEMS = [
-  { href: "/", label: "Khata", icon: "📒" },
+  { href: "/", label: "Khata", icon: "" },
   { href: "/expenses", label: "Mera Khata", icon: "" },
 ];
 
