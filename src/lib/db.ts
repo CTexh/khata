@@ -18,71 +18,63 @@ function getClient(): Client {
   return client;
 }
 
-async function hasColumn(c: Client, table: string, column: string): Promise<boolean> {
-  const rs = await c.execute(`PRAGMA table_info(${table})`);
-  return rs.rows.some((r) => (r.name as string) === column);
-}
-
 export async function db(): Promise<Client> {
   const c = getClient();
   if (!ready) {
     ready = (async () => {
-      await c.execute(`CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT NOT NULL UNIQUE,
-        password_hash TEXT NOT NULL,
-        is_admin INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL
-      )`);
-      await c.execute(`CREATE TABLE IF NOT EXISTS people (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`);
-      await c.execute(`CREATE TABLE IF NOT EXISTS transactions (
-        id TEXT PRIMARY KEY,
-        person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-        amount REAL NOT NULL,
-        note TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL
-      )`);
-      await c.execute(`CREATE TABLE IF NOT EXISTS expenses (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        amount REAL NOT NULL,
-        note TEXT NOT NULL DEFAULT '',
-        expense_date TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`);
-
-      // migrate: scope people to a user (older single-user schema had no user_id)
-      if (!(await hasColumn(c, "people", "user_id"))) {
-        await c.execute(`ALTER TABLE people ADD COLUMN user_id TEXT REFERENCES users(id)`);
-      }
-
-      await c.execute(
-        `CREATE INDEX IF NOT EXISTS idx_people_user ON people(user_id)`
-      );
-      await c.execute(
-        `CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)`
-      );
-
-      // hard-coded admin account: always present, always logs in with this password
-      const existingAdmin = await c.execute({
-        sql: "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
-        args: [ADMIN_USERNAME],
-      });
+      // Schema setup + admin seed collapsed into a single round trip. Fresh
+      // installs get user_id on `people` directly (no ALTER needed); the
+      // ALTER below only fires for pre-existing databases created before
+      // multi-user support and is skipped harmlessly everywhere else.
       const adminHash = hashPassword(ADMIN_PASSWORD);
-      if (existingAdmin.rows.length === 0) {
-        await c.execute({
-          sql: "INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES (?, ?, ?, 1, ?)",
-          args: [randomUUID(), ADMIN_USERNAME, adminHash, new Date().toISOString()],
-        });
-      } else {
-        await c.execute({
-          sql: "UPDATE users SET password_hash = ?, is_admin = 1 WHERE username = ? COLLATE NOCASE",
-          args: [adminHash, ADMIN_USERNAME],
-        });
+      await c.batch(
+        [
+          `CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+          )`,
+          `CREATE TABLE IF NOT EXISTS people (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            user_id TEXT REFERENCES users(id)
+          )`,
+          `CREATE TABLE IF NOT EXISTS transactions (
+            id TEXT PRIMARY KEY,
+            person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+            amount REAL NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+          )`,
+          `CREATE TABLE IF NOT EXISTS expenses (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            amount REAL NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            expense_date TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          )`,
+          `CREATE INDEX IF NOT EXISTS idx_people_user ON people(user_id)`,
+          `CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)`,
+          {
+            sql: `INSERT INTO users (id, username, password_hash, is_admin, created_at)
+                  VALUES (?, ?, ?, 1, ?)
+                  ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, is_admin = 1`,
+            args: [randomUUID(), ADMIN_USERNAME, adminHash, new Date().toISOString()],
+          },
+        ],
+        "write"
+      );
+
+      // one-time backward-compat migration for databases from before multi-user
+      // support; no-ops (and is caught) once `people.user_id` already exists
+      try {
+        await c.execute(`ALTER TABLE people ADD COLUMN user_id TEXT REFERENCES users(id)`);
+      } catch {
+        // column already exists — expected on every run after the first
       }
     })();
   }
