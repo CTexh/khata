@@ -72,8 +72,8 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
-        <button className="btn btn-primary" disabled={busy}>
-          {busy ? "Creating…" : "✨ Create user"}
+        <button className="btn btn-admin" disabled={busy}>
+          {busy ? "Creating…" : "Create user"}
         </button>
       </div>
     </form>
@@ -243,8 +243,8 @@ export default function AdminPage() {
       <div className="flex items-center justify-between -mt-2">
         <h2 className="text-[17px] font-bold">🛠️ Admin — Users</h2>
         {!error && !creating && (
-          <button className="btn btn-primary" onClick={() => setCreating(true)}>
-            <span>➕</span> Create user
+          <button className="btn btn-admin" onClick={() => setCreating(true)}>
+            Create user
           </button>
         )}
       </div>

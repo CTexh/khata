@@ -440,7 +440,7 @@ export default function Home() {
       <div className="flex items-center justify-end -mt-2">
         {!adding && people !== null && (
           <button className="btn btn-primary" onClick={() => setAdding(true)}>
-            <span>📒</span> Add borrower
+            Add borrower
           </button>
         )}
       </div>

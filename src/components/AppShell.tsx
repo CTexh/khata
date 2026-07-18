@@ -33,7 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const items = user?.isAdmin
-    ? [...NAV_ITEMS, { href: "/admin", label: "Admin", icon: "🛠️" }]
+    ? [...NAV_ITEMS, { href: "/admin", label: "Admin", icon: "" }]
     : NAV_ITEMS;
 
   return (
