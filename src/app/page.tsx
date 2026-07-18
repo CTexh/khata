@@ -2,154 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Person, Tx } from "@/lib/db";
-
-/* ---------- formatting ---------- */
-
-function fmtRs(n: number): string {
-  const abs = Math.abs(n);
-  const s = abs.toLocaleString("en-PK", {
-    maximumFractionDigits: Number.isInteger(abs) ? 0 : 2,
-    minimumFractionDigits: 0,
-  });
-  return `${n < 0 ? "−" : ""}Rs ${s}`;
-}
-
-function fmtWhen(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = (now.getTime() - d.getTime()) / 1000;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
-  if (diff < 86400 && d.getDate() === now.getDate())
-    return d.toLocaleTimeString("en-PK", { hour: "numeric", minute: "2-digit" });
-  return d.toLocaleDateString("en-PK", {
-    day: "numeric",
-    month: "short",
-    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
-  });
-}
-
-function fmtFull(iso: string): string {
-  return new Date(iso).toLocaleString("en-PK", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-
-const AVATAR_HUES = [212, 160, 38, 265, 350, 20, 190, 300];
-const hueFor = (id: string) => {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return AVATAR_HUES[h % AVATAR_HUES.length];
-};
-
-/* ---------- logo ---------- */
-
-function Logo({ size = 44 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 64 64"
-      className="logo-float shrink-0"
-      aria-label="Khata logo"
-    >
-      <defs>
-        <linearGradient id="lg-drop" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--accent)" />
-          <stop offset="0.55" stopColor="var(--accent-2)" />
-          <stop offset="1" stopColor="var(--good-2)" />
-        </linearGradient>
-        <radialGradient id="lg-shine" cx="0.32" cy="0.22" r="0.5">
-          <stop offset="0" stopColor="#fff" stopOpacity="0.85" />
-          <stop offset="1" stopColor="#fff" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      {/* liquid droplet / coin blob */}
-      <path
-        d="M32 4C40 16 56 24 56 39c0 13.3-10.7 21-24 21S8 52.3 8 39C8 24 24 16 32 4z"
-        fill="url(#lg-drop)"
-      />
-      <path
-        d="M32 4C40 16 56 24 56 39c0 13.3-10.7 21-24 21S8 52.3 8 39C8 24 24 16 32 4z"
-        fill="url(#lg-shine)"
-      />
-      {/* rupee mark */}
-      <g
-        stroke="#fff"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      >
-        <path d="M24 26h16M24 33h16M26 26c6 0 9 2.5 9 7 0 4.5-3 7.5-9 7.5l12 9" />
-      </g>
-    </svg>
-  );
-}
+import { fmtRs, fmtWhen, fmtFull } from "@/lib/format";
+import { AppShell } from "@/components/AppShell";
+import { Avatar } from "@/components/Avatar";
 
 /* ---------- small components ---------- */
-
-function Avatar({ person, size = 40 }: { person: Person; size?: number }) {
-  const hue = hueFor(person.id);
-  return (
-    <div
-      className="avatar-liquid flex items-center justify-center font-bold shrink-0"
-      style={{
-        width: size,
-        height: size,
-        fontSize: size * 0.36,
-        background: `linear-gradient(135deg, oklch(0.72 0.16 ${hue}), oklch(0.52 0.19 ${(hue + 40) % 360}))`,
-        color: "#fff",
-        textShadow: "0 1px 2px rgba(0,0,20,0.25)",
-      }}
-    >
-      {initials(person.name)}
-    </div>
-  );
-}
-
-function ThemeToggle() {
-  const [dark, setDark] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    setDark(
-      root.dataset.theme === "dark" ||
-        (!root.dataset.theme &&
-          window.matchMedia("(prefers-color-scheme: dark)").matches)
-    );
-  }, []);
-
-  const toggle = () => {
-    const next = !dark;
-    document.documentElement.dataset.theme = next ? "dark" : "light";
-    try {
-      localStorage.setItem("khata-theme", next ? "dark" : "light");
-    } catch {}
-    setDark(next);
-  };
-
-  return (
-    <button
-      onClick={toggle}
-      aria-label="Toggle dark mode"
-      className="btn btn-ghost !p-0 w-10 h-10 text-[17px]"
-    >
-      {dark === null ? "◐" : dark ? "☀️" : "🌙"}
-    </button>
-  );
-}
 
 function Spinner() {
   return (
@@ -185,10 +42,7 @@ function Dashboard({ people }: { people: Person[] }) {
           { label: "People", value: String(owing.length) },
           { label: "Total lent", value: fmtRs(lent) },
         ].map((t) => (
-          <div
-            key={t.label}
-            className="tile px-3 py-2.5"
-          >
+          <div key={t.label} className="tile px-3 py-2.5">
             <p className="text-[11px] font-medium" style={{ color: "var(--muted)" }}>
               {t.label}
             </p>
@@ -439,7 +293,7 @@ function PersonCard({
         onClick={onToggle}
         className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
       >
-        <Avatar person={person} />
+        <Avatar id={person.id} name={person.name} />
         <div className="min-w-0 flex-1">
           <p className="font-semibold truncate">{person.name}</p>
           <p className="text-[12px]" style={{ color: "var(--muted)" }}>
@@ -583,26 +437,14 @@ export default function Home() {
   }, [people, query]);
 
   return (
-    <main className="w-full max-w-xl mx-auto px-4 py-6 sm:py-10 flex flex-col gap-5">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Logo />
-          <div>
-            <h1 className="wordmark text-[26px] leading-tight">Khata</h1>
-            <p className="text-[13px]" style={{ color: "var(--muted)" }}>
-              Your loan ledger
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          {!adding && (
-            <button className="btn btn-primary" onClick={() => setAdding(true)}>
-              <span>📒</span> Add borrower
-            </button>
-          )}
-        </div>
-      </header>
+    <AppShell>
+      <div className="flex items-center justify-end -mt-2">
+        {!adding && people !== null && (
+          <button className="btn btn-primary" onClick={() => setAdding(true)}>
+            <span>📒</span> Add borrower
+          </button>
+        )}
+      </div>
 
       {people === null ? (
         <Spinner />
@@ -635,7 +477,7 @@ export default function Home() {
                 <p className="text-3xl mb-2">🪙</p>
                 <p className="font-semibold">No records yet</p>
                 <p className="text-[14px] mt-1" style={{ color: "var(--muted)" }}>
-                  Tap “New record” to add the first person who owes you.
+                  Tap “Add borrower” to add the first person who owes you.
                 </p>
               </div>
             )}
@@ -655,6 +497,6 @@ export default function Home() {
       <footer className="text-center text-[12px] py-4" style={{ color: "var(--muted)" }}>
         Khata · synced across your devices
       </footer>
-    </main>
+    </AppShell>
   );
 }

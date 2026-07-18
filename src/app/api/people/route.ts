@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
 import { db, listPeople } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 import { randomUUID } from "crypto";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(await listPeople());
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  return NextResponse.json(await listPeople(session.userId));
 }
 
 export async function POST(req: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
   const body = await req.json();
   const name = String(body.name ?? "").trim();
   const amount = Number(body.amount);
@@ -27,8 +33,8 @@ export async function POST(req: Request) {
   await c.batch(
     [
       {
-        sql: "INSERT INTO people (id, name, created_at) VALUES (?, ?, ?)",
-        args: [personId, name, now],
+        sql: "INSERT INTO people (id, name, created_at, user_id) VALUES (?, ?, ?, ?)",
+        args: [personId, name, now, session.userId],
       },
       {
         sql: "INSERT INTO transactions (id, person_id, amount, note, created_at) VALUES (?, ?, ?, ?, ?)",
