@@ -392,8 +392,7 @@ export default function ExpensesPage() {
 
   return (
     <>
-      <div className="flex items-center justify-between -mt-2">
-        <h2 className="text-[17px] font-bold">Mera Khata</h2>
+      <div className="flex items-center justify-end -mt-2">
         {!adding && !editing && (
           <button className="btn btn-expense" onClick={() => setAdding(true)}>
             Log expense

@@ -240,8 +240,7 @@ export default function AdminPage() {
 
   return (
     <>
-      <div className="flex items-center justify-between -mt-2">
-        <h2 className="text-[17px] font-bold">Admin — Users</h2>
+      <div className="flex items-center justify-end -mt-2">
         {!error && !creating && (
           <button className="btn btn-admin" onClick={() => setCreating(true)}>
             Create user
