@@ -2,8 +2,8 @@ import { createClient, type Client } from "@libsql/client";
 import { randomUUID } from "crypto";
 import { hashPassword } from "@/lib/auth";
 
-const ADMIN_USERNAME = "walli";
-const ADMIN_PASSWORD = "821202";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "walli";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "821202";
 
 let client: Client | null = null;
 let ready: Promise<void> | null = null;

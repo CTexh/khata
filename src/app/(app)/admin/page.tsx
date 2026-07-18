@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { UserSummary } from "@/lib/db";
 import { Avatar } from "@/components/Avatar";
 import { fmtWhen } from "@/lib/format";
@@ -16,9 +16,214 @@ function Spinner() {
   );
 }
 
+/* ---------- create user ---------- */
+
+function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const res = await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Something went wrong");
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <form onSubmit={submit} className="card p-5 rise flex flex-col gap-3">
+      <p className="font-semibold">New user</p>
+      <input
+        ref={ref}
+        className="field"
+        placeholder="Username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        required
+      />
+      <input
+        className="field"
+        placeholder="Password (min 6 characters)"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        required
+      />
+      {error && (
+        <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+          {error}
+        </p>
+      )}
+      <div className="flex gap-2 justify-end">
+        <button type="button" className="btn btn-ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn btn-primary" disabled={busy}>
+          {busy ? "Creating…" : "✨ Create user"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/* ---------- reset password ---------- */
+
+function ResetPasswordForm({
+  user,
+  onDone,
+  onCancel,
+}: {
+  user: UserSummary;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const res = await fetch(`/api/admin/users/${user.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Something went wrong");
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2 mt-3 pt-3 border-t" style={{ borderColor: "var(--hairline)" }}>
+      <input
+        ref={ref}
+        className="field"
+        placeholder={`New password for ${user.username}`}
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        required
+      />
+      {error && (
+        <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+          {error}
+        </p>
+      )}
+      <div className="flex gap-2 justify-end">
+        <button type="button" className="btn btn-ghost !py-2 text-[12px]" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn btn-primary !py-2 text-[12px]" disabled={busy}>
+          {busy ? "Saving…" : "💾 Save password"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/* ---------- user row ---------- */
+
+function UserRow({ user, onChanged }: { user: UserSummary; onChanged: () => void }) {
+  const [resetting, setResetting] = useState(false);
+
+  const remove = async () => {
+    if (
+      !confirm(
+        `Delete ${user.username}'s account? This permanently removes their loans and expenses too.`
+      )
+    )
+      return;
+    const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error ?? "Couldn't delete that user");
+      return;
+    }
+    onChanged();
+  };
+
+  return (
+    <li className="p-3 border-b last:border-b-0" style={{ borderColor: "var(--hairline)" }}>
+      <div className="flex items-center gap-3">
+        <Avatar id={user.id} name={user.username} size={40} />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold truncate flex items-center gap-1.5">
+            {user.username}
+            {user.is_admin && (
+              <span
+                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+              >
+                ADMIN
+              </span>
+            )}
+          </p>
+          <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+            Joined {fmtWhen(user.created_at)} · {user.people_count} loan
+            {user.people_count === 1 ? "" : "s"} · {user.expense_count} expense
+            {user.expense_count === 1 ? "" : "s"}
+          </p>
+        </div>
+        {!user.is_admin && (
+          <div className="flex gap-1.5 shrink-0">
+            <button
+              onClick={() => setResetting((v) => !v)}
+              className="btn btn-ghost !py-2 !px-3 text-[12px]"
+            >
+              <span>🔑</span> Password
+            </button>
+            <button
+              onClick={remove}
+              className="btn btn-danger !py-2 !px-3 text-[12px]"
+            >
+              <span>🗑</span> Delete
+            </button>
+          </div>
+        )}
+      </div>
+
+      {resetting && (
+        <ResetPasswordForm
+          user={user}
+          onCancel={() => setResetting(false)}
+          onDone={() => {
+            setResetting(false);
+            alert(`Password updated for ${user.username}.`);
+          }}
+        />
+      )}
+    </li>
+  );
+}
+
+/* ---------- page ---------- */
+
 export default function AdminPage() {
   const [users, setUsers] = useState<UserSummary[] | null>(null);
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/admin/users");
@@ -33,26 +238,15 @@ export default function AdminPage() {
     load();
   }, [load]);
 
-  const remove = async (u: UserSummary) => {
-    if (
-      !confirm(
-        `Delete ${u.username}'s account? This permanently removes their loans and expenses too.`
-      )
-    )
-      return;
-    const res = await fetch(`/api/admin/users/${u.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      alert(j.error ?? "Couldn't delete that user");
-      return;
-    }
-    load();
-  };
-
   return (
     <>
       <div className="flex items-center justify-between -mt-2">
         <h2 className="text-[17px] font-bold">🛠️ Admin — Users</h2>
+        {!error && !creating && (
+          <button className="btn btn-primary" onClick={() => setCreating(true)}>
+            <span>➕</span> Create user
+          </button>
+        )}
       </div>
 
       {error && (
@@ -61,45 +255,23 @@ export default function AdminPage() {
         </div>
       )}
 
+      {creating && (
+        <CreateUserForm
+          onCancel={() => setCreating(false)}
+          onDone={() => {
+            setCreating(false);
+            load();
+          }}
+        />
+      )}
+
       {!error && users === null && <Spinner />}
 
       {!error && users && (
         <div className="card p-2 rise">
           <ul className="flex flex-col">
             {users.map((u) => (
-              <li
-                key={u.id}
-                className="flex items-center gap-3 p-3 border-b last:border-b-0"
-                style={{ borderColor: "var(--hairline)" }}
-              >
-                <Avatar id={u.id} name={u.username} size={40} />
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold truncate flex items-center gap-1.5">
-                    {u.username}
-                    {u.is_admin && (
-                      <span
-                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                        style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-                      >
-                        ADMIN
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-                    Joined {fmtWhen(u.created_at)} · {u.people_count} loan
-                    {u.people_count === 1 ? "" : "s"} · {u.expense_count} expense
-                    {u.expense_count === 1 ? "" : "s"}
-                  </p>
-                </div>
-                {!u.is_admin && (
-                  <button
-                    onClick={() => remove(u)}
-                    className="btn btn-danger !py-2 !px-3 text-[12px] shrink-0"
-                  >
-                    <span>🗑</span> Delete
-                  </button>
-                )}
-              </li>
+              <UserRow key={u.id} user={u} onChanged={load} />
             ))}
           </ul>
         </div>

@@ -11,7 +11,7 @@ type CurrentUser = { id: string; username: string; isAdmin: boolean };
 
 const NAV_ITEMS = [
   { href: "/", label: "Khata", icon: "📒" },
-  { href: "/expenses", label: "Mera Khata", icon: "🧾" },
+  { href: "/expenses", label: "Mera Khata", icon: "" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -102,7 +102,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               href={item.href}
               className={`btn shrink-0 !py-2 ${active ? "btn-primary" : "btn-ghost"}`}
             >
-              <span>{item.icon}</span> {item.label}
+              {item.icon && <span>{item.icon}</span>}
+              <span>{item.label}</span>
             </Link>
           );
         })}
