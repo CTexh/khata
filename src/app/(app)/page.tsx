@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Person, Tx } from "@/lib/db";
-import { fmtRs, fmtWhen, fmtFull } from "@/lib/format";
+import { fmtRs, fmtWhen, fmtFull, dueDateInfo, todayLocalYMD } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
 
 /* ---------- small components ---------- */
@@ -104,6 +104,7 @@ function AddPersonForm({
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
@@ -116,7 +117,7 @@ function AddPersonForm({
     const res = await fetch("/api/people", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, amount: Number(amount), note }),
+      body: JSON.stringify({ name, amount: Number(amount), note, dueDate }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -155,6 +156,19 @@ function AddPersonForm({
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
+      <div className="flex items-center gap-2">
+        <label className="text-[13px] shrink-0" style={{ color: "var(--muted)" }}>
+          Reach out by
+        </label>
+        <input
+          className="field"
+          type="date"
+          value={dueDate}
+          min={todayLocalYMD()}
+          onChange={(e) => setDueDate(e.target.value)}
+          placeholder="Optional"
+        />
+      </div>
       {error && (
         <p className="text-[13px]" style={{ color: "var(--bad)" }}>
           {error}
@@ -266,6 +280,9 @@ function PersonCard({
 }) {
   const [txs, setTxs] = useState<Tx[] | null>(null);
   const [form, setForm] = useState<"lend" | "repay" | null>(null);
+  const [editingDue, setEditingDue] = useState(false);
+  const [dueDraft, setDueDraft] = useState(person.due_date ?? "");
+  const [dueBusy, setDueBusy] = useState(false);
 
   const loadTxs = useCallback(async () => {
     const res = await fetch(`/api/people/${person.id}`);
@@ -286,6 +303,32 @@ function PersonCard({
     onChanged();
   };
 
+  const saveDueDate = async () => {
+    setDueBusy(true);
+    await fetch(`/api/people/${person.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dueDate: dueDraft }),
+    });
+    setDueBusy(false);
+    setEditingDue(false);
+    onChanged();
+  };
+
+  const due = dueDateInfo(person.due_date);
+  const dueColor =
+    due?.status === "overdue"
+      ? "var(--bad)"
+      : due?.status === "soon"
+        ? "#e07a1f"
+        : "var(--accent)";
+  const dueSoft =
+    due?.status === "overdue"
+      ? "var(--bad-soft)"
+      : due?.status === "soon"
+        ? "rgba(224, 122, 31, 0.14)"
+        : "var(--accent-soft)";
+
   return (
     <div className="card overflow-hidden rise">
       <button
@@ -299,6 +342,14 @@ function PersonCard({
             {person.tx_count} {person.tx_count === 1 ? "entry" : "entries"} · updated{" "}
             {fmtWhen(person.last_activity)}
           </p>
+          {!settled && due && (
+            <span
+              className="inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1"
+              style={{ background: dueSoft, color: dueColor }}
+            >
+              {due.label}
+            </span>
+          )}
         </div>
         <div className="text-right shrink-0">
           {settled ? (
@@ -352,6 +403,54 @@ function PersonCard({
               </button>
               <button className="btn btn-good flex-1" onClick={() => setForm("repay")}>
                 <span>💰</span> They paid back
+              </button>
+            </div>
+          )}
+
+          {editingDue ? (
+            <div className="flex items-center gap-2 pt-4">
+              <input
+                className="field"
+                type="date"
+                value={dueDraft}
+                onChange={(e) => setDueDraft(e.target.value)}
+              />
+              <button
+                className="btn btn-ghost !py-2 text-[12px] shrink-0"
+                onClick={() => {
+                  setDueDraft(person.due_date ?? "");
+                  setEditingDue(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary !py-2 text-[12px] shrink-0"
+                disabled={dueBusy}
+                onClick={saveDueDate}
+              >
+                {dueBusy ? "Saving…" : "Save"}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between pt-4">
+              <p className="text-[13px]" style={{ color: "var(--muted)" }}>
+                {due ? (
+                  <>
+                    Reach out by{" "}
+                    <span className="font-medium" style={{ color: "var(--ink-2)" }}>
+                      {due.label.replace(/^(Due|Overdue · )/, "")}
+                    </span>
+                  </>
+                ) : (
+                  "No reach-out date set"
+                )}
+              </p>
+              <button
+                className="btn btn-ghost !py-2 text-[12px] shrink-0"
+                onClick={() => setEditingDue(true)}
+              >
+                {due ? "Change" : "Set date"}
               </button>
             </div>
           )}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db, listTx, personBelongsToUser } from "@/lib/db";
+import { db, listTx, personBelongsToUser, updatePersonDueDate } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { randomUUID } from "crypto";
 
@@ -39,6 +39,26 @@ export async function POST(req: Request, { params }: Params) {
     args: [randomUUID(), id, amount, note, new Date().toISOString()],
   });
   return NextResponse.json({ ok: true }, { status: 201 });
+}
+
+// Set or clear the reach-out due date — not required, may be updated any time
+export async function PATCH(req: Request, { params }: Params) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const { id } = await params;
+  const body = await req.json();
+  const dueDateRaw = String(body.dueDate ?? "").trim();
+  const dueDate = dueDateRaw || null;
+
+  if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    return NextResponse.json({ error: "Invalid due date" }, { status: 400 });
+  }
+  if (!(await personBelongsToUser(id, session.userId))) {
+    return NextResponse.json({ error: "Person not found" }, { status: 404 });
+  }
+
+  await updatePersonDueDate(id, dueDate);
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(_req: Request, { params }: Params) {

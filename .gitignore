@@ -43,3 +43,7 @@ next-env.d.ts
 # local sqlite
 local.db
 local.db-*
+
+# graphify tool output
+.graphify_python
+graphify-out/

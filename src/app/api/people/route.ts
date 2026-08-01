@@ -19,12 +19,17 @@ export async function POST(req: Request) {
   const name = String(body.name ?? "").trim();
   const amount = Number(body.amount);
   const note = String(body.note ?? "").trim();
+  const dueDateRaw = String(body.dueDate ?? "").trim();
+  const dueDate = dueDateRaw || null;
 
   if (!name) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
   if (!Number.isFinite(amount) || amount <= 0) {
     return NextResponse.json({ error: "Amount must be a positive number" }, { status: 400 });
+  }
+  if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    return NextResponse.json({ error: "Invalid due date" }, { status: 400 });
   }
 
   const c = await db();
@@ -33,8 +38,8 @@ export async function POST(req: Request) {
   await c.batch(
     [
       {
-        sql: "INSERT INTO people (id, name, created_at, user_id) VALUES (?, ?, ?, ?)",
-        args: [personId, name, now, session.userId],
+        sql: "INSERT INTO people (id, name, created_at, user_id, due_date) VALUES (?, ?, ?, ?, ?)",
+        args: [personId, name, now, session.userId, dueDate],
       },
       {
         sql: "INSERT INTO transactions (id, person_id, amount, note, created_at) VALUES (?, ?, ?, ?, ?)",

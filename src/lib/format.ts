@@ -77,3 +77,20 @@ export function todayLocalYMD(): string {
   const local = new Date(d.getTime() - tz * 60000);
   return local.toISOString().slice(0, 10);
 }
+
+export type DueStatus = "overdue" | "soon" | "upcoming";
+
+export function dueDateInfo(
+  dueDate: string | null
+): { label: string; status: DueStatus } | null {
+  if (!dueDate) return null;
+  const today = todayLocalYMD();
+  const diffDays = Math.round(
+    (new Date(dueDate + "T00:00:00").getTime() - new Date(today + "T00:00:00").getTime()) /
+      86400000
+  );
+  const label = fmtDateLabel(dueDate).replace(/ \d{4}$/, "");
+  if (diffDays < 0) return { label: `Overdue · ${label}`, status: "overdue" };
+  if (diffDays <= 3) return { label: `Due ${label}`, status: "soon" };
+  return { label: `Due ${label}`, status: "upcoming" };
+}

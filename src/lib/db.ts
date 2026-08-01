@@ -40,7 +40,8 @@ export async function db(): Promise<Client> {
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            user_id TEXT REFERENCES users(id)
+            user_id TEXT REFERENCES users(id),
+            due_date TEXT
           )`,
           `CREATE TABLE IF NOT EXISTS transactions (
             id TEXT PRIMARY KEY,
@@ -69,10 +70,15 @@ export async function db(): Promise<Client> {
         "write"
       );
 
-      // one-time backward-compat migration for databases from before multi-user
-      // support; no-ops (and is caught) once `people.user_id` already exists
+      // one-time backward-compat migrations for databases predating these
+      // columns; each no-ops (and is caught) once the column already exists
       try {
         await c.execute(`ALTER TABLE people ADD COLUMN user_id TEXT REFERENCES users(id)`);
+      } catch {
+        // column already exists — expected on every run after the first
+      }
+      try {
+        await c.execute(`ALTER TABLE people ADD COLUMN due_date TEXT`);
       } catch {
         // column already exists — expected on every run after the first
       }
@@ -173,6 +179,7 @@ export type Person = {
   id: string;
   name: string;
   created_at: string;
+  due_date: string | null;
   balance: number;
   lent: number;
   received: number;
@@ -192,7 +199,7 @@ export async function listPeople(userId: string): Promise<Person[]> {
   const c = await db();
   const rs = await c.execute({
     sql: `
-      SELECT p.id, p.name, p.created_at,
+      SELECT p.id, p.name, p.created_at, p.due_date,
              COALESCE(SUM(t.amount), 0) AS balance,
              COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS lent,
              COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS received,
@@ -210,12 +217,24 @@ export async function listPeople(userId: string): Promise<Person[]> {
     id: r.id as string,
     name: r.name as string,
     created_at: r.created_at as string,
+    due_date: (r.due_date as string) ?? null,
     balance: Number(r.balance),
     lent: Number(r.lent),
     received: Number(r.received),
     tx_count: Number(r.tx_count),
     last_activity: r.last_activity as string,
   }));
+}
+
+export async function updatePersonDueDate(
+  personId: string,
+  dueDate: string | null
+): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: "UPDATE people SET due_date = ? WHERE id = ?",
+    args: [dueDate, personId],
+  });
 }
 
 export async function personBelongsToUser(personId: string, userId: string): Promise<boolean> {
