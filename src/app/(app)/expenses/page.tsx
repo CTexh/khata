@@ -69,16 +69,17 @@ function DetailModal({
       onClick={onClose}
     >
       <div
-        className="rounded-lg p-6 max-w-sm w-full"
+        className="rounded-lg w-full max-w-md"
         style={{
           background: "var(--bg)",
-          boxShadow: "0 10px 40px rgba(0,0,0,0.2)",
+          boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
           color: "var(--text)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between mb-4">
-          <p className="text-[15px] font-semibold">Expense Details</p>
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "var(--hairline)" }}>
+          <h2 className="text-[16px] font-semibold">Expense Details</h2>
           <button
             onClick={onClose}
             className="text-[20px] opacity-50 hover:opacity-100 transition"
@@ -87,87 +88,87 @@ function DetailModal({
           </button>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
-              Amount
-            </p>
-            <p className="text-[28px] font-bold tabular">{fmtRs(expense.amount)}</p>
-          </div>
-
-          {expense.vendor && (
-            <div>
-              <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
-                Vendor
+        {/* Content */}
+        <div className="p-5 space-y-4">
+          {/* Main info row */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-[14px] font-medium truncate">{expense.vendor || "Expense"}</p>
+              <p className="text-[13px]" style={{ color: "var(--muted)" }}>
+                {dt.toLocaleDateString("en-US", {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                })}{" "}
+                at{" "}
+                {dt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
               </p>
-              <p className="text-[14px] font-medium">{expense.vendor}</p>
             </div>
-          )}
 
-          {expense.category && (
-            <div>
-              <p className="text-[12px] font-medium mb-2" style={{ color: "var(--muted)" }}>
-                Category
-              </p>
-              <div
-                className="inline-block px-3 py-1.5 rounded-full text-[12px] font-semibold"
-                style={{
-                  background: isDark ? categoryColor.darkBg : categoryColor.bg,
-                  color: isDark ? categoryColor.darkText : categoryColor.text,
-                }}
-              >
-                {expense.category}
+            <div className="flex items-end gap-2 shrink-0">
+              {expense.category && (
+                <div
+                  className="px-2.5 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap"
+                  style={{
+                    background: isDark ? categoryColor.darkBg : categoryColor.bg,
+                    color: isDark ? categoryColor.darkText : categoryColor.text,
+                  }}
+                >
+                  {expense.category}
+                </div>
+              )}
+              <div className="text-right">
+                <p className="text-[18px] font-bold tabular">{fmtRs(expense.amount)}</p>
               </div>
             </div>
-          )}
+          </div>
 
-          {expense.note && (
+          {/* Divider */}
+          <div style={{ background: "var(--hairline)", height: "1px" }} />
+
+          {/* Details section */}
+          {(expense.note) && (
             <div>
-              <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
+              <p className="text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
                 Note
               </p>
-              <p className="text-[14px]">{expense.note}</p>
+              <p className="text-[13px] leading-relaxed">{expense.note}</p>
             </div>
           )}
 
-          <div>
-            <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
-              Date & Time
-            </p>
-            <p className="text-[14px]">
-              {dt.toLocaleDateString("en-US", {
-                weekday: "short",
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              })}
-              {" at "}
-              {dt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
-            </p>
-          </div>
-
-          <div>
-            <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
-              Created
-            </p>
-            <p className="text-[14px]">
-              {new Date(expense.created_at).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              })}
-            </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
+                Date
+              </p>
+              <p className="text-[13px]">
+                {dt.toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })}
+              </p>
+            </div>
+            <div>
+              <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
+                Time
+              </p>
+              <p className="text-[13px]">
+                {dt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+              </p>
+            </div>
           </div>
         </div>
 
-        <div className="flex gap-2 justify-end mt-6 pt-4 border-t" style={{ borderColor: "var(--hairline)" }}>
-          <button className="btn btn-ghost" onClick={onClose}>
+        {/* Footer */}
+        <div className="flex gap-2 justify-end p-5 border-t" style={{ borderColor: "var(--hairline)" }}>
+          <button className="btn btn-ghost !text-[13px]" onClick={onClose}>
             Close
           </button>
-          <button className="btn btn-ghost" onClick={onEdit}>
+          <button className="btn btn-ghost !text-[13px]" onClick={onEdit}>
             Edit
           </button>
-          <button className="btn btn-danger" onClick={handleDelete}>
+          <button className="btn btn-danger !text-[13px]" onClick={handleDelete}>
             Delete
           </button>
         </div>
