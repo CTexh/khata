@@ -28,6 +28,16 @@ function getCategoryColor(category?: string) {
   return color;
 }
 
+// Respects the app's manual theme toggle (data-theme attribute) first,
+// falling back to the OS preference when the user hasn't overridden it.
+function isDarkMode(): boolean {
+  if (typeof document === "undefined") return false;
+  const explicit = document.documentElement.dataset.theme;
+  if (explicit === "dark") return true;
+  if (explicit === "light") return false;
+  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
 function toLocalDateTime(iso: string): string {
   if (!iso) return "";
   const date = new Date(iso);
@@ -44,14 +54,75 @@ function fromLocalDateTime(local: string): string {
 function DetailModal({
   expense,
   onClose,
-  onEdit,
+  onSaved,
   onDelete,
 }: {
   expense: Expense;
   onClose: () => void;
-  onEdit: () => void;
+  onSaved: (updated: Expense) => void;
   onDelete: () => void;
 }) {
+  const [mode, setMode] = useState<"view" | "edit">("view");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [category, setCategory] = useState("");
+  const [date, setDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  // Lock background scroll while the modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  const startEdit = () => {
+    setAmount(String(expense.amount));
+    setNote(expense.note ?? "");
+    setVendor(expense.vendor ?? "");
+    setCategory(expense.category ?? "");
+    setDate((expense.expense_datetime || expense.expense_date).slice(0, 10));
+    setError("");
+    setMode("edit");
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const res = await fetch(`/api/expenses/${expense.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: Number(amount),
+        note,
+        expense_datetime: `${date}T00:00:00Z`,
+        vendor,
+        category,
+      }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Something went wrong");
+      return;
+    }
+    onSaved({
+      ...expense,
+      amount: Number(amount),
+      note,
+      vendor,
+      category,
+      expense_date: date,
+      expense_datetime: `${date}T00:00:00Z`,
+    });
+    setMode("view");
+  };
+
   const handleDelete = async () => {
     if (!confirm("Delete this expense? This can't be undone.")) return;
     await fetch(`/api/expenses/${expense.id}`, { method: "DELETE" });
@@ -60,7 +131,7 @@ function DetailModal({
 
   const dt = expense.expense_datetime ? new Date(expense.expense_datetime) : new Date(expense.expense_date);
   const categoryColor = getCategoryColor(expense.category);
-  const isDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = isDarkMode();
 
   return (
     <div
@@ -69,7 +140,7 @@ function DetailModal({
       onClick={onClose}
     >
       <div
-        className="rounded-lg w-full max-w-md border"
+        className="rounded-lg w-full max-w-md border max-h-[90vh] overflow-y-auto"
         style={{
           background: isDark ? "#1e293b" : "#ffffff",
           borderColor: isDark ? "#334155" : "#e0e0e0",
@@ -79,8 +150,13 @@ function DetailModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: isDark ? "#334155" : "#e0e0e0" }}>
-          <h2 className="text-[16px] font-semibold" style={{ color: isDark ? "#f1f5f9" : "#000000" }}>Expense Details</h2>
+        <div
+          className="flex items-center justify-between p-5 border-b sticky top-0"
+          style={{ borderColor: isDark ? "#334155" : "#e0e0e0", background: isDark ? "#1e293b" : "#ffffff" }}
+        >
+          <h2 className="text-[16px] font-semibold" style={{ color: isDark ? "#f1f5f9" : "#000000" }}>
+            {mode === "edit" ? "Edit Expense" : "Expense Details"}
+          </h2>
           <button
             onClick={onClose}
             className="text-[20px] opacity-50 hover:opacity-100 transition"
@@ -90,78 +166,153 @@ function DetailModal({
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-5 space-y-3">
-          {/* Title and Amount row */}
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[14px] font-semibold flex-1 min-w-0 truncate" style={{ color: isDark ? "#f1f5f9" : "#000000" }}>{expense.vendor || "Expense"}</p>
-            <p className="text-[18px] font-bold tabular shrink-0" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>{fmtRs(expense.amount)}</p>
-          </div>
+        {mode === "view" ? (
+          <>
+            {/* Content */}
+            <div className="p-5 space-y-3">
+              {/* Title and Amount row */}
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[14px] font-semibold flex-1 min-w-0 truncate" style={{ color: isDark ? "#f1f5f9" : "#000000" }}>{expense.vendor || "Expense"}</p>
+                <p className="text-[18px] font-bold tabular shrink-0" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>{fmtRs(expense.amount)}</p>
+              </div>
 
-          {/* Category Badge */}
-          {expense.category && (
-            <div>
-              <div
-                className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold"
-                style={{
-                  background: isDark ? "#334155" : categoryColor.bg,
-                  color: isDark ? "#cbd5e1" : categoryColor.text,
-                }}
-              >
-                {expense.category}
+              {/* Category Badge */}
+              {expense.category && (
+                <div>
+                  <div
+                    className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                    style={{
+                      background: isDark ? "#334155" : categoryColor.bg,
+                      color: isDark ? "#cbd5e1" : categoryColor.text,
+                    }}
+                  >
+                    {expense.category}
+                  </div>
+                </div>
+              )}
+
+              {/* Divider */}
+              <div style={{ background: "var(--hairline)", height: "1px" }} />
+
+              {/* Details section */}
+              {(expense.note) && (
+                <div>
+                  <p className="text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                    Note
+                  </p>
+                  <p className="text-[13px] leading-relaxed" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>{expense.note}</p>
+                </div>
+              )}
+
+              <div>
+                <p className="text-[12px] font-medium mb-1" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                  Date
+                </p>
+                <p className="text-[13px]" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>
+                  {dt.toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </p>
               </div>
             </div>
-          )}
 
-          {/* Divider */}
-          <div style={{ background: "var(--hairline)", height: "1px" }} />
-
-          {/* Details section */}
-          {(expense.note) && (
-            <div>
-              <p className="text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
-                Note
-              </p>
-              <p className="text-[13px] leading-relaxed" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>{expense.note}</p>
+            {/* Footer */}
+            <div className="flex gap-2 justify-end p-5 border-t" style={{ borderColor: isDark ? "#334155" : "#e0e0e0" }}>
+              <button className="btn btn-ghost !text-[13px]" onClick={onClose}>
+                Close
+              </button>
+              <button className="btn btn-ghost !text-[13px]" onClick={startEdit}>
+                Edit
+              </button>
+              <button className="btn btn-danger !text-[13px]" onClick={handleDelete}>
+                Delete
+              </button>
             </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-[12px] font-medium mb-1" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
-                Date
-              </p>
-              <p className="text-[13px]" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>
-                {dt.toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                })}
-              </p>
+          </>
+        ) : (
+          <form onSubmit={handleSave}>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                  Amount
+                </label>
+                <input
+                  className="field"
+                  type="number"
+                  inputMode="decimal"
+                  min="0.01"
+                  step="any"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                  Vendor/Merchant
+                </label>
+                <input
+                  className="field"
+                  placeholder="Where did you spend? (optional)"
+                  value={vendor}
+                  onChange={(e) => setVendor(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                  Category
+                </label>
+                <input
+                  className="field"
+                  placeholder="Groceries, Transport, etc. (optional)"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                  Note
+                </label>
+                <input
+                  className="field"
+                  placeholder="What was it for? (optional)"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                  Date
+                </label>
+                <input
+                  className="field"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  required
+                />
+              </div>
+              {error && (
+                <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+                  {error}
+                </p>
+              )}
             </div>
-            <div>
-              <p className="text-[12px] font-medium mb-1" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
-                Time
-              </p>
-              <p className="text-[13px]" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>
-                {dt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
-              </p>
-            </div>
-          </div>
-        </div>
 
-        {/* Footer */}
-        <div className="flex gap-2 justify-end p-5 border-t" style={{ borderColor: isDark ? "#333333" : "#e0e0e0" }}>
-          <button className="btn btn-ghost !text-[13px]" onClick={onClose}>
-            Close
-          </button>
-          <button className="btn btn-ghost !text-[13px]" onClick={onEdit}>
-            Edit
-          </button>
-          <button className="btn btn-danger !text-[13px]" onClick={handleDelete}>
-            Delete
-          </button>
-        </div>
+            {/* Footer */}
+            <div className="flex gap-2 justify-end p-5 border-t" style={{ borderColor: isDark ? "#334155" : "#e0e0e0" }}>
+              <button type="button" className="btn btn-ghost !text-[13px]" onClick={() => setMode("view")}>
+                Cancel
+              </button>
+              <button className="btn btn-primary !text-[13px]" disabled={busy}>
+                {busy ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -312,7 +463,7 @@ function ExpenseRow({
   onView: () => void;
 }) {
   const categoryColor = getCategoryColor(expense.category);
-  const isDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = isDarkMode();
 
   return (
     <li
@@ -358,14 +509,12 @@ function MonthView({
   month,
   onNav,
   refreshKey,
-  onEdit,
   onViewDetail,
 }: {
   year: number;
   month: number;
   onNav: (dir: -1 | 1) => void;
   refreshKey: number;
-  onEdit: (e: Expense) => void;
   onViewDetail: (e: Expense) => void;
 }) {
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
@@ -590,7 +739,6 @@ export default function ExpensesPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [chartYear, setChartYear] = useState(now.getFullYear());
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<Expense | null>(null);
   const [viewingDetail, setViewingDetail] = useState<Expense | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -618,23 +766,19 @@ export default function ExpensesPage() {
   return (
     <>
       <div className="flex items-center justify-end -mt-2">
-        {!adding && !editing && !viewingDetail && (
+        {!adding && !viewingDetail && (
           <button className="btn btn-expense" onClick={() => setAdding(true)}>
             Log expense
           </button>
         )}
       </div>
 
-      {(adding || editing) && (
+      {adding && (
         <ExpenseForm
-          editing={editing}
-          onCancel={() => {
-            setAdding(false);
-            setEditing(null);
-          }}
+          editing={null}
+          onCancel={() => setAdding(false)}
           onDone={() => {
             setAdding(false);
-            setEditing(null);
             refresh();
           }}
         />
@@ -644,9 +788,9 @@ export default function ExpensesPage() {
         <DetailModal
           expense={viewingDetail}
           onClose={() => setViewingDetail(null)}
-          onEdit={() => {
-            setEditing(viewingDetail);
-            setViewingDetail(null);
+          onSaved={(updated) => {
+            setViewingDetail(updated);
+            refresh();
           }}
           onDelete={() => {
             setViewingDetail(null);
@@ -673,7 +817,6 @@ export default function ExpensesPage() {
           month={month}
           onNav={navMonth}
           refreshKey={refreshKey}
-          onEdit={setEditing}
           onViewDetail={setViewingDetail}
         />
       )}

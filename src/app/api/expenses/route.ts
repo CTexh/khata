@@ -20,25 +20,25 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  let userId: string | null = null;
-  const routineSecret = req.headers.get("x-routine-secret");
-  const expectedSecret = "test-secret-123";
+  const session = await getSession();
+  let userId: string;
 
-  // Debug: return the secret we received to see what's happening
-  if (!routineSecret) {
-    return NextResponse.json({ debug: "no secret header received", allHeaders: Object.fromEntries(req.headers.entries()) });
+  if (session) {
+    // Normal signed-in user creating an expense from the UI
+    userId = session.userId;
+  } else {
+    // No session — allow the automated routine to post as walli via a shared secret
+    const routineSecret = req.headers.get("x-routine-secret");
+    const expectedSecret = process.env.ROUTINE_SECRET ?? "test-secret-123";
+    if (routineSecret !== expectedSecret) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+    const walliUser = await findUserByUsername("walli");
+    if (!walliUser) {
+      return NextResponse.json({ error: "Admin user not found" }, { status: 500 });
+    }
+    userId = walliUser.id;
   }
-
-  if (routineSecret !== expectedSecret) {
-    return NextResponse.json({ debug: "secret mismatch", received: routineSecret, expected: expectedSecret });
-  }
-
-  // Secret matched, get walli user
-  const walliUser = await findUserByUsername("walli");
-  if (!walliUser) {
-    return NextResponse.json({ error: "Admin user not found" }, { status: 500 });
-  }
-  userId = walliUser.id;
 
   const body = await req.json();
   const amount = Number(body.amount);
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
   }
 
   // Handle both ISO datetime and date-only formats
-  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?)?$/.test(expenseDateTime)) {
+  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?)?$/.test(expenseDateTime)) {
     return NextResponse.json({ error: "Invalid date/time format" }, { status: 400 });
   }
 

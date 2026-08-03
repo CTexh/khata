@@ -25,7 +25,7 @@ export async function PUT(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Amount must be a positive number" }, { status: 400 });
   }
 
-  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?)?$/.test(expenseDateTime)) {
+  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?)?$/.test(expenseDateTime)) {
     return NextResponse.json({ error: "Invalid date/time format" }, { status: 400 });
   }
 
