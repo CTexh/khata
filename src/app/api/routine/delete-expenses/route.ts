@@ -5,6 +5,14 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
+    const routineSecret = req.headers.get("x-routine-secret");
+    const expectedSecret = "test-secret-123";
+
+    // Verify routine secret
+    if (routineSecret !== expectedSecret) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { username, year, month } = await req.json();
 
     // Get user
@@ -25,6 +33,14 @@ export async function POST(req: Request) {
     });
 
     const count = Number(countRes.rows[0].count);
+
+    if (count === 0) {
+      return NextResponse.json({
+        success: true,
+        deleted: 0,
+        message: `No expenses found for ${username} in ${prefix}`
+      });
+    }
 
     // Delete expenses
     await c.execute({
