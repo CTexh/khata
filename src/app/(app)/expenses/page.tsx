@@ -6,23 +6,26 @@ import { fmtRs, fmtDateLabel, MONTH_NAMES, todayLocalYMD } from "@/lib/format";
 
 type View = "month" | "year";
 
-// Category colors mapping
-const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
-  "Food & Dining": { bg: "#FFF3CD", text: "#856404" },
-  Food: { bg: "#FFF3CD", text: "#856404" },
-  Transport: { bg: "#D1ECF1", text: "#0C5460" },
-  Shopping: { bg: "#F8D7DA", text: "#721C24" },
-  Utilities: { bg: "#D4EDDA", text: "#155724" },
-  Entertainment: { bg: "#E2E3E5", text: "#383D41" },
-  Healthcare: { bg: "#F8D7DA", text: "#721C24" },
-  Travel: { bg: "#D1ECF1", text: "#0C5460" },
-  Groceries: { bg: "#D4EDDA", text: "#155724" },
-  Restaurants: { bg: "#FFF3CD", text: "#856404" },
+// Category colors mapping - optimized for light and dark modes
+const CATEGORY_COLORS: Record<string, { bg: string; darkBg: string; text: string; darkText: string }> = {
+  "Food & Dining": { bg: "#FFF3CD", darkBg: "#8B6F47", text: "#856404", darkText: "#FFE66D" },
+  Food: { bg: "#FFF3CD", darkBg: "#8B6F47", text: "#856404", darkText: "#FFE66D" },
+  Transport: { bg: "#D1ECF1", darkBg: "#0D5470", text: "#0C5460", darkText: "#A8E6FF" },
+  Shopping: { bg: "#F8D7DA", darkBg: "#7A2B2B", text: "#721C24", darkText: "#FF6B6B" },
+  Utilities: { bg: "#D4EDDA", darkBg: "#2D5C3E", text: "#155724", darkText: "#6FD676" },
+  Entertainment: { bg: "#E2E3E5", darkBg: "#505050", text: "#383D41", darkText: "#C8C8C8" },
+  Healthcare: { bg: "#F8D7DA", darkBg: "#7A2B2B", text: "#721C24", darkText: "#FF6B6B" },
+  Travel: { bg: "#D1ECF1", darkBg: "#0D5470", text: "#0C5460", darkText: "#A8E6FF" },
+  Groceries: { bg: "#D4EDDA", darkBg: "#2D5C3E", text: "#155724", darkText: "#6FD676" },
+  Restaurants: { bg: "#FFF3CD", darkBg: "#8B6F47", text: "#856404", darkText: "#FFE66D" },
+  "Mobile Wallet Transfer": { bg: "#CCE5FF", darkBg: "#1E3A8A", text: "#0C47A1", darkText: "#93C5FD" },
+  "Bank Fees": { bg: "#FFD9D9", darkBg: "#6B1F1F", text: "#A91F1F", darkText: "#FCA5A5" },
 };
 
 function getCategoryColor(category?: string) {
-  if (!category) return { bg: "var(--accent-soft)", text: "var(--accent)" };
-  return CATEGORY_COLORS[category] || { bg: "#E9ECEF", text: "#495057" };
+  if (!category) return { bg: "var(--accent-soft)", darkBg: "var(--accent-soft)", text: "var(--accent)", darkText: "var(--accent)" };
+  const color = CATEGORY_COLORS[category] || { bg: "#E9ECEF", darkBg: "#404040", text: "#495057", darkText: "#BFBFBF" };
+  return color;
 }
 
 function toLocalDateTime(iso: string): string {
@@ -57,6 +60,7 @@ function DetailModal({
 
   const dt = expense.expense_datetime ? new Date(expense.expense_datetime) : new Date(expense.expense_date);
   const categoryColor = getCategoryColor(expense.category);
+  const isDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
 
   return (
     <div
@@ -65,8 +69,12 @@ function DetailModal({
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-900 rounded-lg p-6 max-w-sm w-full"
-        style={{ boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}
+        className="rounded-lg p-6 max-w-sm w-full"
+        style={{
+          background: "var(--bg)",
+          boxShadow: "0 10px 40px rgba(0,0,0,0.2)",
+          color: "var(--text)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-4">
@@ -79,42 +87,33 @@ function DetailModal({
           </button>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div>
-            <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+            <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
               Amount
             </p>
-            <p className="text-[24px] font-bold tabular">{fmtRs(expense.amount)}</p>
+            <p className="text-[28px] font-bold tabular">{fmtRs(expense.amount)}</p>
           </div>
-
-          {expense.note && (
-            <div>
-              <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
-                Note
-              </p>
-              <p className="text-[14px]">{expense.note}</p>
-            </div>
-          )}
 
           {expense.vendor && (
             <div>
-              <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+              <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
                 Vendor
               </p>
-              <p className="text-[14px]">{expense.vendor}</p>
+              <p className="text-[14px] font-medium">{expense.vendor}</p>
             </div>
           )}
 
           {expense.category && (
             <div>
-              <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+              <p className="text-[12px] font-medium mb-2" style={{ color: "var(--muted)" }}>
                 Category
               </p>
               <div
-                className="inline-block px-3 py-1 rounded-full text-[12px] font-medium mt-1"
+                className="inline-block px-3 py-1.5 rounded-full text-[12px] font-semibold"
                 style={{
-                  background: categoryColor.bg,
-                  color: categoryColor.text,
+                  background: isDark ? categoryColor.darkBg : categoryColor.bg,
+                  color: isDark ? categoryColor.darkText : categoryColor.text,
                 }}
               >
                 {expense.category}
@@ -122,8 +121,17 @@ function DetailModal({
             </div>
           )}
 
+          {expense.note && (
+            <div>
+              <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
+                Note
+              </p>
+              <p className="text-[14px]">{expense.note}</p>
+            </div>
+          )}
+
           <div>
-            <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+            <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
               Date & Time
             </p>
             <p className="text-[14px]">
@@ -139,7 +147,7 @@ function DetailModal({
           </div>
 
           <div>
-            <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+            <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
               Created
             </p>
             <p className="text-[14px]">
@@ -152,7 +160,7 @@ function DetailModal({
           </div>
         </div>
 
-        <div className="flex gap-2 justify-end mt-6">
+        <div className="flex gap-2 justify-end mt-6 pt-4 border-t" style={{ borderColor: "var(--hairline)" }}>
           <button className="btn btn-ghost" onClick={onClose}>
             Close
           </button>
@@ -313,6 +321,7 @@ function ExpenseRow({
   onView: () => void;
 }) {
   const categoryColor = getCategoryColor(expense.category);
+  const isDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
 
   return (
     <li
@@ -320,26 +329,22 @@ function ExpenseRow({
       style={{ borderColor: "var(--hairline)" }}
       onClick={onView}
     >
+      {expense.category && (
+        <span
+          className="text-[11px] font-medium px-2.5 py-1 rounded-full shrink-0 whitespace-nowrap"
+          style={{
+            background: isDark ? categoryColor.darkBg : categoryColor.bg,
+            color: isDark ? categoryColor.darkText : categoryColor.text,
+          }}
+        >
+          {expense.category}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 mb-0.5">
-          <p className="text-[14px] truncate font-medium">{expense.vendor || "Expense"}</p>
-          {expense.category && (
-            <span
-              className="text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap"
-              style={{
-                background: categoryColor.bg,
-                color: categoryColor.text,
-              }}
-            >
-              {expense.category}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
-            {fmtDateLabel(expense.expense_date)}
-          </p>
-        </div>
+        <p className="text-[14px] truncate font-medium">{expense.vendor || "Expense"}</p>
+        <p className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
+          {fmtDateLabel(expense.expense_date)}
+        </p>
       </div>
       <span className="tabular text-[14px] font-semibold shrink-0">
         {fmtRs(expense.amount)}
