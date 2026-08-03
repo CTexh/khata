@@ -64,22 +64,22 @@ function DetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.5)" }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.75)" }}
       onClick={onClose}
     >
       <div
         className="rounded-lg w-full max-w-md"
         style={{
-          background: "var(--bg)",
-          boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
-          color: "var(--text)",
+          background: isDark ? "#1a1a1a" : "#ffffff",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+          color: isDark ? "#e0e0e0" : "#1a1a1a",
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: "var(--hairline)" }}>
-          <h2 className="text-[16px] font-semibold">Expense Details</h2>
+        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: isDark ? "#333333" : "#e0e0e0" }}>
+          <h2 className="text-[16px] font-semibold" style={{ color: isDark ? "#ffffff" : "#000000" }}>Expense Details</h2>
           <button
             onClick={onClose}
             className="text-[20px] opacity-50 hover:opacity-100 transition"
@@ -93,8 +93,8 @@ function DetailModal({
           {/* Main info row */}
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <p className="text-[14px] font-medium truncate">{expense.vendor || "Expense"}</p>
-              <p className="text-[13px]" style={{ color: "var(--muted)" }}>
+              <p className="text-[14px] font-medium truncate" style={{ color: isDark ? "#ffffff" : "#000000" }}>{expense.vendor || "Expense"}</p>
+              <p className="text-[13px]" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
                 {dt.toLocaleDateString("en-US", {
                   weekday: "short",
                   month: "short",
@@ -129,19 +129,19 @@ function DetailModal({
           {/* Details section */}
           {(expense.note) && (
             <div>
-              <p className="text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
+              <p className="text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
                 Note
               </p>
-              <p className="text-[13px] leading-relaxed">{expense.note}</p>
+              <p className="text-[13px] leading-relaxed" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>{expense.note}</p>
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
+              <p className="text-[12px] font-medium mb-1" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
                 Date
               </p>
-              <p className="text-[13px]">
+              <p className="text-[13px]" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>
                 {dt.toLocaleDateString("en-US", {
                   year: "numeric",
                   month: "short",
@@ -150,10 +150,10 @@ function DetailModal({
               </p>
             </div>
             <div>
-              <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
+              <p className="text-[12px] font-medium mb-1" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
                 Time
               </p>
-              <p className="text-[13px]">
+              <p className="text-[13px]" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>
                 {dt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
               </p>
             </div>
@@ -161,7 +161,7 @@ function DetailModal({
         </div>
 
         {/* Footer */}
-        <div className="flex gap-2 justify-end p-5 border-t" style={{ borderColor: "var(--hairline)" }}>
+        <div className="flex gap-2 justify-end p-5 border-t" style={{ borderColor: isDark ? "#333333" : "#e0e0e0" }}>
           <button className="btn btn-ghost !text-[13px]" onClick={onClose}>
             Close
           </button>
