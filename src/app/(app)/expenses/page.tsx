@@ -69,59 +69,49 @@ function DetailModal({
       onClick={onClose}
     >
       <div
-        className="rounded-lg w-full max-w-md"
+        className="rounded-lg w-full max-w-md border"
         style={{
-          background: isDark ? "#1a1a1a" : "#ffffff",
+          background: isDark ? "#1e293b" : "#ffffff",
+          borderColor: isDark ? "#334155" : "#e0e0e0",
           boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-          color: isDark ? "#e0e0e0" : "#1a1a1a",
+          color: isDark ? "#e2e8f0" : "#1a1a1a",
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: isDark ? "#333333" : "#e0e0e0" }}>
-          <h2 className="text-[16px] font-semibold" style={{ color: isDark ? "#ffffff" : "#000000" }}>Expense Details</h2>
+        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: isDark ? "#334155" : "#e0e0e0" }}>
+          <h2 className="text-[16px] font-semibold" style={{ color: isDark ? "#f1f5f9" : "#000000" }}>Expense Details</h2>
           <button
             onClick={onClose}
             className="text-[20px] opacity-50 hover:opacity-100 transition"
+            style={{ color: isDark ? "#cbd5e1" : "#666666" }}
           >
             ✕
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-5 space-y-4">
-          {/* Main info row */}
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <p className="text-[14px] font-medium truncate" style={{ color: isDark ? "#ffffff" : "#000000" }}>{expense.vendor || "Expense"}</p>
-              <p className="text-[13px]" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
-                {dt.toLocaleDateString("en-US", {
-                  weekday: "short",
-                  month: "short",
-                  day: "numeric",
-                })}{" "}
-                at{" "}
-                {dt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
-              </p>
-            </div>
+        <div className="p-5 space-y-3">
+          {/* Title and Amount row */}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[14px] font-semibold flex-1 min-w-0 truncate" style={{ color: isDark ? "#f1f5f9" : "#000000" }}>{expense.vendor || "Expense"}</p>
+            <p className="text-[18px] font-bold tabular shrink-0" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>{fmtRs(expense.amount)}</p>
+          </div>
 
-            <div className="flex items-end gap-2 shrink-0">
-              {expense.category && (
-                <div
-                  className="px-2.5 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap"
-                  style={{
-                    background: isDark ? categoryColor.darkBg : categoryColor.bg,
-                    color: isDark ? categoryColor.darkText : categoryColor.text,
-                  }}
-                >
-                  {expense.category}
-                </div>
-              )}
-              <div className="text-right">
-                <p className="text-[18px] font-bold tabular">{fmtRs(expense.amount)}</p>
+          {/* Category Badge */}
+          {expense.category && (
+            <div>
+              <div
+                className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                style={{
+                  background: isDark ? "#334155" : categoryColor.bg,
+                  color: isDark ? "#cbd5e1" : categoryColor.text,
+                }}
+              >
+                {expense.category}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Divider */}
           <div style={{ background: "var(--hairline)", height: "1px" }} />
@@ -326,28 +316,35 @@ function ExpenseRow({
 
   return (
     <li
-      className="flex items-center gap-3 py-3 border-b last:border-b-0 cursor-pointer hover:opacity-75 transition"
-      style={{ borderColor: "var(--hairline)" }}
+      className="grid items-center gap-3 py-3 px-1 border-b last:border-b-0 cursor-pointer hover:opacity-75 transition"
+      style={{ gridTemplateColumns: "140px 1fr auto", borderColor: "var(--hairline)" }}
       onClick={onView}
     >
-      {expense.category && (
-        <span
-          className="text-[11px] font-medium px-2.5 py-1 rounded-full shrink-0 whitespace-nowrap"
-          style={{
-            background: isDark ? categoryColor.darkBg : categoryColor.bg,
-            color: isDark ? categoryColor.darkText : categoryColor.text,
-          }}
-        >
-          {expense.category}
-        </span>
-      )}
-      <div className="min-w-0 flex-1">
-        <p className="text-[14px] truncate font-medium">{expense.vendor || "Expense"}</p>
-        <p className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
+      {/* Category Badge - Fixed Width */}
+      <div>
+        {expense.category && (
+          <span
+            className="text-[11px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap inline-block"
+            style={{
+              background: isDark ? "#334155" : categoryColor.bg,
+              color: isDark ? "#cbd5e1" : categoryColor.text,
+            }}
+          >
+            {expense.category}
+          </span>
+        )}
+      </div>
+
+      {/* Title and Date */}
+      <div className="min-w-0">
+        <p className="text-[14px] truncate font-medium" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>{expense.vendor || "Expense"}</p>
+        <p className="text-[12px] truncate" style={{ color: isDark ? "#94a3b8" : "#666666" }}>
           {fmtDateLabel(expense.expense_date)}
         </p>
       </div>
-      <span className="tabular text-[14px] font-semibold shrink-0">
+
+      {/* Amount - Right Aligned */}
+      <span className="tabular text-[14px] font-semibold text-right" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>
         {fmtRs(expense.amount)}
       </span>
     </li>
@@ -456,7 +453,7 @@ function MonthView({
             {search ? "No matching expenses" : `No expenses logged in ${MONTH_NAMES[month - 1]}.`}
           </p>
         ) : (
-          <ul>
+          <ul className="pb-2">
             {filtered?.map((e) => (
               <ExpenseRow
                 key={e.id}
