@@ -55,7 +55,8 @@ export async function db(): Promise<Client> {
             user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             amount REAL NOT NULL,
             note TEXT NOT NULL DEFAULT '',
-            expense_date TEXT NOT NULL,
+            expense_date TEXT,
+            expense_datetime TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             vendor TEXT,
             category TEXT
@@ -91,6 +92,11 @@ export async function db(): Promise<Client> {
       }
       try {
         await c.execute(`ALTER TABLE expenses ADD COLUMN category TEXT`);
+      } catch {
+        // column already exists — expected on every run after the first
+      }
+      try {
+        await c.execute(`ALTER TABLE expenses ADD COLUMN expense_datetime TEXT DEFAULT ''`);
       } catch {
         // column already exists — expected on every run after the first
       }
@@ -281,6 +287,7 @@ export type Expense = {
   amount: number;
   note: string;
   expense_date: string;
+  expense_datetime: string;
   created_at: string;
   vendor?: string;
   category?: string;
@@ -313,12 +320,14 @@ export async function getExpense(id: string, userId: string): Promise<Expense | 
 }
 
 function rowToExpense(r: Record<string, unknown>): Expense {
+  const dt = (r.expense_datetime as string) ?? "";
   return {
     id: r.id as string,
     user_id: r.user_id as string,
     amount: Number(r.amount),
     note: (r.note as string) ?? "",
     expense_date: r.expense_date as string,
+    expense_datetime: dt,
     created_at: r.created_at as string,
     vendor: (r.vendor as string) ?? undefined,
     category: (r.category as string) ?? undefined,

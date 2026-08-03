@@ -17,21 +17,28 @@ export async function PUT(req: Request, { params }: Params) {
   const body = await req.json();
   const amount = Number(body.amount);
   const note = String(body.note ?? "").trim();
-  const expenseDate = String(body.date ?? "").trim();
+  let expenseDateTime = String(body.expense_datetime ?? body.date ?? "").trim();
   const vendor = String(body.vendor ?? "").trim() || null;
   const category = String(body.category ?? "").trim() || null;
 
   if (!Number.isFinite(amount) || amount <= 0) {
     return NextResponse.json({ error: "Amount must be a positive number" }, { status: 400 });
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(expenseDate)) {
-    return NextResponse.json({ error: "Invalid date" }, { status: 400 });
+
+  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?)?$/.test(expenseDateTime)) {
+    return NextResponse.json({ error: "Invalid date/time format" }, { status: 400 });
   }
+
+  if (!/T/.test(expenseDateTime)) {
+    expenseDateTime = expenseDateTime + "T00:00:00Z";
+  }
+
+  const expenseDate = expenseDateTime.substring(0, 10);
 
   const c = await db();
   await c.execute({
-    sql: "UPDATE expenses SET amount = ?, note = ?, expense_date = ?, vendor = ?, category = ? WHERE id = ? AND user_id = ?",
-    args: [amount, note, expenseDate, vendor, category, id, session.userId],
+    sql: "UPDATE expenses SET amount = ?, note = ?, expense_date = ?, expense_datetime = ?, vendor = ?, category = ? WHERE id = ? AND user_id = ?",
+    args: [amount, note, expenseDate, expenseDateTime, vendor, category, id, session.userId],
   });
   return NextResponse.json({ ok: true });
 }
