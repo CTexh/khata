@@ -1,13 +1,32 @@
 import { NextResponse } from "next/server";
 import { db, listExpenses, findUserByUsername } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { getSession, verifyRoutineSecret } from "@/lib/auth";
 import { randomUUID } from "crypto";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+// The automated email-sync routine has no session — it authenticates with
+// x-routine-secret instead and always acts as the "walli" account. Shared by
+// GET and POST so both paths resolve identity the exact same way.
+async function resolveUserId(req: Request): Promise<string | NextResponse> {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  if (session) return session.userId;
+
+  if (verifyRoutineSecret(req.headers.get("x-routine-secret"))) {
+    const walliUser = await findUserByUsername("walli");
+    if (!walliUser) {
+      return NextResponse.json({ error: "Admin user not found" }, { status: 500 });
+    }
+    return walliUser.id;
+  }
+
+  return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+}
+
+export async function GET(req: Request) {
+  const resolved = await resolveUserId(req);
+  if (resolved instanceof NextResponse) return resolved;
+  const userId = resolved;
 
   const url = new URL(req.url);
   const now = new Date();
@@ -15,30 +34,14 @@ export async function GET(req: Request) {
   const monthParam = url.searchParams.get("month");
   const month = monthParam ? Number(monthParam) : undefined;
 
-  const expenses = await listExpenses(session.userId, { year, month });
+  const expenses = await listExpenses(userId, { year, month });
   return NextResponse.json(expenses);
 }
 
 export async function POST(req: Request) {
-  const session = await getSession();
-  let userId: string;
-
-  if (session) {
-    // Normal signed-in user creating an expense from the UI
-    userId = session.userId;
-  } else {
-    // No session — allow the automated routine to post as walli via a shared secret
-    const routineSecret = req.headers.get("x-routine-secret");
-    const expectedSecret = process.env.ROUTINE_SECRET ?? "test-secret-123";
-    if (routineSecret !== expectedSecret) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-    const walliUser = await findUserByUsername("walli");
-    if (!walliUser) {
-      return NextResponse.json({ error: "Admin user not found" }, { status: 500 });
-    }
-    userId = walliUser.id;
-  }
+  const resolved = await resolveUserId(req);
+  if (resolved instanceof NextResponse) return resolved;
+  const userId = resolved;
 
   const body = await req.json();
   const amount = Number(body.amount);

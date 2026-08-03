@@ -23,6 +23,17 @@ export function verifyPassword(password: string, stored: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// Constant-time comparison against ROUTINE_SECRET for the automated expense-sync
+// routine. Both the header value and the env var must be present and non-empty —
+// an unset ROUTINE_SECRET must never authenticate an absent/empty header.
+export function verifyRoutineSecret(provided: string | null): boolean {
+  const expected = process.env.ROUTINE_SECRET;
+  if (!expected || !provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 export type SessionPayload = {
   userId: string;
   username: string;
