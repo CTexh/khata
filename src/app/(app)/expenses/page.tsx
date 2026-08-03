@@ -157,10 +157,10 @@ function DetailModal({
             Close
           </button>
           <button className="btn btn-ghost" onClick={onEdit}>
-            ✏️ Edit
+            Edit
           </button>
           <button className="btn btn-danger" onClick={handleDelete}>
-            🗑 Delete
+            Delete
           </button>
         </div>
       </div>
@@ -296,7 +296,7 @@ function ExpenseForm({
           Cancel
         </button>
         <button className="btn btn-primary" disabled={busy}>
-          {busy ? "Saving…" : editing ? "💾 Save changes" : "➕ Add expense"}
+          {busy ? "Saving…" : editing ? "Save changes" : "Add expense"}
         </button>
       </div>
     </form>
@@ -308,13 +308,9 @@ function ExpenseForm({
 function ExpenseRow({
   expense,
   onView,
-  onEdit,
-  onDeleted,
 }: {
   expense: Expense;
   onView: () => void;
-  onEdit: () => void;
-  onDeleted: () => void;
 }) {
   const categoryColor = getCategoryColor(expense.category);
 
@@ -326,7 +322,7 @@ function ExpenseRow({
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-0.5">
-          <p className="text-[14px] truncate font-medium">{expense.note || "Expense"}</p>
+          <p className="text-[14px] truncate font-medium">{expense.vendor || "Expense"}</p>
           {expense.category && (
             <span
               className="text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap"
@@ -341,8 +337,6 @@ function ExpenseRow({
         </div>
         <div className="flex items-center justify-between gap-2">
           <p className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
-            {expense.vendor && <span className="font-medium">{expense.vendor}</span>}
-            {expense.vendor && " • "}
             {fmtDateLabel(expense.expense_date)}
           </p>
         </div>
@@ -350,15 +344,6 @@ function ExpenseRow({
       <span className="tabular text-[14px] font-semibold shrink-0">
         {fmtRs(expense.amount)}
       </span>
-      <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-        <button
-          onClick={onEdit}
-          aria-label="Edit expense"
-          className="btn btn-ghost !p-0 w-8 h-8 text-[13px]"
-        >
-          ✏️
-        </button>
-      </div>
     </li>
   );
 }
@@ -448,24 +433,13 @@ function MonthView({
           </p>
         </div>
 
-        {search && (
-          <input
-            className="field mb-4"
-            placeholder="Search by amount, note, vendor, or category…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        )}
-
-        {!search && (
-          <button
-            onClick={() => setSearch("")}
-            className="btn btn-ghost !text-[12px] !p-2 mb-3 w-full"
-            style={{ color: "var(--muted)" }}
-          >
-            🔍 Search expenses…
-          </button>
-        )}
+        <input
+          className="field mb-4"
+          placeholder="Search by amount, note, vendor, or category…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          autoFocus={search !== ""}
+        />
 
         {expenses === null ? (
           <p className="text-[13px] py-4" style={{ color: "var(--muted)" }}>
@@ -482,8 +456,6 @@ function MonthView({
                 key={e.id}
                 expense={e}
                 onView={() => onViewDetail(e)}
-                onEdit={() => onEdit(e)}
-                onDeleted={() => setBump((b) => b + 1)}
               />
             ))}
           </ul>
