@@ -18,6 +18,8 @@ export async function PUT(req: Request, { params }: Params) {
   const amount = Number(body.amount);
   const note = String(body.note ?? "").trim();
   const expenseDate = String(body.date ?? "").trim();
+  const vendor = String(body.vendor ?? "").trim() || null;
+  const category = String(body.category ?? "").trim() || null;
 
   if (!Number.isFinite(amount) || amount <= 0) {
     return NextResponse.json({ error: "Amount must be a positive number" }, { status: 400 });
@@ -28,8 +30,8 @@ export async function PUT(req: Request, { params }: Params) {
 
   const c = await db();
   await c.execute({
-    sql: "UPDATE expenses SET amount = ?, note = ?, expense_date = ? WHERE id = ? AND user_id = ?",
-    args: [amount, note, expenseDate, id, session.userId],
+    sql: "UPDATE expenses SET amount = ?, note = ?, expense_date = ?, vendor = ?, category = ? WHERE id = ? AND user_id = ?",
+    args: [amount, note, expenseDate, vendor, category, id, session.userId],
   });
   return NextResponse.json({ ok: true });
 }

@@ -20,6 +20,8 @@ function ExpenseForm({
   const [amount, setAmount] = useState(editing ? String(editing.amount) : "");
   const [note, setNote] = useState(editing?.note ?? "");
   const [date, setDate] = useState(editing?.expense_date ?? todayLocalYMD());
+  const [vendor, setVendor] = useState(editing?.vendor ?? "");
+  const [category, setCategory] = useState(editing?.category ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const amountRef = useRef<HTMLInputElement>(null);
@@ -35,7 +37,7 @@ function ExpenseForm({
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount: Number(amount), note, date }),
+      body: JSON.stringify({ amount: Number(amount), note, date, vendor, category }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -74,6 +76,18 @@ function ExpenseForm({
         placeholder="What was it for? (optional)"
         value={note}
         onChange={(e) => setNote(e.target.value)}
+      />
+      <input
+        className="field"
+        placeholder="Merchant/Vendor (optional)"
+        value={vendor}
+        onChange={(e) => setVendor(e.target.value)}
+      />
+      <input
+        className="field"
+        placeholder="Category (optional)"
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
       />
       <div className="flex items-center gap-2">
         <label className="text-[13px] shrink-0" style={{ color: "var(--muted)" }}>
@@ -128,10 +142,24 @@ function ExpenseRow({
       style={{ borderColor: "var(--hairline)" }}
     >
       <div className="min-w-0 flex-1">
-        <p className="text-[14px] truncate font-medium">{expense.note || "Expense"}</p>
-        <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-          {fmtDateLabel(expense.expense_date)}
-        </p>
+        <div className="flex items-center gap-2 mb-0.5">
+          <p className="text-[14px] truncate font-medium">{expense.note || "Expense"}</p>
+          {expense.category && (
+            <span
+              className="text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap"
+              style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+            >
+              {expense.category}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
+            {expense.vendor && <span className="font-medium">{expense.vendor}</span>}
+            {expense.vendor && " • "}
+            {fmtDateLabel(expense.expense_date)}
+          </p>
+        </div>
       </div>
       <span className="tabular text-[14px] font-semibold shrink-0">
         {fmtRs(expense.amount)}

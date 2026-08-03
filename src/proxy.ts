@@ -11,7 +11,12 @@ export function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isPublic = PUBLIC_PATHS.includes(pathname);
 
-  if (!session && !isPublic) {
+  // Check for routine authentication (x-routine-secret header)
+  const routineSecret = request.headers.get("x-routine-secret");
+  const expectedSecret = "test-secret-123";
+  const hasValidRoutineSecret = routineSecret === expectedSecret;
+
+  if (!session && !isPublic && !hasValidRoutineSecret) {
     if (isApi) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }

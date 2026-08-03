@@ -56,7 +56,9 @@ export async function db(): Promise<Client> {
             amount REAL NOT NULL,
             note TEXT NOT NULL DEFAULT '',
             expense_date TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            vendor TEXT,
+            category TEXT
           )`,
           `CREATE INDEX IF NOT EXISTS idx_people_user ON people(user_id)`,
           `CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)`,
@@ -79,6 +81,16 @@ export async function db(): Promise<Client> {
       }
       try {
         await c.execute(`ALTER TABLE people ADD COLUMN due_date TEXT`);
+      } catch {
+        // column already exists — expected on every run after the first
+      }
+      try {
+        await c.execute(`ALTER TABLE expenses ADD COLUMN vendor TEXT`);
+      } catch {
+        // column already exists — expected on every run after the first
+      }
+      try {
+        await c.execute(`ALTER TABLE expenses ADD COLUMN category TEXT`);
       } catch {
         // column already exists — expected on every run after the first
       }
@@ -270,6 +282,8 @@ export type Expense = {
   note: string;
   expense_date: string;
   created_at: string;
+  vendor?: string;
+  category?: string;
 };
 
 export async function listExpenses(
@@ -306,6 +320,8 @@ function rowToExpense(r: Record<string, unknown>): Expense {
     note: (r.note as string) ?? "",
     expense_date: r.expense_date as string,
     created_at: r.created_at as string,
+    vendor: (r.vendor as string) ?? undefined,
+    category: (r.category as string) ?? undefined,
   };
 }
 
