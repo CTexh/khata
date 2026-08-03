@@ -5,13 +5,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    const { username, year, month, secret } = await req.json();
-
-    // Verify admin secret
-    const expectedSecret = process.env.ROUTINE_SECRET || "test-secret-123";
-    if (secret !== expectedSecret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { username, year, month } = await req.json();
 
     // Get user
     const user = await findUserByUsername(username);
