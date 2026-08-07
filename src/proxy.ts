@@ -30,7 +30,7 @@ export function proxy(request: NextRequest) {
   }
 
   if (session && isPublic) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL("/expenses", request.url));
   }
 
   const isAdminRoute = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
@@ -38,7 +38,7 @@ export function proxy(request: NextRequest) {
     if (isApi) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL("/expenses", request.url));
   }
 
   return NextResponse.next();

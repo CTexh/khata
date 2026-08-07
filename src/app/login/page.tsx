@@ -27,7 +27,7 @@ export default function LoginPage() {
       setError(j.error ?? "Something went wrong");
       return;
     }
-    router.push("/");
+    router.push("/expenses");
     router.refresh();
   };
 
