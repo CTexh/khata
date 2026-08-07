@@ -14,6 +14,13 @@ function Spinner() {
   );
 }
 
+type PaymentRecord = {
+  id: string;
+  period: string; // "YYYY-MM"
+  due_date: string; // "YYYY-MM-DD"
+  paid_at: string | null;
+};
+
 type Subscription = {
   id: string;
   user_id: string;
@@ -21,9 +28,12 @@ type Subscription = {
   amount: number;
   due_day: number;
   logo_url: string | null;
-  next_payment_date: string;
   created_at: string;
-  status: "due-today" | "due-soon" | "upcoming";
+  current_period: string;
+  current_due_date: string;
+  paid_this_period: boolean;
+  status: "paid" | "due-today" | "due-soon" | "upcoming";
+  history: PaymentRecord[];
 };
 
 type FormState = {
@@ -64,6 +74,11 @@ function todayLocalYMD(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function fmtPeriod(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
 export default function Subscriptions() {
@@ -132,8 +147,6 @@ export default function Subscriptions() {
       return;
     }
 
-    const dueDay = Number(form.date.split("-")[2]);
-
     try {
       const res = await fetch("/api/subscriptions", {
         method: "POST",
@@ -141,7 +154,7 @@ export default function Subscriptions() {
         body: JSON.stringify({
           name: form.name,
           amount: parseFloat(form.amount),
-          due_day: dueDay,
+          date: form.date,
           logo_url: form.logo_url || null,
         }),
       });
@@ -193,14 +206,16 @@ export default function Subscriptions() {
 
   const monthlyTotal = subscriptions.reduce((sum, sub) => sum + sub.amount, 0);
   const statusColors = {
+    paid: "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400",
     "due-today": "bg-red-500/20 text-red-600 dark:text-red-400",
     "due-soon": "bg-orange-500/20 text-orange-600 dark:text-orange-400",
-    "upcoming": "bg-gray-500/20 text-gray-600 dark:text-gray-400",
+    upcoming: "bg-gray-500/20 text-gray-600 dark:text-gray-400",
   };
   const statusLabels = {
+    paid: "PAID",
     "due-today": "DUE TODAY",
     "due-soon": "DUE SOON",
-    "upcoming": "UPCOMING",
+    upcoming: "UPCOMING",
   };
 
   if (loading) return <Spinner />;
@@ -218,7 +233,7 @@ export default function Subscriptions() {
           onClick={() => setShowForm(!showForm)}
           className="btn btn-primary"
         >
-          + Add
+          Add
         </button>
       </div>
 
@@ -320,11 +335,13 @@ export default function Subscriptions() {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold truncate">{sub.name}</p>
                     <p className="text-sm" style={{ color: "var(--muted)" }}>
-                      Due {new Date(sub.next_payment_date).toLocaleDateString()}
+                      {sub.paid_this_period
+                        ? `Paid for ${fmtPeriod(sub.current_period)}`
+                        : `Due ${new Date(sub.current_due_date).toLocaleDateString()}`}
                     </p>
                   </div>
                   {justPaidId === sub.id ? (
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors.paid}`}>
                       ✓ PAID
                     </span>
                   ) : (
@@ -346,7 +363,10 @@ export default function Subscriptions() {
                         Due {sub.due_day}th of each month
                       </p>
                       <p className="text-sm" style={{ color: "var(--muted)" }}>
-                        Next payment: {new Date(sub.next_payment_date).toLocaleDateString()}
+                        {fmtPeriod(sub.current_period)}:{" "}
+                        {sub.paid_this_period
+                          ? `Paid ${new Date(sub.history.find((h) => h.period === sub.current_period)?.paid_at ?? "").toLocaleDateString()}`
+                          : `Due ${new Date(sub.current_due_date).toLocaleDateString()}`}
                       </p>
                     </div>
                   </div>
@@ -377,10 +397,10 @@ export default function Subscriptions() {
                     <div className="flex gap-3">
                       <button
                         onClick={() => handleMarkPaid(sub.id)}
-                        disabled={actionLoading === sub.id}
+                        disabled={actionLoading === sub.id || sub.paid_this_period}
                         className="btn btn-good flex-1"
                       >
-                        {actionLoading === sub.id ? "Marking..." : "✓ Mark Paid"}
+                        {actionLoading === sub.id ? "Marking..." : "Paid"}
                       </button>
                       <button
                         onClick={() => setConfirmDeleteId(sub.id)}
@@ -391,6 +411,28 @@ export default function Subscriptions() {
                       </button>
                     </div>
                   )}
+
+                  <div className="flex flex-col gap-2 pt-2" style={{ borderTop: "1px solid var(--hairline)" }}>
+                    <p className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+                      History
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      {sub.history.map((h) => (
+                        <div key={h.id} className="flex items-center justify-between text-sm">
+                          <span>{fmtPeriod(h.period)}</span>
+                          {h.paid_at ? (
+                            <span style={{ color: "var(--good)" }}>
+                              Paid {new Date(h.paid_at).toLocaleDateString()}
+                            </span>
+                          ) : (
+                            <span style={{ color: "var(--muted)" }}>
+                              Due {new Date(h.due_date).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

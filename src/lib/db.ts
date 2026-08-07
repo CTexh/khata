@@ -269,7 +269,15 @@ export async function yearlyExpenseTotals(userId: string, year: number): Promise
   });
 }
 
-/* ---------- subscriptions (scoped per user) ---------- */
+/* ---------- subscriptions (scoped per user) ----------
+ * `subscriptions` holds the recurring definition (name, amount, due day).
+ * `subscription_payments` holds one row per calendar month ("period",
+ * format YYYY-MM) that subscription was due - due_date, and paid_at once
+ * marked paid. This is what lets a tile show "paid this month" vs. "due"
+ * and a full history when expanded, and lets a new month roll a fresh
+ * due entry into view automatically (lazily created on read, no cron
+ * needed) instead of overwriting a single mutable next-due-date field.
+ */
 
 export type Subscription = {
   id: string;
@@ -278,144 +286,226 @@ export type Subscription = {
   amount: number;
   due_day: number;
   logo_url: string | null;
-  next_payment_date: string;
   created_at: string;
 };
 
-export type SubscriptionWithStatus = Subscription & {
-  status: "due-today" | "due-soon" | "upcoming";
-  last_paid_date: string | null;
+export type PaymentRecord = {
+  id: string;
+  period: string; // "YYYY-MM"
+  due_date: string; // "YYYY-MM-DD"
+  paid_at: string | null;
 };
+
+export type SubscriptionWithStatus = Subscription & {
+  current_period: string;
+  current_due_date: string;
+  paid_this_period: boolean;
+  status: "paid" | "due-today" | "due-soon" | "upcoming";
+  history: PaymentRecord[];
+};
+
+function currentPeriodStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function todayYMD(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+function nextPeriod(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+}
+
+function clampedDateForPeriod(period: string, due_day: number): string {
+  const [y, m] = period.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  return `${period}-${String(Math.min(due_day, lastDay)).padStart(2, "0")}`;
+}
+
+// Idempotent: INSERT OR IGNORE relies on the UNIQUE(subscription_id, period)
+// constraint so calling this on every list load never creates duplicates.
+async function ensurePeriodPayment(subscriptionId: string, due_day: number, period: string): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: `INSERT OR IGNORE INTO subscription_payments (id, subscription_id, period, due_date, paid_at, created_at)
+          VALUES (?, ?, ?, ?, NULL, ?)`,
+    args: [randomUUID(), subscriptionId, period, clampedDateForPeriod(period, due_day), new Date().toISOString()],
+  });
+}
 
 export async function listSubscriptions(userId: string): Promise<SubscriptionWithStatus[]> {
   const c = await db();
   const rs = await c.execute({
-    sql: `SELECT * FROM subscriptions WHERE user_id = ? ORDER BY next_payment_date ASC`,
+    sql: `SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at ASC`,
     args: [userId],
   });
 
-  const today = new Date().toISOString().split("T")[0];
+  const period = currentPeriodStr();
+  const today = todayYMD();
   const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-  return rs.rows.map((r) => {
-    const next_payment_date = r.next_payment_date as string;
-    let status: "due-today" | "due-soon" | "upcoming";
-    if (next_payment_date <= today) status = "due-today";
-    else if (next_payment_date <= soon) status = "due-soon";
+  const result: SubscriptionWithStatus[] = [];
+  for (const r of rs.rows) {
+    const id = r.id as string;
+    const due_day = Number(r.due_day);
+
+    // Lazily roll a fresh due entry into view on the 1st of a new month -
+    // this is what makes "log in next month, see it due again" work
+    // without a background job.
+    await ensurePeriodPayment(id, due_day, period);
+
+    const histRs = await c.execute({
+      sql: `SELECT id, period, due_date, paid_at FROM subscription_payments WHERE subscription_id = ? ORDER BY period DESC`,
+      args: [id],
+    });
+    const history: PaymentRecord[] = histRs.rows.map((h) => ({
+      id: h.id as string,
+      period: h.period as string,
+      due_date: h.due_date as string,
+      paid_at: (h.paid_at as string) ?? null,
+    }));
+
+    const current = history.find((h) => h.period === period) ?? history[0];
+    const paid = !!current.paid_at;
+    let status: SubscriptionWithStatus["status"];
+    if (paid) status = "paid";
+    else if (current.due_date <= today) status = "due-today";
+    else if (current.due_date <= soon) status = "due-soon";
     else status = "upcoming";
 
-    return {
-      id: r.id as string,
+    result.push({
+      id,
       user_id: r.user_id as string,
       name: r.name as string,
       amount: Number(r.amount),
-      due_day: Number(r.due_day),
+      due_day,
       logo_url: (r.logo_url as string) ?? null,
-      next_payment_date,
       created_at: r.created_at as string,
+      current_period: current.period,
+      current_due_date: current.due_date,
+      paid_this_period: paid,
       status,
-      last_paid_date: null,
-    };
-  });
+      history,
+    });
+  }
+  return result;
 }
 
 export async function createSubscription(
   userId: string,
   name: string,
   amount: number,
-  due_day: number,
+  date: string, // "YYYY-MM-DD" - exact first due date, as picked in the form
   logo_url?: string
 ): Promise<Subscription> {
   const c = await db();
   const id = randomUUID();
   const created_at = new Date().toISOString();
-  const next_payment_date = getNextPaymentDate(due_day);
+  const due_day = Number(date.split("-")[2]);
 
   await c.execute({
-    sql: `INSERT INTO subscriptions (id, user_id, name, amount, due_day, logo_url, next_payment_date, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [id, userId, name, amount, due_day, logo_url || null, next_payment_date, created_at],
+    sql: `INSERT INTO subscriptions (id, user_id, name, amount, due_day, logo_url, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [id, userId, name, amount, due_day, logo_url || null, created_at],
   });
 
-  return { id, user_id: userId, name, amount, due_day, logo_url: logo_url || null, next_payment_date, created_at };
+  // First period's payment uses the exact picked date rather than the
+  // day-of-month clamp, since the user chose it directly.
+  await c.execute({
+    sql: `INSERT INTO subscription_payments (id, subscription_id, period, due_date, paid_at, created_at)
+          VALUES (?, ?, ?, ?, NULL, ?)`,
+    args: [randomUUID(), id, date.slice(0, 7), date, created_at],
+  });
+
+  return { id, user_id: userId, name, amount, due_day, logo_url: logo_url || null, created_at };
 }
 
 export async function markSubscriptionPaid(subscriptionId: string, userId: string): Promise<void> {
   const c = await db();
-  const rs = await c.execute({
+  const subRs = await c.execute({
     sql: `SELECT due_day FROM subscriptions WHERE id = ? AND user_id = ?`,
     args: [subscriptionId, userId],
   });
+  const subRow = subRs.rows[0];
+  if (!subRow) throw new Error("Subscription not found");
+  const due_day = Number(subRow.due_day);
 
-  const r = rs.rows[0];
-  if (!r) throw new Error("Subscription not found");
+  await ensurePeriodPayment(subscriptionId, due_day, currentPeriodStr());
 
-  const due_day = Number(r.due_day);
-  const next_payment_date = getNextPaymentDate(due_day);
+  // Pay the oldest unpaid period, not just "this month" - if a month was
+  // skipped, this catches it up instead of silently leaving it unpaid.
+  const unpaidRs = await c.execute({
+    sql: `SELECT id, period FROM subscription_payments WHERE subscription_id = ? AND paid_at IS NULL ORDER BY period ASC LIMIT 1`,
+    args: [subscriptionId],
+  });
+  const unpaid = unpaidRs.rows[0];
+  if (!unpaid) return;
 
   await c.execute({
-    sql: `UPDATE subscriptions SET next_payment_date = ? WHERE id = ?`,
-    args: [next_payment_date, subscriptionId],
+    sql: `UPDATE subscription_payments SET paid_at = ? WHERE id = ?`,
+    args: [new Date().toISOString(), unpaid.id],
   });
+
+  // Immediately roll the next month's due entry in, as requested.
+  await ensurePeriodPayment(subscriptionId, due_day, nextPeriod(unpaid.period as string));
 }
 
 export async function deleteSubscription(subscriptionId: string, userId: string): Promise<void> {
   const c = await db();
-  await c.execute({
-    sql: `DELETE FROM subscriptions WHERE id = ? AND user_id = ?`,
-    args: [subscriptionId, userId],
-  });
-}
-
-export async function getSubscriptionMonthlyTotal(userId: string, month: number, year: number): Promise<number> {
-  const c = await db();
-  const rs = await c.execute({
-    sql: `
-      SELECT SUM(amount) as total FROM subscriptions
-      WHERE user_id = ? AND next_payment_date >= ? AND next_payment_date < ?
-    `,
-    args: [userId, `${year}-${String(month).padStart(2, "0")}-01`, `${year}-${String(month + 1).padStart(2, "0")}-01`],
-  });
-
-  const r = rs.rows[0];
-  return r ? Number(r.total) || 0 : 0;
-}
-
-function getNextPaymentDate(due_day: number): string {
-  const today = new Date();
-  let year = today.getFullYear();
-  let month = today.getMonth() + 1;
-
-  if (today.getDate() >= due_day) {
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-  }
-
-  const lastDay = new Date(year, month, 0).getDate();
-  const day = Math.min(due_day, lastDay);
-
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  await c.batch(
+    [
+      {
+        sql: `DELETE FROM subscription_payments WHERE subscription_id IN (SELECT id FROM subscriptions WHERE id = ? AND user_id = ?)`,
+        args: [subscriptionId, userId],
+      },
+      { sql: `DELETE FROM subscriptions WHERE id = ? AND user_id = ?`, args: [subscriptionId, userId] },
+    ],
+    "write"
+  );
 }
 
 /* Ensure tables exist */
 export async function ensureTablesExist(): Promise<void> {
   const c = await db();
-  await c.batch([
-    {
-      sql: `CREATE TABLE IF NOT EXISTS subscriptions (
+  await c.batch(
+    [
+      {
+        sql: `CREATE TABLE IF NOT EXISTS subscriptions (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         name TEXT NOT NULL,
         amount REAL NOT NULL,
         due_day INTEGER NOT NULL,
         logo_url TEXT,
-        next_payment_date TEXT NOT NULL,
         created_at TEXT NOT NULL,
         FOREIGN KEY(user_id) REFERENCES users(id)
       )`,
-    },
-  ], "write");
+      },
+      {
+        sql: `CREATE TABLE IF NOT EXISTS subscription_payments (
+        id TEXT PRIMARY KEY,
+        subscription_id TEXT NOT NULL,
+        period TEXT NOT NULL,
+        due_date TEXT NOT NULL,
+        paid_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(subscription_id) REFERENCES subscriptions(id),
+        UNIQUE(subscription_id, period)
+      )`,
+      },
+    ],
+    "write"
+  );
+
+  // Migration: earlier version of this table had a NOT NULL
+  // next_payment_date column, which the new per-month payments model
+  // replaced. Drop it on any DB created before this change so inserts
+  // (which no longer supply that column) don't fail the constraint.
+  try {
+    await c.execute(`ALTER TABLE subscriptions DROP COLUMN next_payment_date`);
+  } catch {
+    // Column already gone (fresh DB) or DROP COLUMN unsupported - fine either way.
+  }
 }
