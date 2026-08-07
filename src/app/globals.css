@@ -7,8 +7,8 @@
   --surface-2: rgba(255, 255, 255, 0.55);
   --field-bg: rgba(255, 255, 255, 0.65);
   --ink: #0b0d14;
-  --ink-2: #494e5c;
-  --muted: #7c8194;
+  --ink-2: #303746;
+  --muted: #454d60;
   --hairline: rgba(11, 13, 20, 0.08);
   --ring: rgba(255, 255, 255, 0.65);
   --glass-shadow: 0 8px 32px rgba(31, 45, 90, 0.12), 0 1.5px 4px rgba(31, 45, 90, 0.06);
@@ -33,8 +33,8 @@
   --surface-2: rgba(255, 255, 255, 0.06);
   --field-bg: rgba(255, 255, 255, 0.07);
   --ink: #f4f5fa;
-  --ink-2: #b9bdcc;
-  --muted: #858a9c;
+  --ink-2: #d9dce6;
+  --muted: #bcc1cf;
   --hairline: rgba(255, 255, 255, 0.09);
   --ring: rgba(255, 255, 255, 0.14);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 1.5px 4px rgba(0, 0, 0, 0.3);
@@ -60,8 +60,8 @@
     --surface-2: rgba(255, 255, 255, 0.06);
     --field-bg: rgba(255, 255, 255, 0.07);
     --ink: #f4f5fa;
-    --ink-2: #b9bdcc;
-    --muted: #858a9c;
+    --ink-2: #d9dce6;
+    --muted: #bcc1cf;
     --hairline: rgba(255, 255, 255, 0.09);
     --ring: rgba(255, 255, 255, 0.14);
     --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 1.5px 4px rgba(0, 0, 0, 0.3);
@@ -86,6 +86,7 @@
 
 html {
   background: var(--page);
+  overflow-x: hidden;
 }
 
 body {
@@ -96,6 +97,24 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
   position: relative;
+  overflow-x: hidden;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 100;
+  transform: translateY(-200%);
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--page);
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
 }
 
 /* ---- liquid background blobs ---- */
@@ -162,17 +181,54 @@ body::after {
 
 /* ---- fields ---- */
 .field {
+  display: block;
   width: 100%;
+  min-height: 48px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   background: var(--field-bg);
   border: 1px solid var(--hairline);
   border-radius: 14px;
   padding: 11px 14px;
-  font-size: 15px;
+  /* 16px prevents Safari from zooming the page when a field receives focus. */
+  font-size: 16px;
   color: var(--ink);
   outline: none;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   transition: border-color 150ms, box-shadow 150ms;
+}
+
+.field[type="date"],
+.field[type="datetime-local"] {
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.modal-backdrop {
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+}
+
+.modal-panel {
+  max-height: calc(100dvh - 2rem);
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@media (max-width: 359px) {
+  .form-actions > .btn {
+    flex: 1 1 100%;
+  }
 }
 .field:focus {
   border-color: var(--accent);
@@ -197,8 +253,15 @@ body::after {
   user-select: none;
   overflow: hidden;
   isolation: isolate;
+  min-width: 48px;
+  min-height: 48px;
   transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 180ms,
     filter 180ms;
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
 }
 .btn::before {
   /* specular top highlight — the "liquid" sheen */
@@ -383,4 +446,15 @@ body::after {
 }
 .rise {
   animation: rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

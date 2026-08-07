@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Person, Tx } from "@/lib/db";
 import { fmtRs, fmtWhen, fmtFull, dueDateInfo, todayLocalYMD } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
@@ -9,7 +9,7 @@ import { Avatar } from "@/components/Avatar";
 
 function Spinner() {
   return (
-    <div className="flex justify-center py-16">
+    <div className="flex justify-center py-16" role="status" aria-label="Loading loan records">
       <div
         className="w-6 h-6 rounded-full border-2 animate-spin"
         style={{ borderColor: "var(--hairline)", borderTopColor: "var(--accent)" }}
@@ -107,8 +107,6 @@ function AddPersonForm({
   const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const nameRef = useRef<HTMLInputElement>(null);
-  useEffect(() => nameRef.current?.focus(), []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,8 +130,8 @@ function AddPersonForm({
     <form onSubmit={submit} className="card p-5 rise flex flex-col gap-3">
       <p className="font-semibold">New loan record</p>
       <input
-        ref={nameRef}
         className="field"
+        aria-label="Person's name"
         placeholder="Person's name"
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -141,6 +139,7 @@ function AddPersonForm({
       />
       <input
         className="field tabular"
+        aria-label="Amount lent"
         placeholder="Amount lent (Rs)"
         type="number"
         inputMode="decimal"
@@ -152,16 +151,18 @@ function AddPersonForm({
       />
       <input
         className="field"
+        aria-label="Loan note"
         placeholder="Note — e.g. cash for bike repair (optional)"
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
-      <div className="flex items-center gap-2">
-        <label className="text-[13px] shrink-0" style={{ color: "var(--muted)" }}>
+      <div className="grid min-w-0 gap-2 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+        <label className="text-[13px]" style={{ color: "var(--muted)" }}>
           Reach out by
         </label>
         <input
           className="field"
+          aria-label="Reach-out date"
           type="date"
           value={dueDate}
           min={todayLocalYMD()}
@@ -170,11 +171,11 @@ function AddPersonForm({
         />
       </div>
       {error && (
-        <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+        <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
           {error}
         </p>
       )}
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions">
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
@@ -203,8 +204,6 @@ function TxForm({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const amountRef = useRef<HTMLInputElement>(null);
-  useEffect(() => amountRef.current?.focus(), []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -228,8 +227,8 @@ function TxForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-2.5 rise">
       <input
-        ref={amountRef}
         className="field tabular"
+        aria-label={mode === "lend" ? "Amount lent" : "Amount received"}
         placeholder={mode === "lend" ? "Amount lent (Rs)" : "Amount received (Rs)"}
         type="number"
         inputMode="decimal"
@@ -241,16 +240,17 @@ function TxForm({
       />
       <input
         className="field"
+        aria-label="Transaction description"
         placeholder="Short description (optional)"
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
       {error && (
-        <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+        <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
           {error}
         </p>
       )}
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions">
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
@@ -333,6 +333,7 @@ function PersonCard({
     <div className="card overflow-hidden rise">
       <button
         onClick={onToggle}
+        aria-expanded={expanded}
         className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
       >
         <Avatar id={person.id} name={person.name} />
@@ -397,7 +398,7 @@ function PersonCard({
               />
             </div>
           ) : (
-            <div className="flex gap-2 pt-4">
+            <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 pt-4">
               <button className="btn btn-primary flex-1" onClick={() => setForm("lend")}>
                 <span>💸</span> I lent more
               </button>
@@ -408,9 +409,10 @@ function PersonCard({
           )}
 
           {editingDue ? (
-            <div className="flex items-center gap-2 pt-4">
+            <div className="grid min-w-0 grid-cols-2 gap-2 pt-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
               <input
-                className="field"
+                className="field col-span-2 sm:col-span-1"
+                aria-label="Reach-out date"
                 type="date"
                 value={dueDraft}
                 onChange={(e) => setDueDraft(e.target.value)}
@@ -457,7 +459,7 @@ function PersonCard({
 
           <div className="mt-4">
             {txs === null ? (
-              <p className="text-[13px] py-2" style={{ color: "var(--muted)" }}>
+              <p className="text-[13px] py-2" style={{ color: "var(--muted)" }} role="status">
                 Loading history…
               </p>
             ) : (
@@ -563,6 +565,7 @@ export default function Home() {
           {people.length > 3 && (
             <input
               className="field"
+              aria-label="Search people"
               placeholder="Search people…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}

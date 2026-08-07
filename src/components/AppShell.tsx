@@ -10,8 +10,8 @@ import { Avatar } from "@/components/Avatar";
 type CurrentUser = { id: string; username: string; isAdmin: boolean };
 
 const NAV_ITEMS = [
-  { href: "/", label: "Khata", icon: "" },
   { href: "/expenses", label: "Mera Khata", icon: "" },
+  { href: "/", label: "Udhar Khata", icon: "" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -37,7 +37,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : NAV_ITEMS;
 
   return (
-    <div className="w-full max-w-xl mx-auto px-4 py-6 sm:py-10 flex flex-col gap-5">
+    <>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <div
+        className="w-full max-w-xl mx-auto px-4 py-6 sm:py-10 flex flex-col gap-5"
+        style={{
+          paddingLeft: "max(1rem, env(safe-area-inset-left))",
+          paddingRight: "max(1rem, env(safe-area-inset-right))",
+          paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))",
+        }}
+      >
       <header className="flex items-center justify-between gap-3">
         <Link href="/" className="flex items-center gap-3 min-w-0">
           <Logo />
@@ -57,6 +66,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 className="btn btn-ghost !p-0 w-10 h-10"
                 onClick={() => setMenuOpen((v) => !v)}
                 aria-label="Account menu"
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
               >
                 <Avatar id={user.id} name={user.username} size={32} />
               </button>
@@ -66,7 +77,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     className="fixed inset-0 z-10"
                     onClick={() => setMenuOpen(false)}
                   />
-                  <div className="card absolute right-0 top-12 z-20 p-2 w-48 rise">
+                  <div className="card absolute right-0 top-12 z-20 p-2 w-48 rise" role="menu">
                     <p className="px-3 py-1.5 text-[13px] font-semibold truncate">
                       {user.username}
                       {user.isAdmin && (
@@ -80,7 +91,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     </p>
                     <button
                       onClick={logout}
-                      className="w-full text-left px-3 py-1.5 rounded-lg text-[13px] cursor-pointer"
+                      role="menuitem"
+                      className="w-full min-h-12 text-left px-3 py-1.5 rounded-lg text-[13px] cursor-pointer"
                       style={{ color: "var(--bad)" }}
                     >
                       Log out
@@ -93,14 +105,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <nav className="flex items-center gap-2 overflow-x-auto pb-0.5">
+      <nav className="flex items-center gap-2 overflow-x-auto pb-0.5" aria-label="Primary navigation">
         {items.map((item) => {
           const active = pathname === item.href;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`btn shrink-0 !py-2 ${active ? "btn-primary" : "btn-ghost"}`}
+              aria-current={active ? "page" : undefined}
+              className={`btn shrink-0 !py-2 !px-4 ${active ? "btn-primary" : "btn-ghost"}`}
             >
               {item.icon && <span>{item.icon}</span>}
               <span>{item.label}</span>
@@ -109,7 +122,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         })}
       </nav>
 
-      {children}
-    </div>
+        <main id="main-content" className="contents">{children}</main>
+      </div>
+    </>
   );
 }

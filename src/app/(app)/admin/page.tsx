@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { UserSummary } from "@/lib/db";
 import { Avatar } from "@/components/Avatar";
 import { fmtWhen } from "@/lib/format";
 
 function Spinner() {
   return (
-    <div className="flex justify-center py-16">
+    <div className="flex justify-center py-16" role="status" aria-label="Loading users">
       <div
         className="w-6 h-6 rounded-full border-2 animate-spin"
         style={{ borderColor: "var(--hairline)", borderTopColor: "var(--accent)" }}
@@ -23,8 +23,6 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => ref.current?.focus(), []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,8 +46,8 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
     <form onSubmit={submit} className="card p-5 rise flex flex-col gap-3">
       <p className="font-semibold">New user</p>
       <input
-        ref={ref}
         className="field"
+        aria-label="Username"
         placeholder="Username"
         value={username}
         onChange={(e) => setUsername(e.target.value)}
@@ -57,6 +55,7 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
       />
       <input
         className="field"
+        aria-label="Password"
         placeholder="Password (min 6 characters)"
         type="password"
         value={password}
@@ -64,11 +63,11 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
         required
       />
       {error && (
-        <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+        <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
           {error}
         </p>
       )}
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions">
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
@@ -94,8 +93,6 @@ function ResetPasswordForm({
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => ref.current?.focus(), []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,8 +115,8 @@ function ResetPasswordForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-2 mt-3 pt-3 border-t" style={{ borderColor: "var(--hairline)" }}>
       <input
-        ref={ref}
         className="field"
+        aria-label={`New password for ${user.username}`}
         placeholder={`New password for ${user.username}`}
         type="password"
         value={password}
@@ -127,11 +124,11 @@ function ResetPasswordForm({
         required
       />
       {error && (
-        <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+        <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
           {error}
         </p>
       )}
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions">
         <button type="button" className="btn btn-ghost !py-2 text-[12px]" onClick={onCancel}>
           Cancel
         </button>
@@ -166,7 +163,7 @@ function UserRow({ user, onChanged }: { user: UserSummary; onChanged: () => void
 
   return (
     <li className="p-3 border-b last:border-b-0" style={{ borderColor: "var(--hairline)" }}>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Avatar id={user.id} name={user.username} size={40} />
         <div className="min-w-0 flex-1">
           <p className="font-semibold truncate flex items-center gap-1.5">
@@ -187,7 +184,7 @@ function UserRow({ user, onChanged }: { user: UserSummary; onChanged: () => void
           </p>
         </div>
         {!user.is_admin && (
-          <div className="flex gap-1.5 shrink-0">
+          <div className="flex w-full flex-wrap justify-end gap-1.5 sm:w-auto sm:shrink-0">
             <button
               onClick={() => setResetting((v) => !v)}
               className="btn btn-ghost !py-2 !px-3 text-[12px]"
@@ -249,7 +246,7 @@ export default function AdminPage() {
       </div>
 
       {error && (
-        <div className="card p-6 text-center rise">
+        <div className="card p-6 text-center rise" role="alert">
           <p style={{ color: "var(--bad)" }}>{error}</p>
         </div>
       )}

@@ -1,12 +1,6 @@
 import { createClient, type Client } from "@libsql/client";
-import { randomUUID } from "crypto";
-import { hashPassword } from "@/lib/auth";
-
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "walli";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "821202";
 
 let client: Client | null = null;
-let ready: Promise<void> | null = null;
 
 function getClient(): Client {
   if (!client) {
@@ -18,92 +12,8 @@ function getClient(): Client {
   return client;
 }
 
-export async function db(): Promise<Client> {
-  const c = getClient();
-  if (!ready) {
-    ready = (async () => {
-      // Schema setup + admin seed collapsed into a single round trip. Fresh
-      // installs get user_id on `people` directly (no ALTER needed); the
-      // ALTER below only fires for pre-existing databases created before
-      // multi-user support and is skipped harmlessly everywhere else.
-      const adminHash = hashPassword(ADMIN_PASSWORD);
-      await c.batch(
-        [
-          `CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            username TEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL,
-            is_admin INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
-          )`,
-          `CREATE TABLE IF NOT EXISTS people (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            user_id TEXT REFERENCES users(id),
-            due_date TEXT
-          )`,
-          `CREATE TABLE IF NOT EXISTS transactions (
-            id TEXT PRIMARY KEY,
-            person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-            amount REAL NOT NULL,
-            note TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL
-          )`,
-          `CREATE TABLE IF NOT EXISTS expenses (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            amount REAL NOT NULL,
-            note TEXT NOT NULL DEFAULT '',
-            expense_date TEXT,
-            expense_datetime TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            vendor TEXT,
-            category TEXT
-          )`,
-          `CREATE INDEX IF NOT EXISTS idx_people_user ON people(user_id)`,
-          `CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)`,
-          {
-            sql: `INSERT INTO users (id, username, password_hash, is_admin, created_at)
-                  VALUES (?, ?, ?, 1, ?)
-                  ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, is_admin = 1`,
-            args: [randomUUID(), ADMIN_USERNAME, adminHash, new Date().toISOString()],
-          },
-        ],
-        "write"
-      );
-
-      // one-time backward-compat migrations for databases predating these
-      // columns; each no-ops (and is caught) once the column already exists
-      try {
-        await c.execute(`ALTER TABLE people ADD COLUMN user_id TEXT REFERENCES users(id)`);
-      } catch {
-        // column already exists — expected on every run after the first
-      }
-      try {
-        await c.execute(`ALTER TABLE people ADD COLUMN due_date TEXT`);
-      } catch {
-        // column already exists — expected on every run after the first
-      }
-      try {
-        await c.execute(`ALTER TABLE expenses ADD COLUMN vendor TEXT`);
-      } catch {
-        // column already exists — expected on every run after the first
-      }
-      try {
-        await c.execute(`ALTER TABLE expenses ADD COLUMN category TEXT`);
-      } catch {
-        // column already exists — expected on every run after the first
-      }
-      try {
-        await c.execute(`ALTER TABLE expenses ADD COLUMN expense_datetime TEXT DEFAULT ''`);
-      } catch {
-        // column already exists — expected on every run after the first
-      }
-    })();
-  }
-  await ready;
-  return c;
+export function db(): Client {
+  return getClient();
 }
 
 /* ---------- users ---------- */
@@ -342,10 +252,10 @@ export async function yearlyExpenseTotals(userId: string, year: number): Promise
     sql: `
       SELECT substr(expense_date, 6, 2) AS month, SUM(amount) AS total, COUNT(*) AS count
       FROM expenses
-      WHERE user_id = ? AND substr(expense_date, 1, 4) = ?
+      WHERE user_id = ? AND expense_date >= ? AND expense_date < ?
       GROUP BY month
     `,
-    args: [userId, String(year)],
+    args: [userId, `${year}-01-01`, `${year + 1}-01-01`],
   });
   const map = new Map<number, YearlyPoint>();
   for (const r of rs.rows) {
@@ -357,4 +267,3 @@ export async function yearlyExpenseTotals(userId: string, year: number): Promise
     return map.get(m) ?? { month: m, total: 0, count: 0 };
   });
 }
-

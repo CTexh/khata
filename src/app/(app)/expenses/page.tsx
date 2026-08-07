@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Expense, YearlyPoint } from "@/lib/db";
-import { fmtRs, fmtDateLabel, MONTH_NAMES, todayLocalYMD } from "@/lib/format";
+import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
 
 type View = "month" | "year";
 
@@ -70,15 +70,60 @@ function DetailModal({
   const [date, setDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Lock background scroll while the modal is open
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const body = document.body;
+    const scrollY = window.scrollY;
+    const previous = {
+      overflow: body.style.overflow,
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+    };
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+
     return () => {
-      document.body.style.overflow = prev;
+      body.style.overflow = previous.overflow;
+      body.style.position = previous.position;
+      body.style.top = previous.top;
+      body.style.width = previous.width;
+      window.scrollTo(0, scrollY);
     };
   }, []);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable?.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const startEdit = () => {
     setAmount(String(expense.amount));
@@ -135,32 +180,35 @@ function DetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
-      style={{ background: "rgba(0,0,0,0.75)" }}
+      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-hidden backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.75)", overscrollBehavior: "none" }}
       onClick={onClose}
     >
       <div
-        className="rounded-lg w-full max-w-md border max-h-[90vh] overflow-y-auto"
-        style={{
-          background: isDark ? "#1e293b" : "#ffffff",
-          borderColor: isDark ? "#334155" : "#e0e0e0",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-          color: isDark ? "#e2e8f0" : "#1a1a1a",
-        }}
+        ref={dialogRef}
+        className="modal-panel card rise w-full max-w-xl overflow-y-auto"
+        style={{ color: "var(--ink)", overscrollBehavior: "contain" }}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleDialogKeyDown}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="expense-dialog-title"
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between p-5 border-b sticky top-0"
-          style={{ borderColor: isDark ? "#334155" : "#e0e0e0", background: isDark ? "#1e293b" : "#ffffff" }}
+          className="flex items-center justify-between p-5 border-b sticky top-0 z-10"
+          style={{ borderColor: "var(--hairline)", background: "var(--surface)" }}
         >
-          <h2 className="text-[16px] font-semibold" style={{ color: isDark ? "#f1f5f9" : "#000000" }}>
+          <h2 id="expense-dialog-title" className="text-[16px] font-semibold" style={{ color: "var(--ink)" }}>
             {mode === "edit" ? "Edit Expense" : "Expense Details"}
           </h2>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
-            className="text-[20px] opacity-50 hover:opacity-100 transition"
-            style={{ color: isDark ? "#cbd5e1" : "#666666" }}
+            type="button"
+            aria-label="Close expense dialog"
+            className="inline-flex h-12 w-12 items-center justify-center text-[20px] opacity-50 hover:opacity-100 transition"
+            style={{ color: "var(--ink-2)" }}
           >
             ✕
           </button>
@@ -172,8 +220,8 @@ function DetailModal({
             <div className="p-5 space-y-3">
               {/* Title and Amount row */}
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[14px] font-semibold flex-1 min-w-0 truncate" style={{ color: isDark ? "#f1f5f9" : "#000000" }}>{expense.vendor || "Expense"}</p>
-                <p className="text-[18px] font-bold tabular shrink-0" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>{fmtRs(expense.amount)}</p>
+                <p className="text-[14px] font-semibold flex-1 min-w-0 truncate" style={{ color: "var(--ink)" }}>{expense.vendor || "Expense"}</p>
+                <p className="text-[18px] font-bold tabular shrink-0" style={{ color: "var(--ink)" }}>{fmtRs(expense.amount)}</p>
               </div>
 
               {/* Category Badge */}
@@ -197,18 +245,18 @@ function DetailModal({
               {/* Details section */}
               {(expense.note) && (
                 <div>
-                  <p className="text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                  <p className="text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
                     Note
                   </p>
-                  <p className="text-[13px] leading-relaxed" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>{expense.note}</p>
+                  <p className="text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>{expense.note}</p>
                 </div>
               )}
 
               <div>
-                <p className="text-[12px] font-medium mb-1" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
                   Date
                 </p>
-                <p className="text-[13px]" style={{ color: isDark ? "#e0e0e0" : "#1a1a1a" }}>
+                <p className="text-[13px]" style={{ color: "var(--ink-2)" }}>
                   {dt.toLocaleDateString("en-US", {
                     year: "numeric",
                     month: "short",
@@ -219,7 +267,7 @@ function DetailModal({
             </div>
 
             {/* Footer */}
-            <div className="flex gap-2 justify-end p-5 border-t" style={{ borderColor: isDark ? "#334155" : "#e0e0e0" }}>
+            <div className="form-actions p-5 border-t" style={{ borderColor: "var(--hairline)" }}>
               <button className="btn btn-ghost !text-[13px]" onClick={onClose}>
                 Close
               </button>
@@ -240,6 +288,7 @@ function DetailModal({
                 </label>
                 <input
                   className="field"
+                  aria-label="Amount"
                   type="number"
                   inputMode="decimal"
                   min="0.01"
@@ -247,7 +296,6 @@ function DetailModal({
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   required
-                  autoFocus
                 />
               </div>
               <div>
@@ -256,6 +304,7 @@ function DetailModal({
                 </label>
                 <input
                   className="field"
+                  aria-label="Vendor or merchant"
                   placeholder="Where did you spend? (optional)"
                   value={vendor}
                   onChange={(e) => setVendor(e.target.value)}
@@ -267,6 +316,7 @@ function DetailModal({
                 </label>
                 <input
                   className="field"
+                  aria-label="Category"
                   placeholder="Groceries, Transport, etc. (optional)"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
@@ -278,17 +328,20 @@ function DetailModal({
                 </label>
                 <input
                   className="field"
+                  aria-label="Note"
                   placeholder="What was it for? (optional)"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
                   Date
                 </label>
                 <input
-                  className="field"
+                  className="field block min-w-0 max-w-full"
+                  aria-label="Date"
+                  style={{ inlineSize: "100%", minInlineSize: 0, maxInlineSize: "100%" }}
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
@@ -296,14 +349,14 @@ function DetailModal({
                 />
               </div>
               {error && (
-                <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+                <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
                   {error}
                 </p>
               )}
             </div>
 
             {/* Footer */}
-            <div className="flex gap-2 justify-end p-5 border-t" style={{ borderColor: isDark ? "#334155" : "#e0e0e0" }}>
+            <div className="form-actions p-5 border-t" style={{ borderColor: "var(--hairline)" }}>
               <button type="button" className="btn btn-ghost !text-[13px]" onClick={() => setMode("view")}>
                 Cancel
               </button>
@@ -338,9 +391,6 @@ function ExpenseForm({
   const [category, setCategory] = useState(editing?.category ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const amountRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => amountRef.current?.focus(), []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -379,8 +429,8 @@ function ExpenseForm({
           Rs
         </span>
         <input
-          ref={amountRef}
           className="field tabular !text-3xl !font-bold !py-4 !pl-14"
+          aria-label="Expense amount"
           placeholder="0"
           type="number"
           inputMode="decimal"
@@ -397,6 +447,7 @@ function ExpenseForm({
         </label>
         <input
           className="field"
+          aria-label="Expense note"
           placeholder="What was it for? (optional)"
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -408,6 +459,7 @@ function ExpenseForm({
         </label>
         <input
           className="field"
+          aria-label="Vendor or merchant"
           placeholder="Where did you spend? (optional)"
           value={vendor}
           onChange={(e) => setVendor(e.target.value)}
@@ -419,6 +471,7 @@ function ExpenseForm({
         </label>
         <input
           className="field"
+          aria-label="Expense category"
           placeholder="Groceries, Transport, etc. (optional)"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
@@ -430,6 +483,7 @@ function ExpenseForm({
         </label>
         <input
           className="field"
+          aria-label="Expense date and time"
           type="datetime-local"
           value={datetime}
           onChange={(e) => setDateTime(e.target.value)}
@@ -437,11 +491,11 @@ function ExpenseForm({
         />
       </div>
       {error && (
-        <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+        <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
           {error}
         </p>
       )}
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions">
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
@@ -466,16 +520,19 @@ function ExpenseRow({
   const isDark = isDarkMode();
 
   return (
-    <li
-      className="grid items-center gap-3 py-3 px-1 border-b last:border-b-0 cursor-pointer hover:opacity-75 transition"
-      style={{ gridTemplateColumns: "140px 1fr auto", borderColor: "var(--hairline)" }}
-      onClick={onView}
-    >
+    <li className="border-b last:border-b-0" style={{ borderColor: "var(--hairline)" }}>
+      <button
+        type="button"
+        className="grid w-full items-center gap-3 py-3 px-1 text-left cursor-pointer hover:opacity-75 transition"
+        style={{ gridTemplateColumns: "32% minmax(0, 1fr) 24%" }}
+        onClick={onView}
+        aria-label={`View ${expense.vendor || "expense"}, ${fmtRs(expense.amount)}`}
+      >
       {/* Category Badge - Fixed Width */}
-      <div>
+      <div className="min-w-0">
         {expense.category && (
           <span
-            className="text-[11px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap inline-block"
+            className="max-w-full overflow-hidden text-ellipsis text-[11px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap inline-block align-middle"
             style={{
               background: isDark ? "#334155" : categoryColor.bg,
               color: isDark ? "#cbd5e1" : categoryColor.text,
@@ -498,6 +555,7 @@ function ExpenseRow({
       <span className="tabular text-[14px] font-semibold text-right" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>
         {fmtRs(expense.amount)}
       </span>
+      </button>
     </li>
   );
 }
@@ -519,7 +577,6 @@ function MonthView({
 }) {
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [search, setSearch] = useState("");
-  const [bump, setBump] = useState(0);
 
   const load = useCallback(async () => {
     setExpenses(null);
@@ -529,7 +586,7 @@ function MonthView({
 
   useEffect(() => {
     load();
-  }, [load, refreshKey, bump]);
+  }, [load, refreshKey]);
 
   const filtered = expenses
     ?.filter((e) => {
@@ -587,14 +644,14 @@ function MonthView({
 
         <input
           className="field mb-4"
+          aria-label="Search expenses"
           placeholder="Search by amount, note, vendor, or category…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          autoFocus={search !== ""}
         />
 
         {expenses === null ? (
-          <p className="text-[13px] py-4" style={{ color: "var(--muted)" }}>
+          <p className="text-[13px] py-4" style={{ color: "var(--muted)" }} role="status">
             Loading…
           </p>
         ) : filtered?.length === 0 ? (

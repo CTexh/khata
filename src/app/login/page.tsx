@@ -32,7 +32,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="w-full max-w-sm mx-auto min-h-dvh flex flex-col items-center justify-center px-4 gap-6">
+    <div className="w-full max-w-sm mx-auto min-h-dvh flex flex-col items-center justify-center px-4 py-6 gap-6">
       <div className="flex items-center gap-3">
         <Logo size={52} />
         <h1 className="wordmark text-[32px]">Khata</h1>
@@ -45,14 +45,15 @@ export default function LoginPage() {
         </p>
         <input
           className="field"
+          aria-label="Username"
           placeholder="Username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          autoFocus
           required
         />
         <input
           className="field"
+          aria-label="Password"
           placeholder="Password"
           type="password"
           value={password}
@@ -60,7 +61,7 @@ export default function LoginPage() {
           required
         />
         {error && (
-          <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+          <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
             {error}
           </p>
         )}
@@ -69,7 +70,7 @@ export default function LoginPage() {
         </button>
         <p className="text-[13px] text-center mt-1" style={{ color: "var(--muted)" }}>
           New here?{" "}
-          <Link href="/signup" className="font-semibold" style={{ color: "var(--accent)" }}>
+          <Link href="/signup" className="inline-flex min-h-12 items-center px-2 -mx-2 font-semibold" style={{ color: "var(--accent)" }}>
             Create an account
           </Link>
         </p>

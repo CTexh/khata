@@ -37,7 +37,7 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="w-full max-w-sm mx-auto min-h-dvh flex flex-col items-center justify-center px-4 gap-6">
+    <div className="w-full max-w-sm mx-auto min-h-dvh flex flex-col items-center justify-center px-4 py-6 gap-6">
       <div className="flex items-center gap-3">
         <Logo size={52} />
         <h1 className="wordmark text-[32px]">Khata</h1>
@@ -50,14 +50,15 @@ export default function SignupPage() {
         </p>
         <input
           className="field"
+          aria-label="Username"
           placeholder="Choose a username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          autoFocus
           required
         />
         <input
           className="field"
+          aria-label="Password"
           placeholder="Password (min 6 characters)"
           type="password"
           value={password}
@@ -66,6 +67,7 @@ export default function SignupPage() {
         />
         <input
           className="field"
+          aria-label="Confirm password"
           placeholder="Confirm password"
           type="password"
           value={confirm}
@@ -73,7 +75,7 @@ export default function SignupPage() {
           required
         />
         {error && (
-          <p className="text-[13px]" style={{ color: "var(--bad)" }}>
+          <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
             {error}
           </p>
         )}
@@ -82,7 +84,7 @@ export default function SignupPage() {
         </button>
         <p className="text-[13px] text-center mt-1" style={{ color: "var(--muted)" }}>
           Already have an account?{" "}
-          <Link href="/login" className="font-semibold" style={{ color: "var(--accent)" }}>
+          <Link href="/login" className="inline-flex min-h-12 items-center px-2 -mx-2 font-semibold" style={{ color: "var(--accent)" }}>
             Log in
           </Link>
         </p>
