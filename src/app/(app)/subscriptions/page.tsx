@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Spinner } from "@/components/Spinner";
+
+function Spinner() {
+  return (
+    <div className="flex justify-center py-16" role="status" aria-label="Loading subscriptions">
+      <div
+        className="w-6 h-6 rounded-full border-2 animate-spin"
+        style={{ borderColor: "var(--hairline)", borderTopColor: "var(--accent)" }}
+      />
+    </div>
+  );
+}
 
 type Subscription = {
   id: string;
