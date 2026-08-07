@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { fmtRs } from "@/lib/format";
 
 function Spinner() {
   return (
@@ -28,10 +29,18 @@ type Subscription = {
 type FormState = {
   name: string;
   amount: string;
-  due_day: string;
+  date: string;
   logo_url: string;
   logoLoading: boolean;
 };
+
+function todayLocalYMD(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export default function Subscriptions() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -42,7 +51,7 @@ export default function Subscriptions() {
   const [form, setForm] = useState<FormState>({
     name: "",
     amount: "",
-    due_day: new Date().getDate().toString(),
+    date: todayLocalYMD(),
     logo_url: "",
     logoLoading: false,
   });
@@ -87,10 +96,12 @@ export default function Subscriptions() {
 
   const handleAddSubscription = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.amount || !form.due_day) {
+    if (!form.name || !form.amount || !form.date) {
       setError("Please fill in all fields");
       return;
     }
+
+    const dueDay = Number(form.date.split("-")[2]);
 
     try {
       const res = await fetch("/api/subscriptions", {
@@ -99,7 +110,7 @@ export default function Subscriptions() {
         body: JSON.stringify({
           name: form.name,
           amount: parseFloat(form.amount),
-          due_day: parseInt(form.due_day),
+          due_day: dueDay,
           logo_url: form.logo_url || null,
         }),
       });
@@ -109,7 +120,7 @@ export default function Subscriptions() {
         throw new Error(err.error || "Failed to create subscription");
       }
 
-      setForm({ name: "", amount: "", due_day: new Date().getDate().toString(), logo_url: "", logoLoading: false });
+      setForm({ name: "", amount: "", date: todayLocalYMD(), logo_url: "", logoLoading: false });
       setShowForm(false);
       await loadSubscriptions();
     } catch (err) {
@@ -160,7 +171,7 @@ export default function Subscriptions() {
         <div>
           <h2 className="text-2xl font-bold">Subscriptions</h2>
           <p className="text-sm" style={{ color: "var(--muted)" }}>
-            Total this month: <span className="tabular font-semibold">${monthlyTotal.toFixed(2)}</span>
+            Total this month: <span className="tabular font-semibold">{fmtRs(monthlyTotal)}</span>
           </p>
         </div>
         <button
@@ -185,10 +196,14 @@ export default function Subscriptions() {
             {form.logo_url && (
               <img src={form.logo_url} alt={form.name} className="w-12 h-12 rounded object-cover" />
             )}
-            <div className="flex-1">
+            <div className="flex-1 flex flex-col gap-1.5">
+              <label className="text-[13px]" style={{ color: "var(--muted)" }}>
+                Name
+              </label>
               <input
                 type="text"
-                placeholder="Subscription name (e.g., Netflix)"
+                aria-label="Subscription name"
+                placeholder="e.g., Netflix"
                 className="field w-full"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -197,29 +212,42 @@ export default function Subscriptions() {
                     handleLogoFetch(e.target.value);
                   }
                 }}
+                required
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              placeholder="Amount"
-              className="field"
-              value={form.amount}
-              onChange={(e) => setForm({ ...form, amount: e.target.value })}
-            />
-            <input
-              type="number"
-              min="1"
-              max="31"
-              placeholder="Due day (1-31)"
-              className="field"
-              value={form.due_day}
-              onChange={(e) => setForm({ ...form, due_day: e.target.value })}
-            />
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[13px]" style={{ color: "var(--muted)" }}>
+                Rs
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                aria-label="Amount in Rs"
+                placeholder="0"
+                className="field tabular"
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[13px]" style={{ color: "var(--muted)" }}>
+                Date
+              </label>
+              <input
+                type="date"
+                aria-label="Due date"
+                className="field"
+                value={form.date}
+                onChange={(e) => setForm({ ...form, date: e.target.value })}
+                required
+              />
+            </div>
           </div>
 
           <div className="flex gap-3">
@@ -283,7 +311,7 @@ export default function Subscriptions() {
                     )}
                     <div className="flex-1">
                       <h3 className="text-lg font-bold">{sub.name}</h3>
-                      <p className="text-2xl font-bold tabular">${sub.amount.toFixed(2)}</p>
+                      <p className="text-2xl font-bold tabular">{fmtRs(sub.amount)}</p>
                       <p className="text-sm" style={{ color: "var(--muted)" }}>
                         Due {sub.due_day}th of each month
                       </p>
