@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { db, deleteSubscription } from "@/lib/db";
+import { db, deleteSubscription, ensureTablesExist } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +13,8 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json();
+
+  await ensureTablesExist();
 
   // Verify subscription belongs to user
   const c = await db();
@@ -30,6 +32,7 @@ export async function PATCH(
   const amount = Number(body.amount ?? r.amount);
   const due_day = Number(body.due_day ?? r.due_day);
   const logo_url = body.logo_url ?? r.logo_url;
+  const active = typeof body.active === "boolean" ? body.active : Number(r.active ?? 1) === 1;
 
   if (!name) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -42,8 +45,8 @@ export async function PATCH(
   }
 
   await c.execute({
-    sql: "UPDATE subscriptions SET name = ?, amount = ?, due_day = ?, logo_url = ? WHERE id = ?",
-    args: [name, amount, due_day, logo_url, id],
+    sql: "UPDATE subscriptions SET name = ?, amount = ?, due_day = ?, logo_url = ?, active = ? WHERE id = ?",
+    args: [name, amount, due_day, logo_url, active ? 1 : 0, id],
   });
 
   return NextResponse.json({ success: true });

@@ -10,8 +10,9 @@ import { Avatar } from "@/components/Avatar";
 type CurrentUser = { id: string; username: string; isAdmin: boolean };
 
 const NAV_ITEMS = [
+  { href: "/", label: "Home", icon: "" },
   { href: "/expenses", label: "Mera Khata", icon: "" },
-  { href: "/", label: "Udhar Khata", icon: "" },
+  { href: "/udhar-khata", label: "Udhar Khata", icon: "" },
   { href: "/subscriptions", label: "Subscriptions", icon: "" },
 ];
 
@@ -106,22 +107,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <nav className="flex items-center gap-2 overflow-x-auto pb-0.5" aria-label="Primary navigation">
-        {items.map((item) => {
-          const active = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={active ? "page" : undefined}
-              className={`btn shrink-0 !py-2 !px-4 ${active ? "btn-primary" : "btn-ghost"}`}
-            >
-              {item.icon && <span>{item.icon}</span>}
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
+      {pathname !== "/" && (
+        <nav className="flex items-center gap-2 overflow-x-auto pb-0.5" aria-label="Primary navigation">
+          {items
+            .filter((item) => item.href !== "/")
+            .map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`btn shrink-0 !py-2 !px-4 ${active ? "btn-primary" : "btn-ghost"}`}
+                >
+                  {item.icon && <span>{item.icon}</span>}
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+        </nav>
+      )}
 
         <main id="main-content" className="contents">{children}</main>
       </div>

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Logo } from "@/components/Logo";
 
 export default function SignupPage() {
+  const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -24,7 +25,7 @@ export default function SignupPage() {
     const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ name, username, password }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -48,6 +49,14 @@ export default function SignupPage() {
         <p className="text-[13px] -mt-2" style={{ color: "var(--muted)" }}>
           Track loans and expenses, synced everywhere.
         </p>
+        <input
+          className="field"
+          aria-label="Your name"
+          placeholder="Your name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
         <input
           className="field"
           aria-label="Username"

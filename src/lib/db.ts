@@ -22,10 +22,24 @@ export function db(): Client {
 export type User = {
   id: string;
   username: string;
+  name: string | null;
   password_hash: string;
   is_admin: boolean;
   created_at: string;
 };
+
+// Lazy migration for installations created before the "name" field existed -
+// mirrors the ensureTablesExist() pattern used for subscriptions below.
+// SELECT * against a DB missing this column simply omits it from the row
+// (no error), so only writers (signup) need to call this first.
+export async function ensureUserNameColumn(): Promise<void> {
+  const c = await db();
+  try {
+    await c.execute(`ALTER TABLE users ADD COLUMN name TEXT`);
+  } catch {
+    // Column already exists.
+  }
+}
 
 export async function findUserByUsername(username: string): Promise<User | null> {
   const c = await db();
@@ -38,6 +52,7 @@ export async function findUserByUsername(username: string): Promise<User | null>
   return {
     id: r.id as string,
     username: r.username as string,
+    name: (r.name as string) ?? null,
     password_hash: r.password_hash as string,
     is_admin: Number(r.is_admin) === 1,
     created_at: r.created_at as string,
@@ -52,6 +67,7 @@ export async function findUserById(id: string): Promise<User | null> {
   return {
     id: r.id as string,
     username: r.username as string,
+    name: (r.name as string) ?? null,
     password_hash: r.password_hash as string,
     is_admin: Number(r.is_admin) === 1,
     created_at: r.created_at as string,
@@ -286,6 +302,7 @@ export type Subscription = {
   amount: number;
   due_day: number;
   logo_url: string | null;
+  active: boolean;
   created_at: string;
 };
 
@@ -300,7 +317,7 @@ export type SubscriptionWithStatus = Subscription & {
   current_period: string;
   current_due_date: string;
   paid_this_period: boolean;
-  status: "paid" | "due-today" | "due-soon" | "upcoming";
+  status: "paid" | "due-today" | "due-soon" | "upcoming" | "inactive";
   history: PaymentRecord[];
 };
 
@@ -350,11 +367,14 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
   for (const r of rs.rows) {
     const id = r.id as string;
     const due_day = Number(r.due_day);
+    const active = Number(r.active ?? 1) === 1;
 
     // Lazily roll a fresh due entry into view on the 1st of a new month -
     // this is what makes "log in next month, see it due again" work
-    // without a background job.
-    await ensurePeriodPayment(id, due_day, period);
+    // without a background job. Skipped for deactivated subscriptions so
+    // an audit-trail entry doesn't keep gaining phantom "due" periods
+    // while paused.
+    if (active) await ensurePeriodPayment(id, due_day, period);
 
     const histRs = await c.execute({
       sql: `SELECT id, period, due_date, paid_at FROM subscription_payments WHERE subscription_id = ? ORDER BY period DESC`,
@@ -370,7 +390,8 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
     const current = history.find((h) => h.period === period) ?? history[0];
     const paid = !!current.paid_at;
     let status: SubscriptionWithStatus["status"];
-    if (paid) status = "paid";
+    if (!active) status = "inactive";
+    else if (paid) status = "paid";
     else if (current.due_date <= today) status = "due-today";
     else if (current.due_date <= soon) status = "due-soon";
     else status = "upcoming";
@@ -382,6 +403,7 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
       amount: Number(r.amount),
       due_day,
       logo_url: (r.logo_url as string) ?? null,
+      active,
       created_at: r.created_at as string,
       current_period: current.period,
       current_due_date: current.due_date,
@@ -419,7 +441,19 @@ export async function createSubscription(
     args: [randomUUID(), id, date.slice(0, 7), date, created_at],
   });
 
-  return { id, user_id: userId, name, amount, due_day, logo_url: logo_url || null, created_at };
+  return { id, user_id: userId, name, amount, due_day, logo_url: logo_url || null, active: true, created_at };
+}
+
+export async function setSubscriptionActive(
+  subscriptionId: string,
+  userId: string,
+  active: boolean
+): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: `UPDATE subscriptions SET active = ? WHERE id = ? AND user_id = ?`,
+    args: [active ? 1 : 0, subscriptionId, userId],
+  });
 }
 
 export async function markSubscriptionPaid(subscriptionId: string, userId: string): Promise<void> {
@@ -507,5 +541,13 @@ export async function ensureTablesExist(): Promise<void> {
     await c.execute(`ALTER TABLE subscriptions DROP COLUMN next_payment_date`);
   } catch {
     // Column already gone (fresh DB) or DROP COLUMN unsupported - fine either way.
+  }
+
+  // Migration: "active" lets a subscription be paused (deactivated) without
+  // losing its payment history, then reactivated later for audit purposes.
+  try {
+    await c.execute(`ALTER TABLE subscriptions ADD COLUMN active INTEGER NOT NULL DEFAULT 1`);
+  } catch {
+    // Column already exists.
   }
 }
