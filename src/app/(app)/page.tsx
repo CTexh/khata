@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fmtRs } from "@/lib/format";
+import { WalletIcon, ReceiptIcon, HandshakeIcon, RepeatIcon } from "@/components/icons";
 
 type CurrentUser = { id: string; username: string; name: string | null; isAdmin: boolean };
 
 type CardStat = {
   href: string;
-  emoji: string;
+  icon: React.ReactNode;
   title: string;
   subtitle: string;
   statLabel: string;
@@ -62,7 +63,7 @@ export default function HeroHome() {
   const cards: CardStat[] = [
     {
       href: "/expenses",
-      emoji: "🧾",
+      icon: <ReceiptIcon size={24} />,
       title: "Mera Khata",
       subtitle: "Track what you spend, month by month",
       statLabel: "Spent this month",
@@ -72,7 +73,7 @@ export default function HeroHome() {
     },
     {
       href: "/udhar-khata",
-      emoji: "🤝",
+      icon: <HandshakeIcon size={24} />,
       title: "Udhar Khata",
       subtitle: "Who owes you, and how much",
       statLabel: "Total outstanding",
@@ -82,7 +83,7 @@ export default function HeroHome() {
     },
     {
       href: "/subscriptions",
-      emoji: "🔁",
+      icon: <RepeatIcon size={24} />,
       title: "Subscriptions",
       subtitle: "Every recurring payment, in one place",
       statLabel: "Due this month",
@@ -102,8 +103,8 @@ export default function HeroHome() {
           transition: "opacity 500ms ease, transform 500ms ease",
         }}
       >
-        <div className="hero-badge logo-float" aria-hidden>
-          <span style={{ fontSize: 34 }}>💰</span>
+        <div className="hero-badge logo-float" style={{ color: "#fff" }} aria-hidden>
+          <WalletIcon size={32} />
         </div>
         <p className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
           {greeting}
@@ -130,10 +131,11 @@ export default function HeroHome() {
                 className="hero-card-icon shrink-0"
                 style={{
                   background: `linear-gradient(135deg, ${c.accent}, ${c.accent2})`,
+                  color: "#fff",
                 }}
                 aria-hidden
               >
-                <span style={{ fontSize: 26 }}>{c.emoji}</span>
+                {c.icon}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="font-bold text-[18px] truncate">{c.title}</p>

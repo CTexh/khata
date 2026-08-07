@@ -108,7 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       {pathname !== "/" && (
-        <nav className="flex items-center gap-2 overflow-x-auto pb-0.5" aria-label="Primary navigation">
+        <nav className="nav-scroll flex items-center gap-2 overflow-x-auto" aria-label="Primary navigation">
           {items
             .filter((item) => item.href !== "/")
             .map((item) => {

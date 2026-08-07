@@ -247,18 +247,16 @@ function SubscriptionDetail({
       )}
 
       {timelineNodes.length > 1 && (
-        <div className="flex items-center">
+        <div className="sub-timeline">
           {timelineNodes.map((h, i) => (
-            <div key={h.id} className="flex items-center flex-1 last:flex-none">
-              <div className="flex flex-col items-center gap-1.5 shrink-0">
-                <div className={`sub-timeline-dot ${h.paid_at ? "" : "pending"}`} />
-                <span className="text-[10px] font-medium" style={{ color: "var(--muted)" }}>
-                  {fmtShortMonth(h.period)}
-                </span>
+            <div key={h.id} className="sub-timeline-seg">
+              <div className="sub-timeline-node">
+                <div className={`sub-timeline-dot ${h.paid_at ? "paid" : "pending"}`} />
+                <span className="sub-timeline-label">{fmtShortMonth(h.period)}</span>
               </div>
               {i < timelineNodes.length - 1 && (
                 <div
-                  className={`sub-timeline-connector flex-1 ${timelineNodes[i + 1].paid_at ? "" : "pending"}`}
+                  className={`sub-timeline-connector ${timelineNodes[i + 1].paid_at ? "paid" : "pending"}`}
                 />
               )}
             </div>
