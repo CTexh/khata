@@ -1,0 +1,25 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Light background -->
+  <rect width="200" height="200" fill="#f9f9f7"/>
+  
+  <!-- Book spine -->
+  <rect x="30" y="30" width="15" height="140" fill="#334155" rx="2"/>
+  
+  <!-- Left page -->
+  <rect x="50" y="30" width="60" height="140" fill="#e2e8f0" stroke="#334155" stroke-width="2" rx="2"/>
+  
+  <!-- Right page -->
+  <rect x="115" y="30" width="60" height="140" fill="#f1f5f9" stroke="#334155" stroke-width="2" rx="2"/>
+  
+  <!-- Ledger lines on left page -->
+  <line x1="55" y1="60" x2="105" y2="60" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
+  <line x1="55" y1="85" x2="105" y2="85" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
+  <line x1="55" y1="110" x2="105" y2="110" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
+  <line x1="55" y1="135" x2="105" y2="135" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
+  
+  <!-- Ledger lines on right page -->
+  <line x1="120" y1="60" x2="170" y2="60" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
+  <line x1="120" y1="85" x2="170" y2="85" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
+  <line x1="120" y1="110" x2="170" y2="110" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
+  <line x1="120" y1="135" x2="170" y2="135" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
+</svg>

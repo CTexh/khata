@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   title: "Khata — Loan Ledger",
   description: "Track money people owe you — lend, receive, settle.",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/favicon.png",
     apple: "/apple-touch-icon.png",
   },
   manifest: "/manifest.json",
