@@ -12,6 +12,11 @@ const nunito = Nunito({
 export const metadata: Metadata = {
   title: "Khata — Loan Ledger",
   description: "Track money people owe you — lend, receive, settle.",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/manifest.json",
 };
 
 export const viewport: Viewport = {
