@@ -34,6 +34,30 @@ type FormState = {
   logoLoading: boolean;
 };
 
+function Avatar({ name, logoUrl, size }: { name: string; logoUrl: string | null; size: "sm" | "lg" }) {
+  const [failed, setFailed] = useState(false);
+  const dim = size === "sm" ? "w-10 h-10" : "w-16 h-16";
+  const text = size === "sm" ? "text-xs" : "text-lg";
+
+  if (logoUrl && !failed) {
+    return (
+      <img
+        src={logoUrl}
+        alt={name}
+        className={`${dim} rounded object-cover shrink-0`}
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${dim} rounded bg-gradient-to-br from-accent to-accent-2 flex items-center justify-center text-white ${text} font-bold shrink-0`}
+    >
+      {name.slice(0, 2).toUpperCase()}
+    </div>
+  );
+}
+
 function todayLocalYMD(): string {
   const d = new Date();
   const y = d.getFullYear();
@@ -48,6 +72,9 @@ export default function Subscriptions() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [justPaidId, setJustPaidId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({
     name: "",
     amount: "",
@@ -84,8 +111,12 @@ export default function Subscriptions() {
         `https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(name)}`
       );
       const data = await response.json();
-      if (data.length > 0 && data[0].logo) {
-        setForm((prev) => ({ ...prev, logo_url: data[0].logo }));
+      // Clearbit's suggest endpoint no longer returns a populated `logo`
+      // field (it's always null now) - but `domain` is still populated,
+      // and Clearbit's separate logo CDN serves a logo for any domain.
+      const domain = data?.[0]?.domain;
+      if (domain) {
+        setForm((prev) => ({ ...prev, logo_url: `https://logo.clearbit.com/${domain}` }));
       }
     } catch (err) {
       console.error("Failed to fetch logo:", err);
@@ -129,25 +160,34 @@ export default function Subscriptions() {
   }, [form, loadSubscriptions]);
 
   const handleMarkPaid = useCallback(async (id: string) => {
+    setError(null);
+    setActionLoading(id);
     try {
       const res = await fetch(`/api/subscriptions/${id}/mark-paid`, { method: "POST" });
       if (!res.ok) throw new Error("Failed to mark as paid");
       await loadSubscriptions();
-      setExpanded(null);
+      setJustPaidId(id);
+      setTimeout(() => setJustPaidId((cur) => (cur === id ? null : cur)), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setActionLoading(null);
     }
   }, [loadSubscriptions]);
 
   const handleDelete = useCallback(async (id: string) => {
-    if (!confirm("Delete this subscription?")) return;
+    setError(null);
+    setActionLoading(id);
     try {
       const res = await fetch(`/api/subscriptions/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete subscription");
       await loadSubscriptions();
       setExpanded(null);
+      setConfirmDeleteId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setActionLoading(null);
     }
   }, [loadSubscriptions]);
 
@@ -193,9 +233,7 @@ export default function Subscriptions() {
       {showForm && (
         <form onSubmit={handleAddSubscription} className="card p-6 flex flex-col gap-4">
           <div className="flex gap-4">
-            {form.logo_url && (
-              <img src={form.logo_url} alt={form.name} className="w-12 h-12 rounded object-cover" />
-            )}
+            {form.logo_url && <Avatar name={form.name || "?"} logoUrl={form.logo_url} size="sm" />}
             <div className="flex-1 flex flex-col gap-1.5">
               <label className="text-[13px]" style={{ color: "var(--muted)" }}>
                 Name
@@ -278,37 +316,29 @@ export default function Subscriptions() {
                 onClick={() => setExpanded(expanded === sub.id ? null : sub.id)}
               >
                 <div className="flex items-center gap-4">
-                  {sub.logo_url && (
-                    <img src={sub.logo_url} alt={sub.name} className="w-10 h-10 rounded object-cover" />
-                  )}
-                  {!sub.logo_url && (
-                    <div className="w-10 h-10 rounded bg-gradient-to-br from-accent to-accent-2 flex items-center justify-center text-white text-xs font-bold">
-                      {sub.name.slice(0, 2).toUpperCase()}
-                    </div>
-                  )}
+                  <Avatar name={sub.name} logoUrl={sub.logo_url} size="sm" />
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold truncate">{sub.name}</p>
                     <p className="text-sm" style={{ color: "var(--muted)" }}>
                       Due {new Date(sub.next_payment_date).toLocaleDateString()}
                     </p>
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors[sub.status]}`}>
-                    {statusLabels[sub.status]}
-                  </span>
+                  {justPaidId === sub.id ? (
+                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                      ✓ PAID
+                    </span>
+                  ) : (
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors[sub.status]}`}>
+                      {statusLabels[sub.status]}
+                    </span>
+                  )}
                 </div>
               </div>
 
               {expanded === sub.id && (
                 <div className="card p-6 mt-2 flex flex-col gap-4">
                   <div className="flex items-start gap-4">
-                    {sub.logo_url && (
-                      <img src={sub.logo_url} alt={sub.name} className="w-16 h-16 rounded object-cover" />
-                    )}
-                    {!sub.logo_url && (
-                      <div className="w-16 h-16 rounded bg-gradient-to-br from-accent to-accent-2 flex items-center justify-center text-white text-lg font-bold">
-                        {sub.name.slice(0, 2).toUpperCase()}
-                      </div>
-                    )}
+                    <Avatar name={sub.name} logoUrl={sub.logo_url} size="lg" />
                     <div className="flex-1">
                       <h3 className="text-lg font-bold">{sub.name}</h3>
                       <p className="text-2xl font-bold tabular">{fmtRs(sub.amount)}</p>
@@ -321,20 +351,46 @@ export default function Subscriptions() {
                     </div>
                   </div>
 
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => handleMarkPaid(sub.id)}
-                      className="btn btn-good flex-1"
-                    >
-                      ✓ Mark Paid
-                    </button>
-                    <button
-                      onClick={() => handleDelete(sub.id)}
-                      className="btn btn-danger flex-1"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  {confirmDeleteId === sub.id ? (
+                    <div className="flex flex-col gap-3">
+                      <p className="text-sm font-semibold" style={{ color: "var(--bad)" }}>
+                        Delete {sub.name}? This cannot be undone.
+                      </p>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => handleDelete(sub.id)}
+                          disabled={actionLoading === sub.id}
+                          className="btn btn-danger flex-1"
+                        >
+                          {actionLoading === sub.id ? "Deleting..." : "Yes, delete"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="btn btn-ghost flex-1"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => handleMarkPaid(sub.id)}
+                        disabled={actionLoading === sub.id}
+                        className="btn btn-good flex-1"
+                      >
+                        {actionLoading === sub.id ? "Marking..." : "✓ Mark Paid"}
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(sub.id)}
+                        disabled={actionLoading === sub.id}
+                        className="btn btn-danger flex-1"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
