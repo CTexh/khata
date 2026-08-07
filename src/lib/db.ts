@@ -1,4 +1,5 @@
 import { createClient, type Client } from "@libsql/client";
+import { randomUUID } from "crypto";
 
 let client: Client | null = null;
 
@@ -266,4 +267,155 @@ export async function yearlyExpenseTotals(userId: string, year: number): Promise
     const m = i + 1;
     return map.get(m) ?? { month: m, total: 0, count: 0 };
   });
+}
+
+/* ---------- subscriptions (scoped per user) ---------- */
+
+export type Subscription = {
+  id: string;
+  user_id: string;
+  name: string;
+  amount: number;
+  due_day: number;
+  logo_url: string | null;
+  next_payment_date: string;
+  created_at: string;
+};
+
+export type SubscriptionWithStatus = Subscription & {
+  status: "due-today" | "due-soon" | "upcoming";
+  last_paid_date: string | null;
+};
+
+export async function listSubscriptions(userId: string): Promise<SubscriptionWithStatus[]> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT * FROM subscriptions WHERE user_id = ? ORDER BY next_payment_date ASC`,
+    args: [userId],
+  });
+
+  const today = new Date().toISOString().split("T")[0];
+  const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  return rs.rows.map((r) => {
+    const next_payment_date = r.next_payment_date as string;
+    let status: "due-today" | "due-soon" | "upcoming";
+    if (next_payment_date <= today) status = "due-today";
+    else if (next_payment_date <= soon) status = "due-soon";
+    else status = "upcoming";
+
+    return {
+      id: r.id as string,
+      user_id: r.user_id as string,
+      name: r.name as string,
+      amount: Number(r.amount),
+      due_day: Number(r.due_day),
+      logo_url: (r.logo_url as string) ?? null,
+      next_payment_date,
+      created_at: r.created_at as string,
+      status,
+      last_paid_date: null,
+    };
+  });
+}
+
+export async function createSubscription(
+  userId: string,
+  name: string,
+  amount: number,
+  due_day: number,
+  logo_url?: string
+): Promise<Subscription> {
+  const c = await db();
+  const id = randomUUID();
+  const created_at = new Date().toISOString();
+  const next_payment_date = getNextPaymentDate(due_day);
+
+  await c.execute({
+    sql: `INSERT INTO subscriptions (id, user_id, name, amount, due_day, logo_url, next_payment_date, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [id, userId, name, amount, due_day, logo_url || null, next_payment_date, created_at],
+  });
+
+  return { id, user_id: userId, name, amount, due_day, logo_url: logo_url || null, next_payment_date, created_at };
+}
+
+export async function markSubscriptionPaid(subscriptionId: string, userId: string): Promise<void> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT due_day FROM subscriptions WHERE id = ? AND user_id = ?`,
+    args: [subscriptionId, userId],
+  });
+
+  const r = rs.rows[0];
+  if (!r) throw new Error("Subscription not found");
+
+  const due_day = Number(r.due_day);
+  const next_payment_date = getNextPaymentDate(due_day);
+
+  await c.execute({
+    sql: `UPDATE subscriptions SET next_payment_date = ? WHERE id = ?`,
+    args: [next_payment_date, subscriptionId],
+  });
+}
+
+export async function deleteSubscription(subscriptionId: string, userId: string): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: `DELETE FROM subscriptions WHERE id = ? AND user_id = ?`,
+    args: [subscriptionId, userId],
+  });
+}
+
+export async function getSubscriptionMonthlyTotal(userId: string, month: number, year: number): Promise<number> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: `
+      SELECT SUM(amount) as total FROM subscriptions
+      WHERE user_id = ? AND next_payment_date >= ? AND next_payment_date < ?
+    `,
+    args: [userId, `${year}-${String(month).padStart(2, "0")}-01`, `${year}-${String(month + 1).padStart(2, "0")}-01`],
+  });
+
+  const r = rs.rows[0];
+  return r ? Number(r.total) || 0 : 0;
+}
+
+function getNextPaymentDate(due_day: number): string {
+  const today = new Date();
+  let year = today.getFullYear();
+  let month = today.getMonth() + 1;
+
+  if (today.getDate() >= due_day) {
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+
+  const lastDay = new Date(year, month, 0).getDate();
+  const day = Math.min(due_day, lastDay);
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/* Ensure tables exist */
+export async function ensureTablesExist(): Promise<void> {
+  const c = await db();
+  await c.batch([
+    {
+      sql: `CREATE TABLE IF NOT EXISTS subscriptions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        due_day INTEGER NOT NULL,
+        logo_url TEXT,
+        next_payment_date TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`,
+    },
+  ], "write");
 }

@@ -12,6 +12,7 @@ type CurrentUser = { id: string; username: string; isAdmin: boolean };
 const NAV_ITEMS = [
   { href: "/expenses", label: "Mera Khata", icon: "" },
   { href: "/", label: "Udhar Khata", icon: "" },
+  { href: "/subscriptions", label: "Subscriptions", icon: "" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
