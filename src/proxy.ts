@@ -33,6 +33,13 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/expenses", request.url));
   }
 
+  // Root path itself has no redirect of its own — a logged-in user opening
+  // the app straight to "/" (bookmark, PWA launch, typed URL) would otherwise
+  // render Home (Udhar Khata) since "/" isn't in PUBLIC_PATHS above.
+  if (session && pathname === "/") {
+    return NextResponse.redirect(new URL("/expenses", request.url));
+  }
+
   const isAdminRoute = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
   if (isAdminRoute && !session?.isAdmin) {
     if (isApi) {
