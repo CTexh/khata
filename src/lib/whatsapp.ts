@@ -78,11 +78,3 @@ export async function sendWhatsAppReminder(
     },
   ]);
 }
-
-// TEMPORARY diagnostic: sends Meta's built-in stock "hello_world" template
-// (no variables, guaranteed to exist/be approved) to isolate whether send
-// failures are pipeline-wide (token/number/permissions) or specific to our
-// subscription_due_reminder template. Remove once the real template works.
-export async function sendHelloWorldTest(phone: string): Promise<WhatsAppSendResult> {
-  return sendTemplate(phone, "hello_world", "en_US", []);
-}
