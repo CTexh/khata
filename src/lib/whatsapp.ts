@@ -13,15 +13,19 @@
 //
 // Needs WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN set - one shared
 // sending number + permanent access token for the whole app, not per-user.
+export type WhatsAppSendResult = { ok: boolean; error?: string };
+
 export async function sendWhatsAppReminder(
   phone: string,
   subscriptionName: string,
   amount: string,
   when: "today" | "tomorrow"
-): Promise<boolean> {
+): Promise<WhatsAppSendResult> {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-  if (!phoneNumberId || !accessToken) return false;
+  if (!phoneNumberId || !accessToken) {
+    return { ok: false, error: "WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN not set" };
+  }
 
   const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
     method: "POST",
@@ -49,5 +53,19 @@ export async function sendWhatsAppReminder(
       },
     }),
   });
-  return res.ok;
+
+  if (res.ok) return { ok: true };
+
+  // Surface Meta's actual error (invalid token, unapproved template, phone
+  // not registered, etc.) instead of a generic failure - this is what
+  // /api/settings/notifications/test returns to the Settings page.
+  const body = await res.text();
+  let error = body;
+  try {
+    const parsed = JSON.parse(body);
+    error = parsed?.error?.message ?? body;
+  } catch {
+    // Not JSON - use the raw body as-is.
+  }
+  return { ok: false, error };
 }

@@ -30,26 +30,31 @@ export async function GET(req: Request) {
   const recipients = await listUsersForReminders();
 
   let remindersSent = 0;
+  const errors: string[] = [];
   for (const user of recipients) {
     const subs = await listSubscriptions(user.id);
     for (const sub of subs) {
       if (!sub.active || sub.paid_this_period) continue;
 
       if (sub.current_due_date === today && !sub.reminder_due_today_sent) {
-        const ok = await sendWhatsAppReminder(user.phone, sub.name, fmtRs(sub.amount), "today");
-        if (ok) {
+        const result = await sendWhatsAppReminder(user.phone, sub.name, fmtRs(sub.amount), "today");
+        if (result.ok) {
           await markReminderSent(sub.current_payment_id, "due_today");
           remindersSent++;
+        } else {
+          errors.push(`${sub.name} (due today): ${result.error}`);
         }
       } else if (sub.current_due_date === tomorrow && !sub.reminder_day_before_sent) {
-        const ok = await sendWhatsAppReminder(user.phone, sub.name, fmtRs(sub.amount), "tomorrow");
-        if (ok) {
+        const result = await sendWhatsAppReminder(user.phone, sub.name, fmtRs(sub.amount), "tomorrow");
+        if (result.ok) {
           await markReminderSent(sub.current_payment_id, "day_before");
           remindersSent++;
+        } else {
+          errors.push(`${sub.name} (due tomorrow): ${result.error}`);
         }
       }
     }
   }
 
-  return NextResponse.json({ ok: true, remindersSent });
+  return NextResponse.json({ ok: true, remindersSent, errors });
 }

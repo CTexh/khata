@@ -18,13 +18,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Phone number is required" }, { status: 400 });
   }
 
-  const ok = await sendWhatsAppReminder(phone, "Test Subscription", "Rs 0", "today");
+  const result = await sendWhatsAppReminder(phone, "Test Subscription", "Rs 0", "today");
 
-  if (!ok) {
-    return NextResponse.json(
-      { error: "Couldn't send — check the number, and that the WhatsApp template is approved" },
-      { status: 502 }
-    );
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error ?? "Couldn't send" }, { status: 502 });
   }
   return NextResponse.json({ success: true });
 }
