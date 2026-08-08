@@ -447,37 +447,58 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
     sql: `SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at ASC`,
     args: [userId],
   });
+  if (rs.rows.length === 0) return [];
 
   const period = currentPeriodStr();
   const today = todayYMD();
   const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const ids = rs.rows.map((r) => r.id as string);
 
-  const result: SubscriptionWithStatus[] = [];
-  for (const r of rs.rows) {
-    const id = r.id as string;
-    const due_day = Number(r.due_day);
-    const active = Number(r.active ?? 1) === 1;
+  // Was N sequential ensurePeriodPayment + N sequential history SELECTs
+  // (2N+1 round trips to a remote DB). Batch the inserts into one
+  // transaction and pull every subscription's history in a single
+  // IN-list SELECT instead - 3 round trips total regardless of N.
+  const insertStmts = rs.rows
+    .filter((r) => Number(r.active ?? 1) === 1)
+    .map((r) => ({
+      sql: `INSERT OR IGNORE INTO subscription_payments (id, subscription_id, period, due_date, paid_at, created_at)
+            VALUES (?, ?, ?, ?, NULL, ?)`,
+      args: [
+        randomUUID(),
+        r.id as string,
+        period,
+        clampedDateForPeriod(period, Number(r.due_day)),
+        new Date().toISOString(),
+      ],
+    }));
+  if (insertStmts.length > 0) await c.batch(insertStmts, "write");
 
-    // Lazily roll a fresh due entry into view on the 1st of a new month -
-    // this is what makes "log in next month, see it due again" work
-    // without a background job. Skipped for deactivated subscriptions so
-    // an audit-trail entry doesn't keep gaining phantom "due" periods
-    // while paused.
-    if (active) await ensurePeriodPayment(id, due_day, period);
-
-    const histRs = await c.execute({
-      sql: `SELECT id, period, due_date, paid_at, reminder_day_before_sent_at, reminder_due_today_sent_at
-            FROM subscription_payments WHERE subscription_id = ? ORDER BY period DESC`,
-      args: [id],
-    });
-    const history: PaymentRecord[] = histRs.rows.map((h) => ({
+  const histRs = await c.execute({
+    sql: `SELECT id, subscription_id, period, due_date, paid_at, reminder_day_before_sent_at, reminder_due_today_sent_at
+          FROM subscription_payments WHERE subscription_id IN (${ids.map(() => "?").join(",")}) ORDER BY period DESC`,
+    args: ids,
+  });
+  const historyBySub = new Map<string, PaymentRecord[]>();
+  for (const h of histRs.rows) {
+    const subId = h.subscription_id as string;
+    const list = historyBySub.get(subId) ?? [];
+    list.push({
       id: h.id as string,
       period: h.period as string,
       due_date: h.due_date as string,
       paid_at: (h.paid_at as string) ?? null,
       reminder_day_before_sent_at: (h.reminder_day_before_sent_at as string) ?? null,
       reminder_due_today_sent_at: (h.reminder_due_today_sent_at as string) ?? null,
-    }));
+    });
+    historyBySub.set(subId, list);
+  }
+
+  const result: SubscriptionWithStatus[] = [];
+  for (const r of rs.rows) {
+    const id = r.id as string;
+    const due_day = Number(r.due_day);
+    const active = Number(r.active ?? 1) === 1;
+    const history = historyBySub.get(id) ?? [];
 
     const current = history.find((h) => h.period === period) ?? history[0];
     const paid = !!current.paid_at;
@@ -598,7 +619,14 @@ export async function deleteSubscription(subscriptionId: string, userId: string)
 }
 
 /* Ensure tables exist */
+// Schema is fixed once a warm serverless instance has run this once - the
+// CREATE TABLE IF NOT EXISTS + 4 sequential ALTER TABLE round trips were
+// re-running on every single subscriptions request, adding real latency
+// for zero effect after the first call. Cache in-process instead.
+let tablesEnsured = false;
+
 export async function ensureTablesExist(): Promise<void> {
+  if (tablesEnsured) return;
   const c = await db();
   await c.batch(
     [
@@ -660,4 +688,6 @@ export async function ensureTablesExist(): Promise<void> {
   } catch {
     // Column already exists.
   }
+
+  tablesEnsured = true;
 }

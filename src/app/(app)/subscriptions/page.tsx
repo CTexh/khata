@@ -363,9 +363,12 @@ export default function Subscriptions() {
     logoLoading: false,
   });
 
-  const loadSubscriptions = useCallback(async () => {
+  // Full-page spinner only on the very first load - re-running this after a
+  // mutation (mark paid, delete, toggle active) shouldn't blank out the
+  // already-visible list, that's a jarring flash on every action.
+  const loadSubscriptions = useCallback(async (isInitial = false) => {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       const res = await fetch("/api/subscriptions");
       if (!res.ok) throw new Error("Failed to load subscriptions");
       const data = await res.json();
@@ -374,12 +377,12 @@ export default function Subscriptions() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadSubscriptions();
+    loadSubscriptions(true);
   }, [loadSubscriptions]);
 
   const handleLogoFetch = useCallback(async (name: string) => {
