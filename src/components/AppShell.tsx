@@ -91,6 +91,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         </span>
                       )}
                     </p>
+                    <Link
+                      href="/settings"
+                      role="menuitem"
+                      onClick={() => setMenuOpen(false)}
+                      className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-lg text-[13px]"
+                    >
+                      ⚙ Settings
+                    </Link>
                     <button
                       onClick={logout}
                       role="menuitem"

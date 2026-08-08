@@ -23,6 +23,7 @@ export type User = {
   id: string;
   username: string;
   name: string | null;
+  phone: string | null;
   password_hash: string;
   is_admin: boolean;
   created_at: string;
@@ -41,6 +42,19 @@ export async function ensureUserNameColumn(): Promise<void> {
   }
 }
 
+// Same lazy-migration pattern for the WhatsApp reminder opt-in phone number.
+// (The sending side - WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN - is
+// one shared Meta WhatsApp Business number for the whole app, set via env
+// vars in src/lib/whatsapp.ts, not per-user.)
+export async function ensureUserNotificationColumns(): Promise<void> {
+  const c = await db();
+  try {
+    await c.execute(`ALTER TABLE users ADD COLUMN phone TEXT`);
+  } catch {
+    // Column already exists.
+  }
+}
+
 export async function findUserByUsername(username: string): Promise<User | null> {
   const c = await db();
   const rs = await c.execute({
@@ -53,6 +67,7 @@ export async function findUserByUsername(username: string): Promise<User | null>
     id: r.id as string,
     username: r.username as string,
     name: (r.name as string) ?? null,
+    phone: (r.phone as string) ?? null,
     password_hash: r.password_hash as string,
     is_admin: Number(r.is_admin) === 1,
     created_at: r.created_at as string,
@@ -68,10 +83,32 @@ export async function findUserById(id: string): Promise<User | null> {
     id: r.id as string,
     username: r.username as string,
     name: (r.name as string) ?? null,
+    phone: (r.phone as string) ?? null,
     password_hash: r.password_hash as string,
     is_admin: Number(r.is_admin) === 1,
     created_at: r.created_at as string,
   };
+}
+
+export async function updateUserNotificationSettings(userId: string, phone: string): Promise<void> {
+  await ensureUserNotificationColumns();
+  const c = await db();
+  await c.execute({
+    sql: "UPDATE users SET phone = ? WHERE id = ?",
+    args: [phone || null, userId],
+  });
+}
+
+export type ReminderRecipient = { id: string; phone: string };
+
+export async function listUsersForReminders(): Promise<ReminderRecipient[]> {
+  await ensureUserNotificationColumns();
+  const c = await db();
+  const rs = await c.execute(`SELECT id, phone FROM users WHERE phone IS NOT NULL AND phone != ''`);
+  return rs.rows.map((r) => ({
+    id: r.id as string,
+    phone: r.phone as string,
+  }));
 }
 
 export type UserSummary = {
@@ -311,12 +348,17 @@ export type PaymentRecord = {
   period: string; // "YYYY-MM"
   due_date: string; // "YYYY-MM-DD"
   paid_at: string | null;
+  reminder_day_before_sent_at: string | null;
+  reminder_due_today_sent_at: string | null;
 };
 
 export type SubscriptionWithStatus = Subscription & {
   current_period: string;
   current_due_date: string;
+  current_payment_id: string;
   paid_this_period: boolean;
+  reminder_day_before_sent: boolean;
+  reminder_due_today_sent: boolean;
   status: "paid" | "due-today" | "due-soon" | "upcoming" | "inactive";
   history: PaymentRecord[];
 };
@@ -326,8 +368,12 @@ function currentPeriodStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function todayYMD(): string {
+export function todayYMD(): string {
   return new Date().toISOString().split("T")[0];
+}
+
+export function tomorrowYMD(): string {
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 }
 
 function nextPeriod(period: string): string {
@@ -377,7 +423,8 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
     if (active) await ensurePeriodPayment(id, due_day, period);
 
     const histRs = await c.execute({
-      sql: `SELECT id, period, due_date, paid_at FROM subscription_payments WHERE subscription_id = ? ORDER BY period DESC`,
+      sql: `SELECT id, period, due_date, paid_at, reminder_day_before_sent_at, reminder_due_today_sent_at
+            FROM subscription_payments WHERE subscription_id = ? ORDER BY period DESC`,
       args: [id],
     });
     const history: PaymentRecord[] = histRs.rows.map((h) => ({
@@ -385,6 +432,8 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
       period: h.period as string,
       due_date: h.due_date as string,
       paid_at: (h.paid_at as string) ?? null,
+      reminder_day_before_sent_at: (h.reminder_day_before_sent_at as string) ?? null,
+      reminder_due_today_sent_at: (h.reminder_due_today_sent_at as string) ?? null,
     }));
 
     const current = history.find((h) => h.period === period) ?? history[0];
@@ -407,7 +456,10 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
       created_at: r.created_at as string,
       current_period: current.period,
       current_due_date: current.due_date,
+      current_payment_id: current.id,
       paid_this_period: paid,
+      reminder_day_before_sent: !!current.reminder_day_before_sent_at,
+      reminder_due_today_sent: !!current.reminder_due_today_sent_at,
       status,
       history,
     });
@@ -486,6 +538,20 @@ export async function markSubscriptionPaid(subscriptionId: string, userId: strin
   await ensurePeriodPayment(subscriptionId, due_day, nextPeriod(unpaid.period as string));
 }
 
+// The `IS NULL` guard makes this safe to call more than once for the same
+// payment/kind (e.g. a cron retry) without overwriting an earlier timestamp.
+export async function markReminderSent(
+  paymentId: string,
+  kind: "day_before" | "due_today"
+): Promise<void> {
+  const c = await db();
+  const column = kind === "day_before" ? "reminder_day_before_sent_at" : "reminder_due_today_sent_at";
+  await c.execute({
+    sql: `UPDATE subscription_payments SET ${column} = ? WHERE id = ? AND ${column} IS NULL`,
+    args: [new Date().toISOString(), paymentId],
+  });
+}
+
 export async function deleteSubscription(subscriptionId: string, userId: string): Promise<void> {
   const c = await db();
   await c.batch(
@@ -547,6 +613,19 @@ export async function ensureTablesExist(): Promise<void> {
   // losing its payment history, then reactivated later for audit purposes.
   try {
     await c.execute(`ALTER TABLE subscriptions ADD COLUMN active INTEGER NOT NULL DEFAULT 1`);
+  } catch {
+    // Column already exists.
+  }
+
+  // Migration: tracks whether the day-before/due-today WhatsApp reminder has
+  // already gone out for this period, so the daily cron never double-sends.
+  try {
+    await c.execute(`ALTER TABLE subscription_payments ADD COLUMN reminder_day_before_sent_at TEXT`);
+  } catch {
+    // Column already exists.
+  }
+  try {
+    await c.execute(`ALTER TABLE subscription_payments ADD COLUMN reminder_due_today_sent_at TEXT`);
   } catch {
     // Column already exists.
   }
