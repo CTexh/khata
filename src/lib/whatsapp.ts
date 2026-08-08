@@ -15,11 +15,11 @@
 // sending number + permanent access token for the whole app, not per-user.
 export type WhatsAppSendResult = { ok: boolean; error?: string };
 
-export async function sendWhatsAppReminder(
+async function sendTemplate(
   phone: string,
-  subscriptionName: string,
-  amount: string,
-  when: "today" | "tomorrow"
+  templateName: string,
+  languageCode: string,
+  components: unknown[]
 ): Promise<WhatsAppSendResult> {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
@@ -38,21 +38,9 @@ export async function sendWhatsAppReminder(
       to: phone.replace(/[^\d]/g, ""), // Meta expects digits only, no "+"
       type: "template",
       template: {
-        name: "subscription_due_reminder",
-        // Meta's "English" template option is stored internally as "en_US",
-        // not "en" - sending "en" gets error #132001 "Template name does
-        // not exist in the translation" even though the template exists.
-        language: { code: "en_US" },
-        components: [
-          {
-            type: "body",
-            parameters: [
-              { type: "text", parameter_name: "sub_name", text: subscriptionName },
-              { type: "text", parameter_name: "amount", text: amount },
-              { type: "text", parameter_name: "due_when", text: when },
-            ],
-          },
-        ],
+        name: templateName,
+        language: { code: languageCode },
+        components,
       },
     }),
   });
@@ -71,4 +59,30 @@ export async function sendWhatsAppReminder(
     // Not JSON - use the raw body as-is.
   }
   return { ok: false, error };
+}
+
+export async function sendWhatsAppReminder(
+  phone: string,
+  subscriptionName: string,
+  amount: string,
+  when: "today" | "tomorrow"
+): Promise<WhatsAppSendResult> {
+  return sendTemplate(phone, "subscription_due_reminder", "en_US", [
+    {
+      type: "body",
+      parameters: [
+        { type: "text", parameter_name: "sub_name", text: subscriptionName },
+        { type: "text", parameter_name: "amount", text: amount },
+        { type: "text", parameter_name: "due_when", text: when },
+      ],
+    },
+  ]);
+}
+
+// TEMPORARY diagnostic: sends Meta's built-in stock "hello_world" template
+// (no variables, guaranteed to exist/be approved) to isolate whether send
+// failures are pipeline-wide (token/number/permissions) or specific to our
+// subscription_due_reminder template. Remove once the real template works.
+export async function sendHelloWorldTest(phone: string): Promise<WhatsAppSendResult> {
+  return sendTemplate(phone, "hello_world", "en_US", []);
 }
