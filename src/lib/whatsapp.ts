@@ -39,7 +39,10 @@ export async function sendWhatsAppReminder(
       type: "template",
       template: {
         name: "subscription_due_reminder",
-        language: { code: "en" },
+        // Meta's "English" template option is stored internally as "en_US",
+        // not "en" - sending "en" gets error #132001 "Template name does
+        // not exist in the translation" even though the template exists.
+        language: { code: "en_US" },
         components: [
           {
             type: "body",
