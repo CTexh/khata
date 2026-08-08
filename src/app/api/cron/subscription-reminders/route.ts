@@ -3,12 +3,14 @@ import {
   ensureTablesExist,
   listUsersForReminders,
   listSubscriptions,
+  listExpenses,
+  ensureMonthlySubscriptionsExpense,
   markReminderSent,
   todayYMD,
   tomorrowYMD,
 } from "@/lib/db";
-import { sendWhatsAppReminder } from "@/lib/whatsapp";
-import { fmtRs } from "@/lib/format";
+import { sendWhatsAppReminder, sendWhatsAppMonthlyReport } from "@/lib/whatsapp";
+import { fmtRs, MONTH_NAMES } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +31,14 @@ export async function GET(req: Request) {
   const tomorrow = tomorrowYMD();
   const recipients = await listUsersForReminders();
 
+  // Last day of the month iff tomorrow rolls into a new month - this is
+  // what triggers the month-end subscriptions expense + WhatsApp report
+  // below, without needing a separate cron entry in vercel.json.
+  const isLastDayOfMonth = tomorrow.slice(0, 7) !== today.slice(0, 7);
+  const [todayYear, todayMonth] = today.split("-").map(Number);
+
   let remindersSent = 0;
+  let monthEndReportsSent = 0;
   const errors: string[] = [];
   for (const user of recipients) {
     const subs = await listSubscriptions(user.id);
@@ -54,7 +63,27 @@ export async function GET(req: Request) {
         }
       }
     }
+
+    if (isLastDayOfMonth) {
+      const activeTotal = subs.filter((s) => s.active).reduce((sum, s) => sum + s.amount, 0);
+      const added = await ensureMonthlySubscriptionsExpense(user.id, todayYear, todayMonth, activeTotal);
+
+      if (user.phone) {
+        const monthExpenses = await listExpenses(user.id, { year: todayYear, month: todayMonth });
+        const monthTotal = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
+        const result = await sendWhatsAppMonthlyReport(
+          user.phone,
+          `${MONTH_NAMES[todayMonth - 1]} ${todayYear}`,
+          fmtRs(monthTotal)
+        );
+        if (result.ok) {
+          monthEndReportsSent++;
+        } else {
+          errors.push(`month-end report (added subscriptions expense: ${added}): ${result.error}`);
+        }
+      }
+    }
   }
 
-  return NextResponse.json({ ok: true, remindersSent, errors });
+  return NextResponse.json({ ok: true, remindersSent, monthEndReportsSent, errors });
 }

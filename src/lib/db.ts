@@ -298,6 +298,49 @@ function rowToExpense(r: Record<string, unknown>): Expense {
   };
 }
 
+// Idempotent: skips insertion if a subscriptions-total expense already
+// exists for this user in this month, so a re-run of the month-end cron
+// (retry, redeploy) never double-books it.
+export async function ensureMonthlySubscriptionsExpense(
+  userId: string,
+  year: number,
+  month: number,
+  total: number
+): Promise<boolean> {
+  if (total <= 0) return false;
+  const c = await db();
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  const existing = await c.execute({
+    sql: `SELECT id FROM expenses WHERE user_id = ? AND category = 'Subscriptions' AND expense_date LIKE ?`,
+    args: [userId, `${prefix}%`],
+  });
+  if (existing.rows.length > 0) return false;
+
+  const lastDay = new Date(year, month, 0).getDate();
+  const expenseDate = `${prefix}-${String(lastDay).padStart(2, "0")}`;
+  await c.execute({
+    sql: `INSERT INTO expenses (id, user_id, amount, note, expense_date, expense_datetime, created_at, vendor, category)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      randomUUID(),
+      userId,
+      total,
+      `Subscriptions total (${MONTH_NAMES_FULL[month - 1]} ${year})`,
+      expenseDate,
+      `${expenseDate}T00:00:00Z`,
+      new Date().toISOString(),
+      null,
+      "Subscriptions",
+    ],
+  });
+  return true;
+}
+
+const MONTH_NAMES_FULL = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
 export type YearlyPoint = { month: number; total: number; count: number };
 
 export async function yearlyExpenseTotals(userId: string, year: number): Promise<YearlyPoint[]> {
@@ -494,18 +537,6 @@ export async function createSubscription(
   });
 
   return { id, user_id: userId, name, amount, due_day, logo_url: logo_url || null, active: true, created_at };
-}
-
-export async function setSubscriptionActive(
-  subscriptionId: string,
-  userId: string,
-  active: boolean
-): Promise<void> {
-  const c = await db();
-  await c.execute({
-    sql: `UPDATE subscriptions SET active = ? WHERE id = ? AND user_id = ?`,
-    args: [active ? 1 : 0, subscriptionId, userId],
-  });
 }
 
 export async function markSubscriptionPaid(subscriptionId: string, userId: string): Promise<void> {

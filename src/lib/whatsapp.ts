@@ -2,14 +2,16 @@
 // business-initiated message (not a reply inside a live 24-hour customer
 // conversation window), so it MUST go through a pre-approved message
 // template - a free-form text message would be rejected outside that
-// window. This expects a template named "subscription_due_reminder",
-// category Utility, approved in WhatsApp Manager, with a static header
-// ("Subscription Reminder from Chattha Technologies") and body:
-//   "Hi! This is a reminder that your {{sub_name}} subscription payment of
-//   {{amount}} is due {{due_when}}. Please make sure you have funds ready
-//   to avoid any interruption."
-// Meta's newer templates require named (not positional {{1}}/{{2}}) body
-// variables, sent via `parameter_name` matching the template exactly.
+// window. This expects a template named "subscription_duedate_reminder",
+// category Utility, approved in WhatsApp Manager, with a dynamic header
+// ("{{sub_name}} Subscription Reminder") and body:
+//   "Hi Walli! This is a reminder that your {{sub_name}} payment of
+//   {{amount}} is due on {{due_when}}. Please make sure you have funds
+//   ready to avoid any interruption."
+// This template uses Meta's "Name" (named, not positional {{1}}/{{2}})
+// variable format, sent via `parameter_name` matching the template exactly
+// - and sub_name appears in both the header and body components, each of
+// which needs its own parameters array.
 //
 // Needs WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN set - one shared
 // sending number + permanent access token for the whole app, not per-user.
@@ -67,13 +69,41 @@ export async function sendWhatsAppReminder(
   amount: string,
   when: "today" | "tomorrow"
 ): Promise<WhatsAppSendResult> {
-  return sendTemplate(phone, "subscription_due_reminder", "en_US", [
+  return sendTemplate(phone, "subscription_duedate_reminder", "en_US", [
+    {
+      type: "header",
+      parameters: [{ type: "text", parameter_name: "sub_name", text: subscriptionName }],
+    },
     {
       type: "body",
       parameters: [
         { type: "text", parameter_name: "sub_name", text: subscriptionName },
         { type: "text", parameter_name: "amount", text: amount },
         { type: "text", parameter_name: "due_when", text: when },
+      ],
+    },
+  ]);
+}
+
+// This expects a template named "monthly_expense_report", category Utility,
+// approved in WhatsApp Manager, with a static header ("Monthly Expense
+// Report") and body:
+//   "Hi Walli! Here's your expense report for {{1}}: *Total expenses*:
+//   {{2}}"
+// Unlike subscription_duedate_reminder, this template uses Meta's "Number"
+// (positional {{1}}/{{2}}) variable format - parameters are matched by
+// array order, so `parameter_name` must be omitted here.
+export async function sendWhatsAppMonthlyReport(
+  phone: string,
+  month: string,
+  total: string
+): Promise<WhatsAppSendResult> {
+  return sendTemplate(phone, "monthly_expense_report", "en_US", [
+    {
+      type: "body",
+      parameters: [
+        { type: "text", text: month },
+        { type: "text", text: total },
       ],
     },
   ]);

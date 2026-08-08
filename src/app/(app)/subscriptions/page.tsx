@@ -500,7 +500,22 @@ export default function Subscriptions() {
     setForm(emptyForm());
   }, []);
 
-  const activeSubscriptions = subscriptions.filter((s) => s.active);
+  // due-today first (most urgent), then due-soon, upcoming, and paid last;
+  // ties broken by due date so the soonest within a status bubbles up.
+  const STATUS_ORDER: Record<Subscription["status"], number> = {
+    "due-today": 0,
+    "due-soon": 1,
+    upcoming: 2,
+    paid: 3,
+    inactive: 4,
+  };
+  const activeSubscriptions = subscriptions
+    .filter((s) => s.active)
+    .sort(
+      (a, b) =>
+        STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+        a.current_due_date.localeCompare(b.current_due_date)
+    );
   const inactiveSubscriptions = subscriptions.filter((s) => !s.active);
   const monthlyTotal = activeSubscriptions.reduce((sum, sub) => sum + sub.amount, 0);
   const statusColors = {
