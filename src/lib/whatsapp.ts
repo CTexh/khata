@@ -69,7 +69,7 @@ export async function sendWhatsAppReminder(
   amount: string,
   when: "today" | "tomorrow"
 ): Promise<WhatsAppSendResult> {
-  return sendTemplate(phone, "subscription_duedate_reminder", "en_US", [
+  return sendTemplate(phone, "subscription_duedate_reminder", "en", [
     {
       type: "header",
       parameters: [{ type: "text", parameter_name: "sub_name", text: subscriptionName }],
@@ -98,7 +98,7 @@ export async function sendWhatsAppMonthlyReport(
   month: string,
   total: string
 ): Promise<WhatsAppSendResult> {
-  return sendTemplate(phone, "monthly_expense_report", "en_US", [
+  return sendTemplate(phone, "monthly_expense_report", "en", [
     {
       type: "body",
       parameters: [
