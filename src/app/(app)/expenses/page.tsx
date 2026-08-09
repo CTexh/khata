@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Expense, YearlyPoint } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
-import { WhatsAppIcon } from "@/components/icons";
 
 type View = "month" | "year";
 
@@ -799,21 +798,6 @@ export default function ExpensesPage() {
   const [adding, setAdding] = useState(false);
   const [viewingDetail, setViewingDetail] = useState<Expense | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [sendingReport, setSendingReport] = useState(false);
-  const [reportMsg, setReportMsg] = useState<{ text: string; bad?: boolean } | null>(null);
-
-  const sendWhatsAppReport = async () => {
-    setSendingReport(true);
-    setReportMsg(null);
-    const res = await fetch("/api/expenses/whatsapp-report", { method: "POST" });
-    setSendingReport(false);
-    if (res.ok) {
-      setReportMsg({ text: "Sent — check WhatsApp." });
-    } else {
-      const j = await res.json().catch(() => ({}));
-      setReportMsg({ text: j.error ?? "Couldn't send.", bad: true });
-    }
-  };
 
   const navMonth = (dir: -1 | 1) => {
     let m = month + dir;
@@ -838,32 +822,13 @@ export default function ExpensesPage() {
 
   return (
     <>
-      {!adding && !viewingDetail && (
-        <div className="flex flex-col items-end -mt-2 gap-2">
+      <div className="flex items-center justify-end -mt-2">
+        {!adding && !viewingDetail && (
           <button className="btn btn-expense" onClick={() => setAdding(true)}>
             Log expense
           </button>
-          <button
-            className="btn btn-whatsapp !p-0 w-11 h-11"
-            onClick={sendWhatsAppReport}
-            disabled={sendingReport}
-            aria-label="Send current total to WhatsApp"
-            title="Send current total to WhatsApp"
-          >
-            <WhatsAppIcon size={19} className={sendingReport ? undefined : "btn-whatsapp-icon"} />
-          </button>
-        </div>
-      )}
-
-      {reportMsg && !adding && !viewingDetail && (
-        <p
-          className="text-[13px] -mt-2 text-right"
-          style={{ color: reportMsg.bad ? "var(--bad)" : "var(--good)" }}
-          role="status"
-        >
-          {reportMsg.text}
-        </p>
-      )}
+        )}
+      </div>
 
       {adding && (
         <ExpenseForm
