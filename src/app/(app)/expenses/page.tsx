@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Expense, YearlyPoint } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
+import { WhatsAppIcon } from "@/components/icons";
 
 type View = "month" | "year";
 
@@ -838,24 +839,25 @@ export default function ExpensesPage() {
   return (
     <>
       {!adding && !viewingDetail && (
-        <div className="flex items-center justify-between -mt-2 gap-2">
+        <div className="flex flex-col items-end -mt-2 gap-2">
+          <button className="btn btn-expense" onClick={() => setAdding(true)}>
+            Log expense
+          </button>
           <button
-            className="btn btn-ghost !py-2 text-[13px]"
+            className="btn btn-whatsapp !py-2 text-[13px]"
             onClick={sendWhatsAppReport}
             disabled={sendingReport}
             aria-label="Send current total to WhatsApp"
           >
-            {sendingReport ? "Sending…" : "📤 WhatsApp total"}
-          </button>
-          <button className="btn btn-expense" onClick={() => setAdding(true)}>
-            Log expense
+            <WhatsAppIcon size={15} className={sendingReport ? undefined : "btn-whatsapp-icon"} />
+            {sendingReport ? "Sending…" : "WhatsApp total"}
           </button>
         </div>
       )}
 
       {reportMsg && !adding && !viewingDetail && (
         <p
-          className="text-[13px] -mt-2"
+          className="text-[13px] -mt-2 text-right"
           style={{ color: reportMsg.bad ? "var(--bad)" : "var(--good)" }}
           role="status"
         >

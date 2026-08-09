@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar } from "@/components/Avatar";
+import { EditIcon } from "@/components/icons";
 
 type CurrentUser = { id: string; username: string; isAdmin: boolean };
 
@@ -114,7 +115,7 @@ function EditProfileModal({ onClose }: { onClose: () => void }) {
                 Close
               </button>
               <button className="btn btn-primary" disabled={saving}>
-                {saving ? "Saving…" : "💾 Save"}
+                {saving ? "Saving…" : "Save"}
               </button>
             </div>
           </form>
@@ -214,9 +215,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         setMenuOpen(false);
                         setProfileOpen(true);
                       }}
-                      className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-lg text-[13px] cursor-pointer"
+                      className="w-full min-h-12 flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] cursor-pointer"
                     >
-                      ✏️ Edit Profile
+                      <EditIcon size={16} className="shrink-0" />
+                      Edit Profile
                     </button>
                     <button
                       onClick={logout}

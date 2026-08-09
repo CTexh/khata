@@ -361,6 +361,35 @@ body::after {
   box-shadow: 0 10px 26px rgba(109, 40, 217, 0.45), inset 0 -2px 6px rgba(30, 0, 60, 0.25);
 }
 
+/* WhatsApp brand action — send report */
+.btn-whatsapp {
+  background: linear-gradient(135deg, #25d366, #128c7e);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(18, 140, 126, 0.35), inset 0 -2px 6px rgba(0, 40, 30, 0.25);
+}
+.btn-whatsapp:hover {
+  box-shadow: 0 10px 26px rgba(18, 140, 126, 0.45), inset 0 -2px 6px rgba(0, 40, 30, 0.25);
+}
+.btn-whatsapp-icon {
+  animation: whatsapp-pulse 2.2s ease-in-out infinite;
+}
+@keyframes whatsapp-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.75;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-whatsapp-icon {
+    animation: none;
+  }
+}
+
 /* liquid glass icon button — for nav arrows etc; keeps the specular sheen + shine sweep */
 .btn-nav {
   background: linear-gradient(135deg, var(--surface-2), var(--surface));
