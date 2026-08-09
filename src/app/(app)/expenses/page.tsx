@@ -844,13 +844,13 @@ export default function ExpensesPage() {
             Log expense
           </button>
           <button
-            className="btn btn-whatsapp !py-2 text-[13px]"
+            className="btn btn-whatsapp !p-0 w-11 h-11"
             onClick={sendWhatsAppReport}
             disabled={sendingReport}
             aria-label="Send current total to WhatsApp"
+            title="Send current total to WhatsApp"
           >
-            <WhatsAppIcon size={15} className={sendingReport ? undefined : "btn-whatsapp-icon"} />
-            {sendingReport ? "Sending…" : "WhatsApp total"}
+            <WhatsAppIcon size={19} className={sendingReport ? undefined : "btn-whatsapp-icon"} />
           </button>
         </div>
       )}

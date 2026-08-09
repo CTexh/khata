@@ -53,15 +53,6 @@ export function RepeatIcon({ size = 24, className }: IconProps) {
   );
 }
 
-export function EditIcon({ size = 24, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>
-      <path {...base} d="M4 20.5h4L18.5 10 15 6.5 4.5 17v3.5Z" />
-      <path {...base} d="M13.2 8.3 16.7 11.8" />
-    </svg>
-  );
-}
-
 export function WhatsAppIcon({ size = 24, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden fill="currentColor">
