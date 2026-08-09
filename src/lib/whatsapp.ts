@@ -50,8 +50,7 @@ async function sendTemplate(
   if (res.ok) return { ok: true };
 
   // Surface Meta's actual error (invalid token, unapproved template, phone
-  // not registered, etc.) instead of a generic failure - this is what
-  // /api/settings/notifications/test returns to the Settings page.
+  // not registered, etc.) instead of a generic failure.
   const body = await res.text();
   let error = body;
   try {

@@ -90,12 +90,13 @@ export async function findUserById(id: string): Promise<User | null> {
   };
 }
 
-export async function updateUserNotificationSettings(userId: string, phone: string): Promise<void> {
+export async function updateUserProfile(userId: string, name: string, phone: string): Promise<void> {
+  await ensureUserNameColumn();
   await ensureUserNotificationColumns();
   const c = await db();
   await c.execute({
-    sql: "UPDATE users SET phone = ? WHERE id = ?",
-    args: [phone || null, userId],
+    sql: "UPDATE users SET name = ?, phone = ? WHERE id = ?",
+    args: [name || null, phone || null, userId],
   });
 }
 

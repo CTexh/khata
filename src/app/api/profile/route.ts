@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { findUserById, updateUserNotificationSettings } from "@/lib/db";
+import { findUserById, updateUserProfile } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const user = await findUserById(session.userId);
-  return NextResponse.json({ phone: user?.phone ?? "" });
+  return NextResponse.json({ name: user?.name ?? "", phone: user?.phone ?? "" });
 }
 
 export async function PATCH(req: Request) {
@@ -17,8 +17,9 @@ export async function PATCH(req: Request) {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await req.json();
+  const name = String(body.name ?? "").trim();
   const phone = String(body.phone ?? "").trim();
 
-  await updateUserNotificationSettings(session.userId, phone);
+  await updateUserProfile(session.userId, name, phone);
   return NextResponse.json({ success: true });
 }

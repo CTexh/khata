@@ -798,6 +798,21 @@ export default function ExpensesPage() {
   const [adding, setAdding] = useState(false);
   const [viewingDetail, setViewingDetail] = useState<Expense | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sendingReport, setSendingReport] = useState(false);
+  const [reportMsg, setReportMsg] = useState<{ text: string; bad?: boolean } | null>(null);
+
+  const sendWhatsAppReport = async () => {
+    setSendingReport(true);
+    setReportMsg(null);
+    const res = await fetch("/api/expenses/whatsapp-report", { method: "POST" });
+    setSendingReport(false);
+    if (res.ok) {
+      setReportMsg({ text: "Sent — check WhatsApp." });
+    } else {
+      const j = await res.json().catch(() => ({}));
+      setReportMsg({ text: j.error ?? "Couldn't send.", bad: true });
+    }
+  };
 
   const navMonth = (dir: -1 | 1) => {
     let m = month + dir;
@@ -822,13 +837,31 @@ export default function ExpensesPage() {
 
   return (
     <>
-      <div className="flex items-center justify-end -mt-2">
-        {!adding && !viewingDetail && (
+      {!adding && !viewingDetail && (
+        <div className="flex items-center justify-between -mt-2 gap-2">
+          <button
+            className="btn btn-ghost !py-2 text-[13px]"
+            onClick={sendWhatsAppReport}
+            disabled={sendingReport}
+            aria-label="Send current total to WhatsApp"
+          >
+            {sendingReport ? "Sending…" : "📤 WhatsApp total"}
+          </button>
           <button className="btn btn-expense" onClick={() => setAdding(true)}>
             Log expense
           </button>
-        )}
-      </div>
+        </div>
+      )}
+
+      {reportMsg && !adding && !viewingDetail && (
+        <p
+          className="text-[13px] -mt-2"
+          style={{ color: reportMsg.bad ? "var(--bad)" : "var(--good)" }}
+          role="status"
+        >
+          {reportMsg.text}
+        </p>
+      )}
 
       {adding && (
         <ExpenseForm

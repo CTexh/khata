@@ -9,6 +9,121 @@ import { Avatar } from "@/components/Avatar";
 
 type CurrentUser = { id: string; username: string; isAdmin: boolean };
 
+function EditProfileModal({ onClose }: { onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/profile")
+      .then((r) => r.json())
+      .then((d) => {
+        setName(d.name ?? "");
+        setPhone(d.phone ?? "");
+        setLoading(false);
+      });
+  }, []);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setMsg(null);
+    const res = await fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, phone }),
+    });
+    setSaving(false);
+    setMsg(res.ok ? { text: "Saved." } : { text: "Couldn't save — try again.", bad: true });
+  };
+
+  return (
+    <div
+      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-hidden backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.75)", overscrollBehavior: "none" }}
+      onClick={onClose}
+    >
+      <div
+        className="modal-panel card rise w-full max-w-sm overflow-y-auto"
+        style={{ color: "var(--ink)", overscrollBehavior: "contain" }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-profile-title"
+      >
+        <div
+          className="flex items-center justify-between p-5 border-b"
+          style={{ borderColor: "var(--hairline)" }}
+        >
+          <h2 id="edit-profile-title" className="text-[16px] font-semibold">
+            Edit Profile
+          </h2>
+          <button
+            onClick={onClose}
+            type="button"
+            aria-label="Close"
+            className="inline-flex h-10 w-10 items-center justify-center text-[20px] opacity-50 hover:opacity-100 transition"
+          >
+            ✕
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="p-5 text-[13px]" style={{ color: "var(--muted)" }}>
+            Loading…
+          </div>
+        ) : (
+          <form onSubmit={save} className="p-5 flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+                Name
+              </label>
+              <input
+                className="field"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+                WhatsApp number
+              </label>
+              <input
+                className="field"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+923001234567"
+              />
+              <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+                Used for subscription reminders and expense reports.
+              </p>
+            </div>
+
+            {msg && (
+              <p className="text-[13px]" style={{ color: msg.bad ? "var(--bad)" : "var(--good)" }} role="status">
+                {msg.text}
+              </p>
+            )}
+
+            <div className="form-actions">
+              <button type="button" className="btn btn-ghost" onClick={onClose}>
+                Close
+              </button>
+              <button className="btn btn-primary" disabled={saving}>
+                {saving ? "Saving…" : "💾 Save"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const NAV_ITEMS = [
   { href: "/", label: "Home", icon: "" },
   { href: "/expenses", label: "Mera Khata", icon: "" },
@@ -19,6 +134,7 @@ const NAV_ITEMS = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
 
@@ -91,14 +207,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         </span>
                       )}
                     </p>
-                    <Link
-                      href="/settings"
+                    <button
+                      type="button"
                       role="menuitem"
-                      onClick={() => setMenuOpen(false)}
-                      className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-lg text-[13px]"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setProfileOpen(true);
+                      }}
+                      className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-lg text-[13px] cursor-pointer"
                     >
-                      ⚙ Settings
-                    </Link>
+                      ✏️ Edit Profile
+                    </button>
                     <button
                       onClick={logout}
                       role="menuitem"
@@ -138,6 +257,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main id="main-content" className="contents">{children}</main>
       </div>
+      {profileOpen && <EditProfileModal onClose={() => setProfileOpen(false)} />}
     </>
   );
 }
