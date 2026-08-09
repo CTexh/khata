@@ -50,13 +50,13 @@ export default function SettingsPage() {
     );
   };
 
-  const sendTest = async () => {
+  const sendTest = async (type: "subscription" | "monthly_report") => {
     setTesting(true);
     setTestMsg(null);
     const res = await fetch("/api/settings/notifications/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify({ phone, type }),
     });
     setTesting(false);
     if (res.ok) {
@@ -81,9 +81,8 @@ export default function SettingsPage() {
       <form onSubmit={save} className="card p-5 rise flex flex-col gap-3 mt-4">
         <p className="font-semibold">WhatsApp reminders</p>
         <p className="text-[13px]" style={{ color: "var(--muted)" }}>
-          Sent via Meta&apos;s official WhatsApp Business Cloud API. While the app is in
-          development mode, your number needs to be added as a test recipient in the Meta
-          Developer dashboard before messages will deliver.
+          Sent via Meta&apos;s official WhatsApp Business Cloud API - a due-date nudge the day
+          before and the day of, plus an end-of-month expense report.
         </p>
 
         <input
@@ -104,10 +103,18 @@ export default function SettingsPage() {
           <button
             type="button"
             className="btn btn-ghost !py-2 text-[12px]"
-            onClick={sendTest}
+            onClick={() => sendTest("subscription")}
             disabled={testing || !phone}
           >
-            {testing ? "Sending…" : "Send test message"}
+            {testing ? "Sending…" : "Send test reminder"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost !py-2 text-[12px]"
+            onClick={() => sendTest("monthly_report")}
+            disabled={testing || !phone}
+          >
+            {testing ? "Sending…" : "Send test expense report"}
           </button>
           <button className="btn btn-primary" disabled={saving}>
             {saving ? "Saving…" : "💾 Save"}
