@@ -394,30 +394,6 @@ const MONTH_NAMES_FULL = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-export type YearlyPoint = { month: number; total: number; count: number };
-
-export async function yearlyExpenseTotals(userId: string, year: number): Promise<YearlyPoint[]> {
-  const c = await db();
-  const rs = await c.execute({
-    sql: `
-      SELECT substr(expense_date, 6, 2) AS month, SUM(amount) AS total, COUNT(*) AS count
-      FROM expenses
-      WHERE user_id = ? AND expense_date >= ? AND expense_date < ?
-      GROUP BY month
-    `,
-    args: [userId, `${year}-01-01`, `${year + 1}-01-01`],
-  });
-  const map = new Map<number, YearlyPoint>();
-  for (const r of rs.rows) {
-    const m = Number(r.month);
-    map.set(m, { month: m, total: Number(r.total), count: Number(r.count) });
-  }
-  return Array.from({ length: 12 }, (_, i) => {
-    const m = i + 1;
-    return map.get(m) ?? { month: m, total: 0, count: 0 };
-  });
-}
-
 /* ---------- expense categorisation ----------
  * See src/lib/categorize.ts for the deterministic half. This half holds the
  * two layers that need the database: per-vendor rules the user has taught by

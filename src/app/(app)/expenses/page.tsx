@@ -1,10 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Expense, YearlyPoint } from "@/lib/db";
+import type { Expense } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
-
-type View = "month" | "year" | "categories";
 
 // Category colors mapping - optimized for light and dark modes
 const CATEGORY_COLORS: Record<string, { bg: string; darkBg: string; text: string; darkText: string }> = {
@@ -1141,245 +1139,6 @@ function ExpenseRow({
   );
 }
 
-/* ---------- month view ---------- */
-
-function MonthView({
-  year,
-  month,
-  onNav,
-  refreshKey,
-  onViewDetail,
-  onRecategorize,
-}: {
-  year: number;
-  month: number;
-  onNav: (dir: -1 | 1) => void;
-  refreshKey: number;
-  onViewDetail: (e: Expense) => void;
-  onRecategorize: () => void;
-}) {
-  const [expenses, setExpenses] = useState<Expense[] | null>(null);
-  const [search, setSearch] = useState("");
-
-  const load = useCallback(async () => {
-    setExpenses(null);
-    const res = await fetch(`/api/expenses?year=${year}&month=${month}`);
-    setExpenses(await res.json());
-  }, [year, month]);
-
-  useEffect(() => {
-    load();
-  }, [load, refreshKey]);
-
-  const filtered = expenses
-    ?.filter((e) => {
-      if (!search.trim()) return true;
-      const q = search.toLowerCase();
-      return (
-        String(e.amount).includes(q) ||
-        (e.note?.toLowerCase().includes(q) ?? false) ||
-        (e.vendor?.toLowerCase().includes(q) ?? false) ||
-        (e.category?.toLowerCase().includes(q) ?? false)
-      );
-    })
-    .sort((a, b) => new Date(b.expense_datetime || b.expense_date).getTime() - new Date(a.expense_datetime || a.expense_date).getTime());
-
-  const total = filtered?.reduce((s, e) => s + e.amount, 0) ?? 0;
-
-  return (
-    <>
-      <div className="card p-5 sm:p-6 rise">
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => onNav(-1)}
-            aria-label="Previous month"
-            className="btn btn-nav !p-0 w-9 h-9"
-          >
-            ←
-          </button>
-          <p className="font-semibold text-[15px]">
-            {MONTH_NAMES[month - 1]} {year}
-          </p>
-          <button
-            onClick={() => onNav(1)}
-            aria-label="Next month"
-            className="btn btn-nav !p-0 w-9 h-9"
-          >
-            →
-          </button>
-        </div>
-
-        <p className="text-[13px] font-medium" style={{ color: "var(--muted)" }}>
-          {search ? "Filtered total" : "Spent this month"}
-        </p>
-        <p className="hero-num text-4xl font-bold tracking-tight mt-1 tabular">
-          {fmtRs(total)}
-        </p>
-      </div>
-
-      <section className="card p-5 sm:p-6 rise">
-        <div className="flex items-center justify-between mb-4 gap-3">
-          <p className="font-semibold">History</p>
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              type="button"
-              onClick={onRecategorize}
-              className="text-[12px] underline underline-offset-2 cursor-pointer"
-              style={{ color: "var(--muted)" }}
-            >
-              Re-categorise
-            </button>
-            <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-              {filtered?.length ?? 0} {filtered?.length === 1 ? "expense" : "expenses"}
-            </p>
-          </div>
-        </div>
-
-        <input
-          className="field mb-4"
-          aria-label="Search expenses"
-          placeholder="Search by amount, note, vendor, or category…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-
-        {expenses === null ? (
-          <p className="text-[13px] py-4" style={{ color: "var(--muted)" }} role="status">
-            Loading…
-          </p>
-        ) : filtered?.length === 0 ? (
-          <p className="text-[13px] py-4 text-center" style={{ color: "var(--muted)" }}>
-            {search ? "No matching expenses" : `No expenses logged in ${MONTH_NAMES[month - 1]}.`}
-          </p>
-        ) : (
-          <ul className="pb-2">
-            {filtered?.map((e) => (
-              <ExpenseRow
-                key={e.id}
-                expense={e}
-                onView={() => onViewDetail(e)}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-    </>
-  );
-}
-
-/* ---------- yearly bar chart ---------- */
-
-function YearlyChart({ points }: { points: YearlyPoint[] }) {
-  const max = Math.max(...points.map((p) => p.total), 1);
-  const highestIdx = points.reduce(
-    (best, p, i) => (p.total > points[best].total ? i : best),
-    0
-  );
-  const MONTH_ABBR = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
-
-  return (
-    <div className="flex items-end gap-1.5 sm:gap-2.5 h-40 mt-2">
-      {points.map((p, i) => {
-        const h = p.total > 0 ? Math.max((p.total / max) * 100, 4) : 2;
-        const isHighest = i === highestIdx && p.total > 0;
-        return (
-          <div key={p.month} className="flex-1 flex flex-col items-center gap-1.5 h-full">
-            <div className="flex-1 w-full flex items-end">
-              <div
-                className="w-full rounded-t-lg transition-[height] duration-500"
-                style={{
-                  height: `${h}%`,
-                  background: isHighest
-                    ? "linear-gradient(180deg, var(--accent-2), var(--accent))"
-                    : "linear-gradient(180deg, var(--accent), var(--accent-2))",
-                  opacity: isHighest ? 1 : 0.55,
-                  boxShadow: isHighest ? "0 0 14px var(--accent-soft)" : undefined,
-                }}
-                title={`${MONTH_NAMES[i]}: ${fmtRs(p.total)} (${p.count} expense${p.count === 1 ? "" : "s"})`}
-              />
-            </div>
-            <span
-              className="text-[10px] font-medium"
-              style={{ color: isHighest ? "var(--accent)" : "var(--muted)" }}
-            >
-              {MONTH_ABBR[i]}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ---------- year view ---------- */
-
-function YearView({
-  year,
-  onNav,
-  refreshKey,
-}: {
-  year: number;
-  onNav: (dir: -1 | 1) => void;
-  refreshKey: number;
-}) {
-  const [data, setData] = useState<{ yearly: YearlyPoint[] } | null>(null);
-
-  useEffect(() => {
-    setData(null);
-    fetch(`/api/expenses/stats?year=${year}`)
-      .then((r) => r.json())
-      .then(setData);
-  }, [year, refreshKey]);
-
-  const total = data?.yearly.reduce((s, p) => s + p.total, 0) ?? 0;
-  const highest = data?.yearly.reduce(
-    (best, p) => (p.total > best.total ? p : best),
-    { month: 1, total: 0, count: 0 }
-  );
-
-  return (
-    <div className="card p-5 sm:p-6 rise">
-      <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={() => onNav(-1)}
-          aria-label="Previous year"
-          className="btn btn-nav !p-0 w-9 h-9"
-        >
-          ←
-        </button>
-        <p className="font-semibold text-[15px]">{year}</p>
-        <button
-          onClick={() => onNav(1)}
-          aria-label="Next year"
-          className="btn btn-nav !p-0 w-9 h-9"
-        >
-          →
-        </button>
-      </div>
-
-      <p className="text-[13px] font-medium" style={{ color: "var(--muted)" }}>
-        Spent in {year}
-      </p>
-      <p className="hero-num text-4xl font-bold tracking-tight mt-1 tabular">{fmtRs(total)}</p>
-
-      {data ? <YearlyChart points={data.yearly} /> : <div className="h-40 mt-2" />}
-
-      {highest && highest.total > 0 && (
-        <div className="tile px-3 py-2.5 mt-5 inline-flex">
-          <div>
-            <p className="text-[11px] font-medium" style={{ color: "var(--muted)" }}>
-              Highest-spending month
-            </p>
-            <p className="text-sm font-semibold mt-0.5">
-              {MONTH_NAMES[highest.month - 1]} — <span className="tabular">{fmtRs(highest.total)}</span>
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ---------- category report ---------- */
 
 type CategoryPoint = { category: string; total: number; count: number };
@@ -1522,12 +1281,18 @@ function CategoryChart({
   );
 }
 
-function CategoriesView({
+// The single expenses view. The breakdown and the history were two pages
+// showing the same period over the same data, so the chart is now the filter
+// for the list beneath it: picking a category narrows the history in place
+// rather than navigating somewhere else.
+function ExpensesView({
   refreshKey,
   onViewDetail,
+  onRecategorize,
 }: {
   refreshKey: number;
   onViewDetail: (e: Expense) => void;
+  onRecategorize: () => void;
 }) {
   const now = new Date();
   const [scope, setScope] = useState<"month" | "year">("month");
@@ -1535,7 +1300,8 @@ function CategoriesView({
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [data, setData] = useState<{ total: number; categories: CategoryPoint[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [rows, setRows] = useState<Expense[] | null>(null);
+  const [expenses, setExpenses] = useState<Expense[] | null>(null);
+  const [search, setSearch] = useState("");
   const { categories, setCategories } = useCategories();
   const [managing, setManaging] = useState(false);
 
@@ -1551,14 +1317,11 @@ function CategoriesView({
   }, [year, month, scope, monthParam, refreshKey]);
 
   useEffect(() => {
-    if (!selected) {
-      setRows(null);
-      return;
-    }
-    setRows(null);
-    fetch(`/api/expenses?year=${year}${monthParam}&category=${encodeURIComponent(selected)}`)
+    setExpenses(null);
+    const categoryParam = selected ? `&category=${encodeURIComponent(selected)}` : "";
+    fetch(`/api/expenses?year=${year}${monthParam}${categoryParam}`)
       .then((r) => r.json())
-      .then(setRows);
+      .then(setExpenses);
   }, [selected, year, month, scope, monthParam, refreshKey]);
 
   const nav = (dir: -1 | 1) => {
@@ -1578,6 +1341,26 @@ function CategoriesView({
     setMonth(m);
     setYear(y);
   };
+
+  const filtered = expenses
+    ?.filter((e) => {
+      if (!search.trim()) return true;
+      const q = search.toLowerCase();
+      return (
+        String(e.amount).includes(q) ||
+        (e.note?.toLowerCase().includes(q) ?? false) ||
+        (e.vendor?.toLowerCase().includes(q) ?? false) ||
+        (e.category?.toLowerCase().includes(q) ?? false)
+      );
+    })
+    .sort(
+      (a, b) =>
+        new Date(b.expense_datetime || b.expense_date).getTime() -
+        new Date(a.expense_datetime || a.expense_date).getTime()
+    );
+
+  const shownTotal = filtered?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
+  const isNarrowed = Boolean(selected) || Boolean(search.trim());
 
   const exportHref = `/api/expenses/export?year=${year}${monthParam}${
     selected ? `&category=${encodeURIComponent(selected)}` : ""
@@ -1679,50 +1462,77 @@ function CategoriesView({
         />
       )}
 
-      {selected && (
-        <section className="card p-5 sm:p-6 rise">
-          <div className="flex items-center justify-between mb-4 gap-3">
-            <div className="min-w-0">
-              <p className="font-semibold truncate">{selected}</p>
+      <section className="card p-5 sm:p-6 rise">
+        <div className="flex items-center justify-between mb-4 gap-3">
+          <div className="min-w-0">
+            <p className="font-semibold truncate">{selected ?? "History"}</p>
+            {isNarrowed && (
               <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-                {periodLabel}
+                {filtered?.length ?? 0} of {expenses?.length ?? 0} · {fmtRs(shownTotal)}
               </p>
-            </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            {selected && (
+              <button
+                type="button"
+                onClick={() => setSelected(null)}
+                className="btn btn-ghost !py-2 !px-3 text-[12px]"
+              >
+                Clear
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setSelected(null)}
-              className="btn btn-ghost !py-2 !px-3 text-[12px] shrink-0"
+              onClick={onRecategorize}
+              className="text-[12px] underline underline-offset-2 cursor-pointer"
+              style={{ color: "var(--muted)" }}
             >
-              Clear
+              Re-categorise
             </button>
+            {!isNarrowed && (
+              <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+                {filtered?.length ?? 0} {filtered?.length === 1 ? "expense" : "expenses"}
+              </p>
+            )}
           </div>
+        </div>
 
-          {rows === null ? (
-            <p className="text-[13px] py-4" style={{ color: "var(--muted)" }} role="status">
-              Loading…
-            </p>
-          ) : rows.length === 0 ? (
-            <p className="text-[13px] py-4 text-center" style={{ color: "var(--muted)" }}>
-              Nothing here.
-            </p>
-          ) : (
-            <ul className="pb-2">
-              {rows.map((e) =>
-                selected === "Uncategorised" ? (
-                  <ReviewRow
-                    key={e.id}
-                    expense={e}
-                    categories={categories}
-                    onAssigned={() => setRows((cur) => cur?.filter((r) => r.id !== e.id) ?? null)}
-                  />
-                ) : (
-                  <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} />
-                )
-              )}
-            </ul>
-          )}
-        </section>
-      )}
+        <input
+          className="field mb-4"
+          aria-label="Search expenses"
+          placeholder="Search by amount, note, vendor, or category…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        {expenses === null ? (
+          <p className="text-[13px] py-4" style={{ color: "var(--muted)" }} role="status">
+            Loading…
+          </p>
+        ) : filtered?.length === 0 ? (
+          <p className="text-[13px] py-4 text-center" style={{ color: "var(--muted)" }}>
+            {search ? "No matching expenses" : `No expenses in ${periodLabel}.`}
+          </p>
+        ) : (
+          <ul className="pb-2">
+            {filtered?.map((e) =>
+              selected === "Uncategorised" ? (
+                <ReviewRow
+                  key={e.id}
+                  expense={e}
+                  categories={categories}
+                  onAssigned={() =>
+                    setExpenses((cur) => cur?.filter((r) => r.id !== e.id) ?? null)
+                  }
+                />
+              ) : (
+                <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} />
+              )
+            )}
+          </ul>
+        )}
+      </section>
     </>
   );
 }
@@ -1730,37 +1540,12 @@ function CategoriesView({
 /* ---------- page ---------- */
 
 export default function ExpensesPage() {
-  const now = new Date();
-  const [view, setView] = useState<View>("month");
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [chartYear, setChartYear] = useState(now.getFullYear());
   const [adding, setAdding] = useState(false);
   const [viewingDetail, setViewingDetail] = useState<Expense | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [recategorizing, setRecategorizing] = useState(false);
 
-  const navMonth = (dir: -1 | 1) => {
-    let m = month + dir;
-    let y = year;
-    if (m < 1) {
-      m = 12;
-      y -= 1;
-    } else if (m > 12) {
-      m = 1;
-      y += 1;
-    }
-    setMonth(m);
-    setYear(y);
-  };
-
   const refresh = () => setRefreshKey((k) => k + 1);
-
-  const views: { id: View; label: string }[] = [
-    { id: "month", label: "This month" },
-    { id: "year", label: "Yearly" },
-    { id: "categories", label: "Categories" },
-  ];
 
   return (
     <>
@@ -1808,38 +1593,11 @@ export default function ExpensesPage() {
         />
       )}
 
-      <div className="flex items-center gap-2">
-        {views.map((v) => (
-          <button
-            key={v.id}
-            onClick={() => setView(v.id)}
-            className={`btn !py-2 text-[13px] ${view === v.id ? "btn-primary" : "btn-ghost"}`}
-          >
-            {v.label}
-          </button>
-        ))}
-      </div>
-
-      {view === "month" && (
-        <MonthView
-          year={year}
-          month={month}
-          onNav={navMonth}
-          refreshKey={refreshKey}
-          onViewDetail={setViewingDetail}
-          onRecategorize={() => setRecategorizing(true)}
-        />
-      )}
-      {view === "categories" && (
-        <CategoriesView refreshKey={refreshKey} onViewDetail={setViewingDetail} />
-      )}
-      {view === "year" && (
-        <YearView
-          year={chartYear}
-          onNav={(dir) => setChartYear((y) => y + dir)}
-          refreshKey={refreshKey}
-        />
-      )}
+      <ExpensesView
+        refreshKey={refreshKey}
+        onViewDetail={setViewingDetail}
+        onRecategorize={() => setRecategorizing(true)}
+      />
 
       <footer className="text-center text-[12px] py-4" style={{ color: "var(--muted)" }}>
         Mera Khata · your everyday spending, sorted
