@@ -172,12 +172,13 @@ export async function POST() {
   const { changes } = await planChanges(session.userId);
   const c = await db();
 
-  for (const ch of changes) {
-    await c.execute({
-      sql: "UPDATE expenses SET category = ?, vendor_key = ? WHERE id = ? AND user_id = ?",
-      args: [ch.to, ch.vendorKey || null, ch.id, session.userId],
-    });
-  }
+  // One statement per row meant one network round trip per row against a
+  // remote database - a few hundred expenses was enough to run past the
+  // function's time limit. Batches of 200 keep the whole pass to a few trips.
+  const statements: { sql: string; args: unknown[] }[] = changes.map((ch) => ({
+    sql: "UPDATE expenses SET category = ?, vendor_key = ? WHERE id = ? AND user_id = ?",
+    args: [ch.to, ch.vendorKey || null, ch.id, session.userId],
+  }));
 
   // Fill vendor_key for everything else that was already categorised right.
   const rest = await c.execute({
@@ -187,10 +188,14 @@ export async function POST() {
   for (const r of rest.rows) {
     const key = normalizeVendor(r.vendor as string | null);
     if (!key) continue;
-    await c.execute({
+    statements.push({
       sql: "UPDATE expenses SET vendor_key = ? WHERE id = ? AND user_id = ?",
       args: [key, r.id as string, session.userId],
     });
+  }
+
+  for (let i = 0; i < statements.length; i += 200) {
+    await c.batch(statements.slice(i, i + 200) as never, "write");
   }
 
   return NextResponse.json({ ok: true, updated: changes.length });

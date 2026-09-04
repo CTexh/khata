@@ -326,7 +326,6 @@ export const PEOPLE: PersonRule[] = [
 ];
 
 // Kept for the existing tests/imports that reference family names directly.
-export const FAMILY_MEMBERS = PEOPLE.filter((p) => p.category === "Family").map((p) => p.name);
 
 // Relationship words that identify a payee as family on their own. Matched
 // against the payee/vendor only - never the note - so that a note like

@@ -24,6 +24,24 @@
   --blob-2: rgba(42, 120, 214, 0.32);
   --blob-3: rgba(16, 168, 96, 0.22);
   --inset-hl: rgba(255, 255, 255, 0.45);
+  /* category palette - one hue per category, referenced as
+  var(--cat-<slug>-bg/fg) so nothing has to detect the theme in JS */
+  --cat-default-bg: #e9ecef;         --cat-default-fg: #495057;
+  --cat-uncategorised-bg: #ffedd5;   --cat-uncategorised-fg: #9a3412;
+  --cat-family-bg: #fce7f3;          --cat-family-fg: #9d174d;
+  --cat-donations-bg: #fef3c7;       --cat-donations-fg: #92400e;
+  --cat-groceries-bg: #dcfce7;       --cat-groceries-fg: #15803d;
+  --cat-food-dining-bg: #fff3cd;     --cat-food-dining-fg: #854d0e;
+  --cat-car-bg: #dbeafe;             --cat-car-fg: #1e40af;
+  --cat-tech-bg: #e0f2fe;            --cat-tech-fg: #075985;
+  --cat-shopping-bg: #ffe4e6;        --cat-shopping-fg: #9f1239;
+  --cat-personal-care-bg: #f3e8ff;   --cat-personal-care-fg: #6b21a8;
+  --cat-entertainment-bg: #fae8ff;   --cat-entertainment-fg: #86198f;
+  --cat-medical-bg: #fee2e2;         --cat-medical-fg: #991b1b;
+  --cat-subscriptions-bg: #e0e7ff;   --cat-subscriptions-fg: #3730a3;
+  --cat-investment-bg: #d1fae5;      --cat-investment-fg: #065f46;
+  --cat-rent-bg: #ede9fe;            --cat-rent-fg: #5b21b6;
+  --cat-bills-utilities-bg: #ccfbf1; --cat-bills-utilities-fg: #115e59;
 }
 
 :root[data-theme="dark"] {
@@ -50,6 +68,22 @@
   --blob-2: rgba(42, 120, 214, 0.24);
   --blob-3: rgba(16, 168, 96, 0.16);
   --inset-hl: rgba(255, 255, 255, 0.08);
+  --cat-default-bg: #3a3f46;         --cat-default-fg: #c9cdd6;
+  --cat-uncategorised-bg: #7c2d12;   --cat-uncategorised-fg: #fdba74;
+  --cat-family-bg: #7a2e58;          --cat-family-fg: #f9a8d4;
+  --cat-donations-bg: #78350f;       --cat-donations-fg: #fcd34d;
+  --cat-groceries-bg: #14532d;       --cat-groceries-fg: #86efac;
+  --cat-food-dining-bg: #78502a;     --cat-food-dining-fg: #fde68a;
+  --cat-car-bg: #1e3a8a;             --cat-car-fg: #93c5fd;
+  --cat-tech-bg: #075985;            --cat-tech-fg: #7dd3fc;
+  --cat-shopping-bg: #881337;        --cat-shopping-fg: #fda4af;
+  --cat-personal-care-bg: #581c87;   --cat-personal-care-fg: #d8b4fe;
+  --cat-entertainment-bg: #701a75;   --cat-entertainment-fg: #f5d0fe;
+  --cat-medical-bg: #7f1d1d;         --cat-medical-fg: #fca5a5;
+  --cat-subscriptions-bg: #312e81;   --cat-subscriptions-fg: #a5b4fc;
+  --cat-investment-bg: #064e3b;      --cat-investment-fg: #6ee7b7;
+  --cat-rent-bg: #4c1d95;            --cat-rent-fg: #c4b5fd;
+  --cat-bills-utilities-bg: #134e4a; --cat-bills-utilities-fg: #5eead4;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -77,6 +111,22 @@
     --blob-2: rgba(42, 120, 214, 0.24);
     --blob-3: rgba(16, 168, 96, 0.16);
     --inset-hl: rgba(255, 255, 255, 0.08);
+    --cat-default-bg: #3a3f46;         --cat-default-fg: #c9cdd6;
+    --cat-uncategorised-bg: #7c2d12;   --cat-uncategorised-fg: #fdba74;
+    --cat-family-bg: #7a2e58;          --cat-family-fg: #f9a8d4;
+    --cat-donations-bg: #78350f;       --cat-donations-fg: #fcd34d;
+    --cat-groceries-bg: #14532d;       --cat-groceries-fg: #86efac;
+    --cat-food-dining-bg: #78502a;     --cat-food-dining-fg: #fde68a;
+    --cat-car-bg: #1e3a8a;             --cat-car-fg: #93c5fd;
+    --cat-tech-bg: #075985;            --cat-tech-fg: #7dd3fc;
+    --cat-shopping-bg: #881337;        --cat-shopping-fg: #fda4af;
+    --cat-personal-care-bg: #581c87;   --cat-personal-care-fg: #d8b4fe;
+    --cat-entertainment-bg: #701a75;   --cat-entertainment-fg: #f5d0fe;
+    --cat-medical-bg: #7f1d1d;         --cat-medical-fg: #fca5a5;
+    --cat-subscriptions-bg: #312e81;   --cat-subscriptions-fg: #a5b4fc;
+    --cat-investment-bg: #064e3b;      --cat-investment-fg: #6ee7b7;
+    --cat-rent-bg: #4c1d95;            --cat-rent-fg: #c4b5fd;
+    --cat-bills-utilities-bg: #134e4a; --cat-bills-utilities-fg: #5eead4;
   }
 }
 

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate-db.mjs"
+    "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate-db.mjs",
+    "test": "node --experimental-strip-types scripts/test-categorize.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

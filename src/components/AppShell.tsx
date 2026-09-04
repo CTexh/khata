@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -18,12 +18,13 @@ function EditProfileModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     fetch("/api/profile")
-      .then((r) => r.json())
+      .then(async (r): Promise<{ name?: string; phone?: string }> => (r.ok ? r.json() : {}))
       .then((d) => {
         setName(d.name ?? "");
         setPhone(d.phone ?? "");
-        setLoading(false);
-      });
+      })
+      // A failed load must still clear the spinner, or the form never appears.
+      .finally(() => setLoading(false));
   }, []);
 
   const save = async (e: React.FormEvent) => {
@@ -136,18 +137,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
-  const router = useRouter();
 
   useEffect(() => {
     fetch("/api/auth/me")
-      .then((r) => r.json())
-      .then((d) => setUser(d.user));
+      .then((r) => (r.ok ? r.json() : { user: null }))
+      .then((d) => setUser(d.user))
+      .catch(() => setUser(null));
   }, []);
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
+    // A full page load rather than a client-side push, so nothing the previous
+    // account cached in module state (the shared category list, for one) can
+    // outlive the session and be shown to whoever signs in next.
+    window.location.href = "/login";
   };
 
   const items = user?.isAdmin

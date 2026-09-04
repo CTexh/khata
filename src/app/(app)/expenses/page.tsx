@@ -1,55 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Expense } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
 
-// Category colors mapping - optimized for light and dark modes
-const CATEGORY_COLORS: Record<string, { bg: string; darkBg: string; text: string; darkText: string }> = {
-  "Food & Dining": { bg: "#FFF3CD", darkBg: "#8B6F47", text: "#856404", darkText: "#FFE66D" },
-  Food: { bg: "#FFF3CD", darkBg: "#8B6F47", text: "#856404", darkText: "#FFE66D" },
-  Transport: { bg: "#D1ECF1", darkBg: "#0D5470", text: "#0C5460", darkText: "#A8E6FF" },
-  Shopping: { bg: "#F8D7DA", darkBg: "#7A2B2B", text: "#721C24", darkText: "#FF6B6B" },
-  Utilities: { bg: "#D4EDDA", darkBg: "#2D5C3E", text: "#155724", darkText: "#6FD676" },
-  Entertainment: { bg: "#E2E3E5", darkBg: "#505050", text: "#383D41", darkText: "#C8C8C8" },
-  Healthcare: { bg: "#F8D7DA", darkBg: "#7A2B2B", text: "#721C24", darkText: "#FF6B6B" },
-  Travel: { bg: "#D1ECF1", darkBg: "#0D5470", text: "#0C5460", darkText: "#A8E6FF" },
-  Groceries: { bg: "#D4EDDA", darkBg: "#2D5C3E", text: "#155724", darkText: "#6FD676" },
-  Restaurants: { bg: "#FFF3CD", darkBg: "#8B6F47", text: "#856404", darkText: "#FFE66D" },
-  "Mobile Wallet Transfer": { bg: "#CCE5FF", darkBg: "#1E3A8A", text: "#0C47A1", darkText: "#93C5FD" },
-  "Bank Fees": { bg: "#FFD9D9", darkBg: "#6B1F1F", text: "#A91F1F", darkText: "#FCA5A5" },
-  // Canonical set (see src/lib/categorize.ts)
-  Family: { bg: "#FCE7F3", darkBg: "#7A2E58", text: "#9D174D", darkText: "#F9A8D4" },
-  Donations: { bg: "#FEF3C7", darkBg: "#78350F", text: "#92400E", darkText: "#FCD34D" },
-  Tech: { bg: "#E0F2FE", darkBg: "#075985", text: "#075985", darkText: "#7DD3FC" },
-  Medical: { bg: "#F8D7DA", darkBg: "#7A2B2B", text: "#721C24", darkText: "#FF6B6B" },
-  Investment: { bg: "#DCFCE7", darkBg: "#14532D", text: "#166534", darkText: "#86EFAC" },
-  Uncategorised: { bg: "#FEE2E2", darkBg: "#7F1D1D", text: "#991B1B", darkText: "#FCA5A5" },
-  Car: { bg: "#DBEAFE", darkBg: "#1E40AF", text: "#1E3A8A", darkText: "#93C5FD" },
-  "Bills & Utilities": { bg: "#D4EDDA", darkBg: "#2D5C3E", text: "#155724", darkText: "#6FD676" },
-  Rent: { bg: "#EDE9FE", darkBg: "#4C1D95", text: "#5B21B6", darkText: "#C4B5FD" },
-  "Mobile Top-up": { bg: "#CFFAFE", darkBg: "#155E75", text: "#155E75", darkText: "#A5F3FC" },
-  Health: { bg: "#F8D7DA", darkBg: "#7A2B2B", text: "#721C24", darkText: "#FF6B6B" },
-  Subscriptions: { bg: "#E0E7FF", darkBg: "#3730A3", text: "#3730A3", darkText: "#A5B4FC" },
-  "Bank Charges": { bg: "#FFD9D9", darkBg: "#6B1F1F", text: "#A91F1F", darkText: "#FCA5A5" },
-  Transfer: { bg: "#CCE5FF", darkBg: "#1E3A8A", text: "#0C47A1", darkText: "#93C5FD" },
-  Other: { bg: "#E9ECEF", darkBg: "#404040", text: "#495057", darkText: "#BFBFBF" },
-};
-
-function getCategoryColor(category?: string) {
-  if (!category) return { bg: "var(--accent-soft)", darkBg: "var(--accent-soft)", text: "var(--accent)", darkText: "var(--accent)" };
-  const color = CATEGORY_COLORS[category] || { bg: "#E9ECEF", darkBg: "#404040", text: "#495057", darkText: "#BFBFBF" };
-  return color;
-}
-
-// Respects the app's manual theme toggle (data-theme attribute) first,
-// falling back to the OS preference when the user hasn't overridden it.
-function isDarkMode(): boolean {
-  if (typeof document === "undefined") return false;
-  const explicit = document.documentElement.dataset.theme;
-  if (explicit === "dark") return true;
-  if (explicit === "light") return false;
-  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+// Category colours live in globals.css as --cat-<slug>-bg/fg, defined once per
+// theme. Reading them as CSS variables means the badge is correct on the very
+// first paint: nothing here has to know whether the app is in dark mode, which
+// is what used to make these colours disagree with the server-rendered HTML.
+// The var() fallback covers categories with no palette entry of their own.
+function categoryVars(category?: string | null): { bg: string; fg: string } {
+  const slug = (category ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) return { bg: "var(--cat-default-bg)", fg: "var(--cat-default-fg)" };
+  return {
+    bg: `var(--cat-${slug}-bg, var(--cat-default-bg))`,
+    fg: `var(--cat-${slug}-fg, var(--cat-default-fg))`,
+  };
 }
 
 function toLocalDateTime(iso: string): string {
@@ -67,21 +36,47 @@ function fromLocalDateTime(local: string): string {
 
 type UserCategory = { name: string; keywords: string[] };
 
-function useCategories() {
-  const [categories, setCategories] = useState<UserCategory[]>([]);
+// One category list, shared by every component on the page. Three components
+// each ran their own fetch, so opening the page hit /api/categories three
+// times - and a category created in Manage categories never reached the
+// dropdowns in the form or the detail modal, because each held its own copy.
+let categoryCache: UserCategory[] | null = null;
+let categoryInflight: Promise<UserCategory[]> | null = null;
+const categorySubscribers = new Set<(c: UserCategory[]) => void>();
 
-  const reload = useCallback(async () => {
-    const res = await fetch("/api/categories");
-    if (!res.ok) return;
-    const d = await res.json();
-    setCategories(d.categories ?? []);
-  }, []);
+function publishCategories(next: UserCategory[]) {
+  categoryCache = next;
+  for (const notify of categorySubscribers) notify(next);
+}
+
+function loadCategories(): Promise<UserCategory[]> {
+  if (categoryCache) return Promise.resolve(categoryCache);
+  categoryInflight ??= fetch("/api/categories")
+    .then((r) => (r.ok ? r.json() : { categories: [] }))
+    .then((d) => {
+      const list: UserCategory[] = d.categories ?? [];
+      publishCategories(list);
+      return list;
+    })
+    .catch(() => [])
+    .finally(() => {
+      categoryInflight = null;
+    });
+  return categoryInflight;
+}
+
+function useCategories() {
+  const [categories, setCategories] = useState<UserCategory[]>(() => categoryCache ?? []);
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    categorySubscribers.add(setCategories);
+    loadCategories();
+    return () => {
+      categorySubscribers.delete(setCategories);
+    };
+  }, []);
 
-  return { categories, setCategories, reload };
+  return { categories, setCategories: publishCategories };
 }
 
 // Categories are always picked, never typed - that is what stops the list
@@ -512,8 +507,7 @@ function DetailModal({
   };
 
   const dt = expense.expense_datetime ? new Date(expense.expense_datetime) : new Date(expense.expense_date);
-  const categoryColor = getCategoryColor(expense.category);
-  const isDark = isDarkMode();
+  const categoryColor = categoryVars(expense.category);
 
   return (
     <div
@@ -567,8 +561,8 @@ function DetailModal({
                   <div
                     className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold"
                     style={{
-                      background: isDark ? "#334155" : categoryColor.bg,
-                      color: isDark ? "#cbd5e1" : categoryColor.text,
+                      background: categoryColor.bg,
+                      color: categoryColor.fg,
                     }}
                   >
                     {expense.category}
@@ -620,7 +614,7 @@ function DetailModal({
           <form onSubmit={handleSave}>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
                   Amount
                 </label>
                 <input
@@ -636,7 +630,7 @@ function DetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
                   Vendor/Merchant
                 </label>
                 <input
@@ -648,7 +642,7 @@ function DetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
                   Category
                 </label>
                 <CategorySelect
@@ -659,7 +653,7 @@ function DetailModal({
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
                   Note
                 </label>
                 <input
@@ -671,7 +665,7 @@ function DetailModal({
                 />
               </div>
               <div className="min-w-0">
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
+                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
                   Date
                 </label>
                 <input
@@ -1095,8 +1089,7 @@ function ExpenseRow({
   expense: Expense;
   onView: () => void;
 }) {
-  const categoryColor = getCategoryColor(expense.category);
-  const isDark = isDarkMode();
+  const categoryColor = categoryVars(expense.category);
 
   return (
     <li className="border-b last:border-b-0" style={{ borderColor: "var(--hairline)" }}>
@@ -1113,8 +1106,8 @@ function ExpenseRow({
           <span
             className="max-w-full overflow-hidden text-ellipsis text-[11px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap inline-block align-middle"
             style={{
-              background: isDark ? "#334155" : categoryColor.bg,
-              color: isDark ? "#cbd5e1" : categoryColor.text,
+              background: categoryColor.bg,
+              color: categoryColor.fg,
             }}
           >
             {expense.category}
@@ -1124,14 +1117,14 @@ function ExpenseRow({
 
       {/* Title and Date */}
       <div className="min-w-0">
-        <p className="text-[14px] truncate font-medium" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>{expense.vendor || "Expense"}</p>
-        <p className="text-[12px] truncate" style={{ color: isDark ? "#94a3b8" : "#666666" }}>
+        <p className="text-[14px] truncate font-medium" style={{ color: "var(--ink)" }}>{expense.vendor || "Expense"}</p>
+        <p className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
           {fmtDateLabel(expense.expense_date)}
         </p>
       </div>
 
       {/* Amount - Right Aligned */}
-      <span className="tabular text-[14px] font-semibold text-right" style={{ color: isDark ? "#f1f5f9" : "#1a1a1a" }}>
+      <span className="tabular text-[14px] font-semibold text-right" style={{ color: "var(--ink)" }}>
         {fmtRs(expense.amount)}
       </span>
       </button>
@@ -1235,12 +1228,11 @@ function CategoryChart({
 }) {
   const max = Math.max(...points.map((p) => p.total), 1);
   const grand = points.reduce((s, p) => s + p.total, 0);
-  const isDark = isDarkMode();
 
   return (
     <div className="flex flex-col gap-2.5 mt-4">
       {points.map((p) => {
-        const color = getCategoryColor(p.category);
+        const color = categoryVars(p.category);
         const isSelected = selected === p.category;
         const share = grand > 0 ? (p.total / grand) * 100 : 0;
         return (
@@ -1267,7 +1259,7 @@ function CategoryChart({
                 className="h-full rounded-full transition-[width] duration-500"
                 style={{
                   width: `${Math.max((p.total / max) * 100, 2)}%`,
-                  background: isDark ? color.darkBg : color.bg,
+                  background: color.fg,
                 }}
               />
             </div>
@@ -1302,18 +1294,38 @@ function ExpensesView({
   const [selected, setSelected] = useState<string | null>(null);
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [search, setSearch] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [refreshing, setRefreshing] = useState(true);
   const { categories, setCategories } = useCategories();
   const [managing, setManaging] = useState(false);
 
   const monthParam = scope === "month" ? `&month=${month}` : "";
   const periodLabel = scope === "month" ? `${MONTH_NAMES[month - 1]} ${year}` : String(year);
 
+  // Stepping quickly through months used to let an older reply overwrite a
+  // newer one, and a failed request left "Loading…" on screen for good. The
+  // previous period stays visible while the next one loads, so moving between
+  // months no longer blanks the page.
   useEffect(() => {
-    setData(null);
+    const ac = new AbortController();
     setSelected(null);
-    fetch(`/api/expenses/categories?year=${year}${monthParam}`)
-      .then((r) => r.json())
-      .then(setData);
+    setRefreshing(true);
+    setLoadError("");
+    fetch(`/api/expenses/categories?year=${year}${monthParam}`, { signal: ac.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error("load failed");
+        return r.json();
+      })
+      .then((d) => {
+        setData(d);
+        setRefreshing(false);
+      })
+      .catch(() => {
+        if (ac.signal.aborted) return;
+        setLoadError("Could not load this period. Check your connection and try again.");
+        setRefreshing(false);
+      });
+    return () => ac.abort();
   }, [year, month, scope, monthParam, refreshKey]);
 
   // A whole year of expenses is a wall of rows nobody reads, so over a year
@@ -1340,11 +1352,19 @@ function ExpensesView({
       setExpenses(null);
       return;
     }
-    setExpenses(null);
+    const ac = new AbortController();
     const categoryParam = selected ? `&category=${encodeURIComponent(selected)}` : "";
-    fetch(`/api/expenses?year=${year}${monthParam}${categoryParam}`)
-      .then((r) => r.json())
-      .then(setExpenses);
+    fetch(`/api/expenses?year=${year}${monthParam}${categoryParam}`, { signal: ac.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error("load failed");
+        return r.json();
+      })
+      .then((rows) => setExpenses(Array.isArray(rows) ? rows : []))
+      .catch(() => {
+        if (ac.signal.aborted) return;
+        setExpenses([]);
+      });
+    return () => ac.abort();
   }, [showHistory, selected, year, month, scope, monthParam, refreshKey]);
 
   const nav = (dir: -1 | 1) => {
@@ -1432,7 +1452,10 @@ function ExpensesView({
         <p className="text-[13px] font-medium" style={{ color: "var(--muted)" }}>
           Spent in {periodLabel}
         </p>
-        <p className="hero-num text-4xl font-bold tracking-tight mt-1 tabular">
+        <p
+          className="hero-num text-4xl font-bold tracking-tight mt-1 tabular"
+          style={{ opacity: refreshing && data ? 0.45 : 1, transition: "opacity .18s ease" }}
+        >
           {fmtRs(data?.total ?? 0)}
         </p>
 
@@ -1452,7 +1475,11 @@ function ExpensesView({
           </button>
         )}
 
-        {data === null ? (
+        {loadError ? (
+          <p className="text-[13px] py-6" style={{ color: "var(--bad)" }} role="alert">
+            {loadError}
+          </p>
+        ) : data === null ? (
           <p className="text-[13px] py-6" style={{ color: "var(--muted)" }} role="status">
             Loading…
           </p>
@@ -1461,11 +1488,13 @@ function ExpensesView({
             No expenses in {periodLabel}.
           </p>
         ) : (
+          <div style={{ opacity: refreshing ? 0.45 : 1, transition: "opacity .18s ease" }}>
           <CategoryChart
             points={data.categories}
             selected={selected}
             onSelect={(c) => setSelected((cur) => (cur === c ? null : c))}
           />
+          </div>
         )}
 
         <div className="form-actions mt-5">

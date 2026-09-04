@@ -433,12 +433,21 @@ export async function ensureCategoryTables(): Promise<void> {
   } catch {
     // Column already exists.
   }
-  try {
-    await c.execute(
-      `CREATE INDEX IF NOT EXISTS idx_expenses_vendor_key ON expenses (user_id, vendor_key)`
-    );
-  } catch {
-    // Index already exists.
+  // Indexes behind the queries every expenses page makes. scripts/migrate-db.mjs
+  // creates two of these, but that script is run by hand - creating them here
+  // as well means a database that never had it run still gets them, and
+  // IF NOT EXISTS makes the repeat harmless. Without these, listing a month
+  // scans the whole expenses table and sorts it.
+  for (const sql of [
+    `CREATE INDEX IF NOT EXISTS idx_expenses_vendor_key ON expenses (user_id, vendor_key)`,
+    `CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses (user_id, expense_date)`,
+    `CREATE INDEX IF NOT EXISTS idx_expenses_user_category ON expenses (user_id, category)`,
+  ]) {
+    try {
+      await c.execute(sql);
+    } catch {
+      // Index already exists, or the column it covers predates this build.
+    }
   }
   categoryTablesEnsured = true;
 }
@@ -1024,6 +1033,14 @@ export async function ensureTablesExist(): Promise<void> {
     await c.execute(`ALTER TABLE subscription_payments ADD COLUMN reminder_due_today_sent_at TEXT`);
   } catch {
     // Column already exists.
+  }
+
+  // Every subscriptions read filters by user_id; subscription_payments is
+  // already covered by its UNIQUE(subscription_id, period) constraint.
+  try {
+    await c.execute(`CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions (user_id)`);
+  } catch {
+    // Index already exists.
   }
 
   tablesEnsured = true;
