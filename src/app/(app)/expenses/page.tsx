@@ -5,7 +5,7 @@ import type { Expense, YearlyPoint } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
 import { CATEGORIES } from "@/lib/categorize";
 
-type View = "month" | "year";
+type View = "month" | "year" | "categories";
 
 // Category colors mapping - optimized for light and dark modes
 const CATEGORY_COLORS: Record<string, { bg: string; darkBg: string; text: string; darkText: string }> = {
@@ -23,6 +23,11 @@ const CATEGORY_COLORS: Record<string, { bg: string; darkBg: string; text: string
   "Bank Fees": { bg: "#FFD9D9", darkBg: "#6B1F1F", text: "#A91F1F", darkText: "#FCA5A5" },
   // Canonical set (see src/lib/categorize.ts)
   Family: { bg: "#FCE7F3", darkBg: "#7A2E58", text: "#9D174D", darkText: "#F9A8D4" },
+  Donations: { bg: "#FEF3C7", darkBg: "#78350F", text: "#92400E", darkText: "#FCD34D" },
+  Tech: { bg: "#E0F2FE", darkBg: "#075985", text: "#075985", darkText: "#7DD3FC" },
+  Medical: { bg: "#F8D7DA", darkBg: "#7A2B2B", text: "#721C24", darkText: "#FF6B6B" },
+  Investment: { bg: "#DCFCE7", darkBg: "#14532D", text: "#166534", darkText: "#86EFAC" },
+  Uncategorised: { bg: "#FEE2E2", darkBg: "#7F1D1D", text: "#991B1B", darkText: "#FCA5A5" },
   Car: { bg: "#DBEAFE", darkBg: "#1E40AF", text: "#1E3A8A", darkText: "#93C5FD" },
   "Bills & Utilities": { bg: "#D4EDDA", darkBg: "#2D5C3E", text: "#155724", darkText: "#6FD676" },
   Rent: { bg: "#EDE9FE", darkBg: "#4C1D95", text: "#5B21B6", darkText: "#C4B5FD" },
@@ -1058,6 +1063,327 @@ function YearView({
   );
 }
 
+/* ---------- category report ---------- */
+
+type CategoryPoint = { category: string; total: number; count: number };
+
+// One row of the "needs a category" queue. Assigning here also teaches the
+// rule for that payee, so the same transfer never has to be sorted twice.
+function ReviewRow({ expense, onAssigned }: { expense: Expense; onAssigned: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const assign = async (category: string) => {
+    if (!category) return;
+    setBusy(true);
+    setError("");
+    const res = await fetch(`/api/expenses/${expense.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: expense.amount,
+        note: expense.note ?? "",
+        expense_datetime: expense.expense_datetime || `${expense.expense_date}T00:00:00Z`,
+        vendor: expense.vendor ?? "",
+        category,
+      }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError("Couldn't save");
+      return;
+    }
+    onAssigned();
+  };
+
+  return (
+    <li className="py-3" style={{ borderBottom: "1px solid var(--hairline)" }}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[14px] font-semibold truncate">
+            {expense.vendor || expense.note || "Expense"}
+          </p>
+          <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+            {fmtDateLabel(expense.expense_date)}
+            {expense.note && expense.vendor ? ` · ${expense.note}` : ""}
+          </p>
+        </div>
+        <p className="text-[14px] font-semibold tabular shrink-0">{fmtRs(expense.amount)}</p>
+      </div>
+      <div className="flex items-center gap-2 mt-2">
+        <select
+          className="field !py-2 text-[13px]"
+          aria-label={`Category for ${expense.vendor || "expense"}`}
+          defaultValue=""
+          disabled={busy}
+          onChange={(e) => assign(e.target.value)}
+        >
+          <option value="" disabled>
+            {busy ? "Saving…" : "Pick a category…"}
+          </option>
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        {error && (
+          <span className="text-[12px]" style={{ color: "var(--bad)" }} role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
+// Horizontal bars: category names are long ("Bills & Utilities") and this is
+// read on a phone, so vertical columns would clip the labels. Each bar is a
+// button that drills into the expenses behind it.
+function CategoryChart({
+  points,
+  selected,
+  onSelect,
+}: {
+  points: CategoryPoint[];
+  selected: string | null;
+  onSelect: (category: string) => void;
+}) {
+  const max = Math.max(...points.map((p) => p.total), 1);
+  const grand = points.reduce((s, p) => s + p.total, 0);
+  const isDark = isDarkMode();
+
+  return (
+    <div className="flex flex-col gap-2.5 mt-4">
+      {points.map((p) => {
+        const color = getCategoryColor(p.category);
+        const isSelected = selected === p.category;
+        const share = grand > 0 ? (p.total / grand) * 100 : 0;
+        return (
+          <button
+            key={p.category}
+            type="button"
+            onClick={() => onSelect(p.category)}
+            aria-pressed={isSelected}
+            className="w-full text-left rounded-xl px-3 py-2.5 transition"
+            style={{
+              background: isSelected ? "var(--surface-2)" : "transparent",
+              outline: isSelected ? "1px solid var(--ring)" : "none",
+            }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[13px] font-semibold truncate">{p.category}</span>
+              <span className="text-[13px] font-semibold tabular shrink-0">{fmtRs(p.total)}</span>
+            </div>
+            <div
+              className="mt-1.5 h-2.5 w-full rounded-full overflow-hidden"
+              style={{ background: "var(--hairline)" }}
+            >
+              <div
+                className="h-full rounded-full transition-[width] duration-500"
+                style={{
+                  width: `${Math.max((p.total / max) * 100, 2)}%`,
+                  background: isDark ? color.darkBg : color.bg,
+                }}
+              />
+            </div>
+            <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
+              {p.count} expense{p.count === 1 ? "" : "s"} · {share.toFixed(share < 10 ? 1 : 0)}%
+            </p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CategoriesView({
+  refreshKey,
+  onViewDetail,
+}: {
+  refreshKey: number;
+  onViewDetail: (e: Expense) => void;
+}) {
+  const now = new Date();
+  const [scope, setScope] = useState<"month" | "year">("month");
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [data, setData] = useState<{ total: number; categories: CategoryPoint[] } | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [rows, setRows] = useState<Expense[] | null>(null);
+
+  const monthParam = scope === "month" ? `&month=${month}` : "";
+  const periodLabel = scope === "month" ? `${MONTH_NAMES[month - 1]} ${year}` : String(year);
+
+  useEffect(() => {
+    setData(null);
+    setSelected(null);
+    fetch(`/api/expenses/categories?year=${year}${monthParam}`)
+      .then((r) => r.json())
+      .then(setData);
+  }, [year, month, scope, monthParam, refreshKey]);
+
+  useEffect(() => {
+    if (!selected) {
+      setRows(null);
+      return;
+    }
+    setRows(null);
+    fetch(`/api/expenses?year=${year}${monthParam}&category=${encodeURIComponent(selected)}`)
+      .then((r) => r.json())
+      .then(setRows);
+  }, [selected, year, month, scope, monthParam, refreshKey]);
+
+  const nav = (dir: -1 | 1) => {
+    if (scope === "year") {
+      setYear((y) => y + dir);
+      return;
+    }
+    let m = month + dir;
+    let y = year;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    } else if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    setMonth(m);
+    setYear(y);
+  };
+
+  const exportHref = `/api/expenses/export?year=${year}${monthParam}${
+    selected ? `&category=${encodeURIComponent(selected)}` : ""
+  }`;
+
+  const needsReview = data?.categories.find((c) => c.category === "Uncategorised");
+
+  return (
+    <>
+      <div className="card p-5 sm:p-6 rise">
+        <div className="flex items-center gap-2 mb-4">
+          {(["month", "year"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setScope(s)}
+              className={`btn !py-1.5 !px-3.5 text-[12px] ${scope === s ? "btn-primary" : "btn-ghost"}`}
+            >
+              {s === "month" ? "By month" : "By year"}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => nav(-1)}
+            aria-label={scope === "year" ? "Previous year" : "Previous month"}
+            className="btn btn-nav !p-0 w-9 h-9"
+          >
+            ←
+          </button>
+          <p className="font-semibold text-[15px]">{periodLabel}</p>
+          <button
+            onClick={() => nav(1)}
+            aria-label={scope === "year" ? "Next year" : "Next month"}
+            className="btn btn-nav !p-0 w-9 h-9"
+          >
+            →
+          </button>
+        </div>
+
+        <p className="text-[13px] font-medium" style={{ color: "var(--muted)" }}>
+          Spent in {periodLabel}
+        </p>
+        <p className="hero-num text-4xl font-bold tracking-tight mt-1 tabular">
+          {fmtRs(data?.total ?? 0)}
+        </p>
+
+        {needsReview && (
+          <button
+            type="button"
+            onClick={() => setSelected("Uncategorised")}
+            className="tile px-3 py-2.5 mt-4 w-full text-left cursor-pointer"
+            style={{ borderLeft: "3px solid var(--bad)" }}
+          >
+            <p className="text-[13px] font-semibold">
+              {needsReview.count} transfer{needsReview.count === 1 ? "" : "s"} need a category
+            </p>
+            <p className="text-[12px] mt-0.5" style={{ color: "var(--muted)" }}>
+              {fmtRs(needsReview.total)} the feed couldn&apos;t explain — tap to sort them out
+            </p>
+          </button>
+        )}
+
+        {data === null ? (
+          <p className="text-[13px] py-6" style={{ color: "var(--muted)" }} role="status">
+            Loading…
+          </p>
+        ) : data.categories.length === 0 ? (
+          <p className="text-[13px] py-6 text-center" style={{ color: "var(--muted)" }}>
+            No expenses in {periodLabel}.
+          </p>
+        ) : (
+          <CategoryChart
+            points={data.categories}
+            selected={selected}
+            onSelect={(c) => setSelected((cur) => (cur === c ? null : c))}
+          />
+        )}
+
+        <div className="form-actions mt-5">
+          <a className="btn btn-ghost !py-2 text-[13px]" href={exportHref} download>
+            Download Excel{selected ? ` · ${selected}` : ""}
+          </a>
+        </div>
+      </div>
+
+      {selected && (
+        <section className="card p-5 sm:p-6 rise">
+          <div className="flex items-center justify-between mb-4 gap-3">
+            <div className="min-w-0">
+              <p className="font-semibold truncate">{selected}</p>
+              <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+                {periodLabel}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelected(null)}
+              className="btn btn-ghost !py-2 !px-3 text-[12px] shrink-0"
+            >
+              Clear
+            </button>
+          </div>
+
+          {rows === null ? (
+            <p className="text-[13px] py-4" style={{ color: "var(--muted)" }} role="status">
+              Loading…
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="text-[13px] py-4 text-center" style={{ color: "var(--muted)" }}>
+              Nothing here.
+            </p>
+          ) : (
+            <ul className="pb-2">
+              {rows.map((e) =>
+                selected === "Uncategorised" ? (
+                  <ReviewRow
+                    key={e.id}
+                    expense={e}
+                    onAssigned={() => setRows((cur) => cur?.filter((r) => r.id !== e.id) ?? null)}
+                  />
+                ) : (
+                  <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} />
+                )
+              )}
+            </ul>
+          )}
+        </section>
+      )}
+    </>
+  );
+}
+
 /* ---------- page ---------- */
 
 export default function ExpensesPage() {
@@ -1090,6 +1416,7 @@ export default function ExpensesPage() {
   const views: { id: View; label: string }[] = [
     { id: "month", label: "This month" },
     { id: "year", label: "Yearly" },
+    { id: "categories", label: "Categories" },
   ];
 
   return (
@@ -1159,6 +1486,9 @@ export default function ExpensesPage() {
           onViewDetail={setViewingDetail}
           onRecategorize={() => setRecategorizing(true)}
         />
+      )}
+      {view === "categories" && (
+        <CategoriesView refreshKey={refreshKey} onViewDetail={setViewingDetail} />
       )}
       {view === "year" && (
         <YearView

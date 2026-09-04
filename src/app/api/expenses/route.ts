@@ -46,8 +46,9 @@ export async function GET(req: Request) {
   const year = Number(url.searchParams.get("year")) || now.getFullYear();
   const monthParam = url.searchParams.get("month");
   const month = monthParam ? Number(monthParam) : undefined;
+  const category = url.searchParams.get("category")?.trim() || undefined;
 
-  const expenses = await listExpenses(userId, { year, month });
+  const expenses = await listExpenses(userId, { year, month, category });
   return NextResponse.json(expenses);
 }
 

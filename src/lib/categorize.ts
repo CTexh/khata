@@ -22,20 +22,21 @@
 // same spending across two buckets and making monthly totals lie.
 export const CATEGORIES = [
   "Family",
-  "Car",
+  "Donations",
   "Groceries",
   "Food & Dining",
+  "Entertainment",
+  "Shopping",
+  "Tech",
+  "Medical",
+  "Investment",
+  "Car",
+  "Transport",
   "Bills & Utilities",
   "Rent",
   "Mobile Top-up",
-  "Shopping",
-  "Clothing",
-  "Health",
-  "Transport",
-  "Entertainment",
   "Subscriptions",
   "Bank Charges",
-  "Transfer",
   "Other",
 ] as const;
 
@@ -45,6 +46,22 @@ export type Category = (typeof CATEGORIES)[number];
 // canonical name. Keys are compared lowercased + whitespace-collapsed.
 const CATEGORY_ALIASES: Record<string, Category> = {
   family: "Family",
+
+  donation: "Donations",
+  donations: "Donations",
+  charity: "Donations",
+  zakat: "Donations",
+  sadqa: "Donations",
+  sadaqah: "Donations",
+  khairat: "Donations",
+
+  investment: "Investment",
+  investments: "Investment",
+  savings: "Investment",
+  stocks: "Investment",
+  "mutual fund": "Investment",
+  gold: "Investment",
+  plot: "Investment",
 
   car: "Car",
   "car parts": "Car",
@@ -87,21 +104,42 @@ const CATEGORY_ALIASES: Record<string, Category> = {
   "mobile load": "Mobile Top-up",
   easyload: "Mobile Top-up",
 
+  // Buying a thing from a business is Shopping. Deliberately swallows the
+  // narrow one-off buckets ("Furniture", "Electronics", "Clothing") so the
+  // category list stays short instead of growing a tail of near-duplicates.
   shopping: "Shopping",
   "online shopping": "Shopping",
+  clothing: "Shopping",
+  clothes: "Shopping",
+  apparel: "Shopping",
+  garments: "Shopping",
+  shoes: "Shopping",
+  footwear: "Shopping",
+  furniture: "Shopping",
+  appliances: "Shopping",
+  decor: "Shopping",
+  "home decor": "Shopping",
+  stationery: "Shopping",
+  gifts: "Shopping",
 
-  clothing: "Clothing",
-  clothes: "Clothing",
-  apparel: "Clothing",
-  garments: "Clothing",
+  tech: "Tech",
+  electronics: "Tech",
+  gadgets: "Tech",
+  laptop: "Tech",
+  computer: "Tech",
+  hardware: "Tech",
+  accessories: "Tech",
+  headphones: "Tech",
 
-  pharmacy: "Health",
-  health: "Health",
-  healthcare: "Health",
-  medical: "Health",
-  medicine: "Health",
-  doctor: "Health",
-  hospital: "Health",
+  pharmacy: "Medical",
+  health: "Medical",
+  healthcare: "Medical",
+  medical: "Medical",
+  medicine: "Medical",
+  doctor: "Medical",
+  hospital: "Medical",
+  clinic: "Medical",
+  lab: "Medical",
 
   transport: "Transport",
   travel: "Transport",
@@ -120,12 +158,6 @@ const CATEGORY_ALIASES: Record<string, Category> = {
   "bank fees": "Bank Charges",
   "bank fee": "Bank Charges",
 
-  transfer: "Transfer",
-  transfers: "Transfer",
-  "mobile wallet transfer": "Transfer",
-  ibft: "Transfer",
-  raast: "Transfer",
-
   other: "Other",
   misc: "Other",
   miscellaneous: "Other",
@@ -133,17 +165,31 @@ const CATEGORY_ALIASES: Record<string, Category> = {
   uncategorised: "Other",
 };
 
-// Folds any free-text category onto the canonical list. Unknown values are
-// returned title-cased rather than discarded - a category we've never seen is
-// still better information than nothing, and it shows up in the UI as-is.
-export function canonicalCategory(raw: string | null | undefined): string | null {
+// Folds a free-text category onto the canonical list.
+//
+// `strict` is for categories that came from the email-sync routine rather than
+// from a person. Those are only ever guesses scraped out of a bank message, so
+// anything that isn't recognised - including the useless catch-all "Transfer" -
+// is dropped, leaving the expense uncategorised and waiting for review. That is
+// what stops the feed inventing junk categories.
+//
+// Left non-strict (the default) an unrecognised value is passed through as-is,
+// which is how typing a brand-new category in the form creates one.
+export function canonicalCategory(
+  raw: string | null | undefined,
+  strict = false
+): string | null {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return null;
   const key = trimmed.toLowerCase().replace(/\s+/g, " ");
+
   const mapped = CATEGORY_ALIASES[key];
   if (mapped) return mapped;
+
   const exact = CATEGORIES.find((c) => c.toLowerCase() === key);
-  return exact ?? trimmed;
+  if (exact) return exact;
+
+  return strict ? null : trimmed;
 }
 
 /* ---------- vendor normalisation ---------- */
@@ -229,6 +275,13 @@ function vendorTokens(raw: string | null | undefined): string[] {
 // no matter which bank or wallet it went through.
 export const FAMILY_MEMBERS = ["Ijaz Ahmad Chatta", "Huda Ijaz", "Habib Ullah"];
 
+// Named people whose payments always mean the same thing. Matched with the
+// same fuzzy logic as family names, so bank-mangled spellings still land.
+const PERSON_RULES: { names: string[]; category: Category }[] = [
+  { names: FAMILY_MEMBERS, category: "Family" },
+  { names: ["Ansab Bangash"], category: "Donations" },
+];
+
 // Relationship words that identify a payee as family on their own. Matched
 // against the payee/vendor only - never the note - so that a note like
 // "gift for mom" stays Shopping instead of becoming Family.
@@ -248,6 +301,70 @@ const FAMILY_TERMS = new Set([
   "baji",
   "apa",
 ]);
+
+// Known merchants whose name alone settles the category. Matched against the
+// vendor only - a shop name mentioned in a note is far weaker evidence than
+// the payee field actually being that shop. Extend this list as chains repeat.
+const MERCHANT_RULES: { keywords: string[]; category: Category }[] = [
+  // Every Euro-branded store in this ledger is a grocer: "Euro Store Crow",
+  // "Euro Food Town", "Meat Pro Euro S".
+  { keywords: ["euro"], category: "Groceries" },
+
+  // Marketplaces and general retail - buying a thing from a brand rather than
+  // handing money to a person.
+  {
+    keywords: [
+      "daraz",
+      "amazon",
+      "aliexpress",
+      "alibaba",
+      "temu",
+      "shein",
+      "ebay",
+      "olx",
+      "khaadi",
+      "outfitters",
+      "sapphire",
+      "gul ahmed",
+      "alkaram",
+      "bonanza",
+      "breakout",
+      "limelight",
+      "borjan",
+      "bata",
+      "servis",
+      "ikea",
+      "interwood",
+      "habitt",
+    ],
+    category: "Shopping",
+  },
+
+  // Tech retailers and hardware brands.
+  {
+    keywords: [
+      "apple",
+      "samsung",
+      "dell",
+      "lenovo",
+      "asus",
+      "xiaomi",
+      "logitech",
+      "anker",
+      "telemart",
+      "ishopping",
+      "priceoye",
+      "symbios",
+      "shophive",
+      "czone",
+      "mega pk",
+      "homeshopping",
+      "paklap",
+      "galaxy",
+    ],
+    category: "Tech",
+  },
+];
 
 // Anything that keeps the car running or on the road. Matched against vendor
 // and note, since "petrol" typed into the note is as strong a signal as a
@@ -334,11 +451,21 @@ export function matchRuleCategory(
   const haystack = `${vendor ?? ""} ${note ?? ""}`.toLowerCase();
 
   if (vendorToks.some((t) => FAMILY_TERMS.has(t))) return "Family";
-  if (FAMILY_MEMBERS.some((m) => matchesFamilyMember(vendorToks, m))) return "Family";
-  // A family member named in the note ("sent to Habib Ullah") counts too.
-  if (FAMILY_MEMBERS.some((m) => matchesFamilyMember(vendorTokens(note), m))) return "Family";
+
+  const noteToks = vendorTokens(note);
+  for (const rule of PERSON_RULES) {
+    // The payee field is the strong signal; a name written into the note
+    // ("sent to Habib Ullah") counts too.
+    if (rule.names.some((n) => matchesFamilyMember(vendorToks, n))) return rule.category;
+    if (rule.names.some((n) => matchesFamilyMember(noteToks, n))) return rule.category;
+  }
 
   if (CAR_KEYWORDS.some((k) => haystack.includes(k))) return "Car";
+
+  const vendorText = vendorToks.join(" ");
+  for (const m of MERCHANT_RULES) {
+    if (m.keywords.some((k) => vendorText.includes(k))) return m.category;
+  }
 
   return null;
 }

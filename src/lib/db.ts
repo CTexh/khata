@@ -259,20 +259,65 @@ export type Expense = {
   category?: string;
 };
 
+// Rows with no category are reported under this label so they stay visible in
+// breakdowns instead of silently vanishing from the totals.
+export const UNCATEGORISED = "Uncategorised";
+
+// SQL fragment + args for "this expense is in this category", handling the
+// uncategorised bucket (NULL or empty string) as a first-class choice.
+function categoryFilter(category: string): { sql: string; args: string[] } {
+  if (category === UNCATEGORISED) {
+    return { sql: " AND (category IS NULL OR category = '')", args: [] };
+  }
+  return { sql: " AND category = ?", args: [category] };
+}
+
 export async function listExpenses(
   userId: string,
-  opts: { year: number; month?: number }
+  opts: { year: number; month?: number; category?: string }
 ): Promise<Expense[]> {
   const c = await db();
   const prefix =
     opts.month !== undefined
       ? `${opts.year}-${String(opts.month).padStart(2, "0")}`
       : `${opts.year}`;
+
+  const filter = opts.category ? categoryFilter(opts.category) : { sql: "", args: [] };
   const rs = await c.execute({
-    sql: `SELECT * FROM expenses WHERE user_id = ? AND expense_date LIKE ? ORDER BY expense_date DESC, created_at DESC`,
-    args: [userId, `${prefix}%`],
+    sql: `SELECT * FROM expenses WHERE user_id = ? AND expense_date LIKE ?${filter.sql} ORDER BY expense_date DESC, created_at DESC`,
+    args: [userId, `${prefix}%`, ...filter.args],
   });
   return rs.rows.map(rowToExpense);
+}
+
+export type CategoryPoint = { category: string; total: number; count: number };
+
+// Spending grouped by category for a month (or a whole year when `month` is
+// omitted), biggest first - the shape the report chart renders directly.
+export async function categoryTotals(
+  userId: string,
+  opts: { year: number; month?: number }
+): Promise<CategoryPoint[]> {
+  const c = await db();
+  const prefix =
+    opts.month !== undefined
+      ? `${opts.year}-${String(opts.month).padStart(2, "0")}`
+      : `${opts.year}`;
+  const rs = await c.execute({
+    sql: `SELECT COALESCE(NULLIF(TRIM(category), ''), ?) AS category,
+                 SUM(amount) AS total,
+                 COUNT(*) AS count
+          FROM expenses
+          WHERE user_id = ? AND expense_date LIKE ?
+          GROUP BY category
+          ORDER BY total DESC`,
+    args: [UNCATEGORISED, userId, `${prefix}%`],
+  });
+  return rs.rows.map((r) => ({
+    category: r.category as string,
+    total: Number(r.total),
+    count: Number(r.count),
+  }));
 }
 
 export async function getExpense(id: string, userId: string): Promise<Expense | null> {
@@ -493,7 +538,11 @@ export async function resolveExpenseCategory(opts: {
   const rule = matchRuleCategory(opts.vendor, opts.note);
   if (rule) return { category: rule, vendorKey, source: "rule" };
 
-  const provided = canonicalCategory(opts.provided);
+  // A category from the email-sync routine is only a guess, so it is folded
+  // strictly onto the known set. Anything unrecognised - notably the bank's
+  // catch-all "Transfer" - is dropped, so the expense surfaces as
+  // uncategorised for review rather than hiding in a meaningless bucket.
+  const provided = canonicalCategory(opts.provided, !opts.explicit);
   if (provided) return { category: provided, vendorKey, source: "provided" };
 
   const learned = await learnedCategoryForVendor(opts.userId, vendorKey);
