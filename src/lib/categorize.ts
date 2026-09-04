@@ -22,7 +22,6 @@
 // same spending across two buckets and making monthly totals lie.
 export const CATEGORIES = [
   "Family",
-  "Transfer",
   "Donations",
   "Groceries",
   "Food & Dining",
@@ -165,8 +164,9 @@ const CATEGORY_ALIASES: Record<string, Category> = {
 // What the bank writes when it has no idea what a payment was for: these name
 // the rail the money took, not the spending. Never accepted from the feed - an
 // expense nothing can explain has to land in review for a human decision,
-// rather than in a bucket that merely looks answered. "Transfer" stays a real
-// category so it can still be chosen by hand.
+// rather than in a bucket that merely looks answered. There is deliberately no
+// "Transfer" category at all: a transfer is a means of payment, not a thing
+// money was spent on, so one that doesn't say what it was for is unanswered.
 const FEED_CATCHALLS = new Set([
   "transfer",
   "transfers",

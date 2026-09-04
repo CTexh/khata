@@ -1633,10 +1633,10 @@ function CategoriesView({
             style={{ borderLeft: "3px solid var(--bad)" }}
           >
             <p className="text-[13px] font-semibold">
-              {needsReview.count} transfer{needsReview.count === 1 ? "" : "s"} need a category
+              {needsReview.count} expense{needsReview.count === 1 ? "" : "s"} need a category
             </p>
             <p className="text-[12px] mt-0.5" style={{ color: "var(--muted)" }}>
-              {fmtRs(needsReview.total)} the feed couldn&apos;t explain — tap to sort them out
+              {fmtRs(needsReview.total)} nothing could explain — tap to sort them out
             </p>
           </button>
         )}

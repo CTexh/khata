@@ -1,6 +1,12 @@
 import { createClient, type Client } from "@libsql/client";
 import { randomUUID } from "crypto";
-import { CATEGORIES, canonicalCategory, matchRuleCategory, normalizeVendor } from "@/lib/categorize";
+import {
+  CATEGORIES,
+  canonicalCategory,
+  isUnexplainedCategory,
+  matchRuleCategory,
+  normalizeVendor,
+} from "@/lib/categorize";
 
 let client: Client | null = null;
 
@@ -489,13 +495,29 @@ export async function listUserCategories(userId: string): Promise<UserCategory[]
     rs = await read();
   }
 
-  return rs.rows.map((r) => ({
-    name: r.name as string,
-    keywords: String(r.keywords ?? "")
-      .split(",")
-      .map((k) => k.trim().toLowerCase())
-      .filter(Boolean),
-  }));
+  // A category that only means "don't know" - "Transfer", "Other", "Misc" -
+  // is not a category, it is an unanswered question. Drop any that are still
+  // on the list from an earlier version so they stop being pickable.
+  const stale = rs.rows.filter((r) => isUnexplainedCategory(r.name as string));
+  if (stale.length > 0) {
+    await c.batch(
+      stale.map((r) => ({
+        sql: `DELETE FROM expense_categories WHERE user_id = ? AND name = ?`,
+        args: [userId, r.name as string],
+      })),
+      "write"
+    );
+  }
+
+  return rs.rows
+    .filter((r) => !isUnexplainedCategory(r.name as string))
+    .map((r) => ({
+      name: r.name as string,
+      keywords: String(r.keywords ?? "")
+        .split(",")
+        .map((k) => k.trim().toLowerCase())
+        .filter(Boolean),
+    }));
 }
 
 // Replaces the user's list with the current built-in set. Expenses keep
