@@ -22,22 +22,20 @@
 // same spending across two buckets and making monthly totals lie.
 export const CATEGORIES = [
   "Family",
+  "Transfer",
   "Donations",
   "Groceries",
   "Food & Dining",
-  "Entertainment",
-  "Shopping",
-  "Tech",
-  "Medical",
-  "Investment",
   "Car",
-  "Transport",
-  "Bills & Utilities",
-  "Rent",
-  "Mobile Top-up",
+  "Tech",
+  "Shopping",
+  "Personal Care",
+  "Entertainment",
+  "Medical",
   "Subscriptions",
-  "Bank Charges",
-  "Other",
+  "Investment",
+  "Rent",
+  "Bills & Utilities",
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
@@ -97,12 +95,16 @@ const CATEGORY_ALIASES: Record<string, Category> = {
   rents: "Rent",
   "house rent": "Rent",
 
-  "mobile top-up": "Mobile Top-up",
-  "mobile topup": "Mobile Top-up",
-  "top-up": "Mobile Top-up",
-  topup: "Mobile Top-up",
-  "mobile load": "Mobile Top-up",
-  easyload: "Mobile Top-up",
+  "mobile top-up": "Bills & Utilities",
+  "mobile topup": "Bills & Utilities",
+  "top-up": "Bills & Utilities",
+  topup: "Bills & Utilities",
+  "mobile load": "Bills & Utilities",
+  easyload: "Bills & Utilities",
+  "bank charges": "Bills & Utilities",
+  "bank charge": "Bills & Utilities",
+  "bank fees": "Bills & Utilities",
+  "bank fee": "Bills & Utilities",
 
   // Buying a thing from a business is Shopping. Deliberately swallows the
   // narrow one-off buckets ("Furniture", "Electronics", "Clothing") so the
@@ -141,11 +143,6 @@ const CATEGORY_ALIASES: Record<string, Category> = {
   clinic: "Medical",
   lab: "Medical",
 
-  transport: "Transport",
-  travel: "Transport",
-  taxi: "Transport",
-  ride: "Transport",
-
   entertainment: "Entertainment",
   movies: "Entertainment",
   cinema: "Entertainment",
@@ -153,25 +150,36 @@ const CATEGORY_ALIASES: Record<string, Category> = {
   subscription: "Subscriptions",
   subscriptions: "Subscriptions",
 
-  "bank charges": "Bank Charges",
-  "bank charge": "Bank Charges",
-  "bank fees": "Bank Charges",
-  "bank fee": "Bank Charges",
+  // Person-to-person money the rules can't place. Kept as a real category so
+  // unknown transfers are visibly "a transfer I haven't sorted yet" rather
+  // than blank, and so they group together for review.
+  transfer: "Transfer",
+  transfers: "Transfer",
+  "mobile wallet transfer": "Transfer",
+  "funds transfer": "Transfer",
+  ibft: "Transfer",
+  raast: "Transfer",
 
-  other: "Other",
-  misc: "Other",
-  miscellaneous: "Other",
-  uncategorized: "Other",
-  uncategorised: "Other",
+  "personal care": "Personal Care",
+  grooming: "Personal Care",
+  salon: "Personal Care",
+  saloon: "Personal Care",
+  barber: "Personal Care",
+  haircut: "Personal Care",
+  spa: "Personal Care",
+  skincare: "Personal Care",
+  gym: "Personal Care",
+  fitness: "Personal Care",
 };
 
 // Folds a free-text category onto the canonical list.
 //
 // `strict` is for categories that came from the email-sync routine rather than
 // from a person. Those are only ever guesses scraped out of a bank message, so
-// anything that isn't recognised - including the useless catch-all "Transfer" -
-// is dropped, leaving the expense uncategorised and waiting for review. That is
-// what stops the feed inventing junk categories.
+// anything that isn't recognised is dropped, leaving the expense uncategorised
+// and waiting for review - that is what stops the feed inventing categories.
+// The bank's own "Transfer"/"RAAST" wording does map, so person-to-person money
+// the rules can't place lands in Transfer instead of nowhere.
 //
 // Left non-strict (the default) an unrecognised value is passed through as-is,
 // which is how typing a brand-new category in the form creates one.
@@ -349,6 +357,12 @@ const MERCHANT_RULES: { keywords: string[]; category: Category }[] = [
       "habitt",
     ],
     category: "Shopping",
+  },
+
+  // Grooming and fitness places.
+  {
+    keywords: ["salon", "saloon", "barber", "spa", "grooming", "gym", "fitness"],
+    category: "Personal Care",
   },
 
   // Tech retailers and hardware brands.

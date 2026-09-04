@@ -4,6 +4,7 @@ import {
   createUserCategory,
   deleteUserCategory,
   listUserCategories,
+  resetUserCategories,
   updateUserCategory,
 } from "@/lib/db";
 
@@ -23,6 +24,13 @@ export async function POST(req: Request) {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await req.json();
+
+  // Adopt the current built-in set, for lists seeded before it changed.
+  if (body.reset === true) {
+    await resetUserCategories(session.userId);
+    return NextResponse.json({ ok: true, categories: await listUserCategories(session.userId) });
+  }
+
   const name = String(body.name ?? "").trim();
   const keywords = String(body.keywords ?? "").trim();
 

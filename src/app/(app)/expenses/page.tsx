@@ -143,6 +143,7 @@ function ManageCategoriesModal({
   const [editName, setEditName] = useState("");
   const [editKeywords, setEditKeywords] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   const send = async (method: string, body?: unknown, qs = "") => {
     setBusy(true);
@@ -241,6 +242,46 @@ function ManageCategoriesModal({
             {error}
           </p>
         )}
+
+        <div className="px-5 pt-4">
+          {confirmReset ? (
+            <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--surface-2)" }}>
+              <p className="text-[13px]">
+                Replace your list with the standard set? Your expenses keep their
+                current categories - run Re-categorise afterwards to fold them onto
+                the new names.
+              </p>
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost !py-2 text-[12px]"
+                  onClick={() => setConfirmReset(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary !py-2 text-[12px]"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (await send("POST", { reset: true })) setConfirmReset(false);
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="text-[12px] underline underline-offset-2 cursor-pointer"
+              style={{ color: "var(--muted)" }}
+              onClick={() => setConfirmReset(true)}
+            >
+              Reset to the standard set
+            </button>
+          )}
+        </div>
 
         <ul className="p-5 flex flex-col gap-2">
           {categories.map((c) => (

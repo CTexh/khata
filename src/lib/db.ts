@@ -498,6 +498,24 @@ export async function listUserCategories(userId: string): Promise<UserCategory[]
   }));
 }
 
+// Replaces the user's list with the current built-in set. Expenses keep
+// whatever category string they already had - the re-categorise pass is what
+// folds those onto the new names - so this never destroys history.
+export async function resetUserCategories(userId: string): Promise<void> {
+  await ensureCategoryTables();
+  const c = await db();
+  const now = new Date().toISOString();
+  await c.execute({ sql: `DELETE FROM expense_categories WHERE user_id = ?`, args: [userId] });
+  await c.batch(
+    CATEGORIES.map((name, i) => ({
+      sql: `INSERT INTO expense_categories (user_id, name, keywords, sort_order, created_at)
+            VALUES (?, ?, NULL, ?, ?)`,
+      args: [userId, name, i, now],
+    })),
+    "write"
+  );
+}
+
 export async function createUserCategory(
   userId: string,
   name: string,
