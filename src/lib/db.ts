@@ -1,6 +1,6 @@
 import { createClient, type Client } from "@libsql/client";
 import { randomUUID } from "crypto";
-import { canonicalCategory, matchRuleCategory, normalizeVendor } from "@/lib/categorize";
+import { CATEGORIES, canonicalCategory, matchRuleCategory, normalizeVendor } from "@/lib/categorize";
 
 let client: Client | null = null;
 
@@ -431,6 +431,18 @@ export async function ensureCategoryTables(): Promise<void> {
     updated_at TEXT NOT NULL,
     PRIMARY KEY (user_id, vendor_key)
   )`);
+  // The user's own category list. Categories are picked from here, never
+  // typed free-hand, which is what keeps the list short instead of growing a
+  // tail of near-duplicates. `keywords` lets a category the user invented
+  // start catching expenses on its own.
+  await c.execute(`CREATE TABLE IF NOT EXISTS expense_categories (
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    keywords TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, name)
+  )`);
   // Normalised payee, so "EURO STORE CROW" and "Euro Store Crow" look up the
   // same learned category. Written on every insert/update from here on, and
   // backfilled for older rows by the re-categorise action.
@@ -447,6 +459,113 @@ export async function ensureCategoryTables(): Promise<void> {
     // Index already exists.
   }
   categoryTablesEnsured = true;
+}
+
+export type UserCategory = { name: string; keywords: string[] };
+
+// The user's category list, seeded from the built-in set the first time it is
+// read so a new account starts with something sensible rather than nothing.
+export async function listUserCategories(userId: string): Promise<UserCategory[]> {
+  await ensureCategoryTables();
+  const c = await db();
+
+  const read = async () =>
+    c.execute({
+      sql: `SELECT name, keywords FROM expense_categories WHERE user_id = ? ORDER BY sort_order ASC, name ASC`,
+      args: [userId],
+    });
+
+  let rs = await read();
+  if (rs.rows.length === 0) {
+    const now = new Date().toISOString();
+    await c.batch(
+      CATEGORIES.map((name, i) => ({
+        sql: `INSERT OR IGNORE INTO expense_categories (user_id, name, keywords, sort_order, created_at)
+              VALUES (?, ?, NULL, ?, ?)`,
+        args: [userId, name, i, now],
+      })),
+      "write"
+    );
+    rs = await read();
+  }
+
+  return rs.rows.map((r) => ({
+    name: r.name as string,
+    keywords: String(r.keywords ?? "")
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean),
+  }));
+}
+
+export async function createUserCategory(
+  userId: string,
+  name: string,
+  keywords: string
+): Promise<void> {
+  await listUserCategories(userId); // ensures the table is seeded first
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM expense_categories WHERE user_id = ?`,
+    args: [userId],
+  });
+  await c.execute({
+    sql: `INSERT OR IGNORE INTO expense_categories (user_id, name, keywords, sort_order, created_at)
+          VALUES (?, ?, ?, ?, ?)`,
+    args: [userId, name, keywords || null, Number(rs.rows[0].next), new Date().toISOString()],
+  });
+}
+
+// Renaming carries the existing expenses across, so a rename never orphans
+// history into a category that no longer exists.
+export async function updateUserCategory(
+  userId: string,
+  name: string,
+  changes: { newName?: string; keywords?: string }
+): Promise<void> {
+  await ensureCategoryTables();
+  const c = await db();
+  const newName = changes.newName?.trim();
+
+  if (newName && newName !== name) {
+    await c.execute({
+      sql: `UPDATE expense_categories SET name = ?, keywords = COALESCE(?, keywords) WHERE user_id = ? AND name = ?`,
+      args: [newName, changes.keywords ?? null, userId, name],
+    });
+    await c.execute({
+      sql: `UPDATE expenses SET category = ? WHERE user_id = ? AND category = ?`,
+      args: [newName, userId, name],
+    });
+    await c.execute({
+      sql: `UPDATE expense_vendor_rules SET category = ? WHERE user_id = ? AND category = ?`,
+      args: [newName, userId, name],
+    });
+    return;
+  }
+
+  await c.execute({
+    sql: `UPDATE expense_categories SET keywords = ? WHERE user_id = ? AND name = ?`,
+    args: [changes.keywords ?? null, userId, name],
+  });
+}
+
+// Deleting sends its expenses back to the review queue rather than destroying
+// them, and drops the learned rules that pointed at it.
+export async function deleteUserCategory(userId: string, name: string): Promise<void> {
+  await ensureCategoryTables();
+  const c = await db();
+  await c.execute({
+    sql: `DELETE FROM expense_categories WHERE user_id = ? AND name = ?`,
+    args: [userId, name],
+  });
+  await c.execute({
+    sql: `UPDATE expenses SET category = NULL WHERE user_id = ? AND category = ?`,
+    args: [userId, name],
+  });
+  await c.execute({
+    sql: `DELETE FROM expense_vendor_rules WHERE user_id = ? AND category = ?`,
+    args: [userId, name],
+  });
 }
 
 // Records "for this payee, I mean this category" - taught implicitly whenever
@@ -503,7 +622,7 @@ export type CategoryResolution = {
   vendorKey: string;
   // Which layer decided, so the UI can explain itself and the re-categorise
   // preview can show why each row is changing.
-  source: "vendor-rule" | "rule" | "provided" | "learned" | "none";
+  source: "vendor-rule" | "keyword" | "rule" | "provided" | "learned" | "none";
 };
 
 // The full pipeline. `provided` is whatever category came in on the request -
@@ -534,6 +653,19 @@ export async function resolveExpenseCategory(opts: {
 
   const vendorRule = await getVendorRule(opts.userId, vendorKey);
   if (vendorRule) return { category: vendorRule, vendorKey, source: "vendor-rule" };
+
+  // Keywords the user attached to their own categories. These sit above the
+  // built-in rules because they are the user's explicit configuration, and
+  // they are what makes a category they invented start catching expenses
+  // without having to be taught one payee at a time.
+  const haystack = `${opts.vendor ?? ""} ${opts.note ?? ""}`.toLowerCase();
+  if (haystack.trim()) {
+    for (const cat of await listUserCategories(opts.userId)) {
+      if (cat.keywords.some((k) => haystack.includes(k))) {
+        return { category: cat.name, vendorKey, source: "keyword" };
+      }
+    }
+  }
 
   const rule = matchRuleCategory(opts.vendor, opts.note);
   if (rule) return { category: rule, vendorKey, source: "rule" };

@@ -5,6 +5,7 @@ import {
   ensureCategoryTables,
   getVendorRule,
   learnedCategoryForVendor,
+  listUserCategories,
 } from "@/lib/db";
 import { canonicalCategory, matchRuleCategory, normalizeVendor } from "@/lib/categorize";
 
@@ -27,7 +28,7 @@ type Change = {
   amount: number;
   from: string | null;
   to: string;
-  reason: "rule" | "vendor-rule" | "tidy" | "learned";
+  reason: "rule" | "vendor-rule" | "keyword" | "tidy" | "learned";
   vendorKey: string;
 };
 
@@ -44,6 +45,7 @@ async function planChanges(userId: string): Promise<{ changes: Change[]; scanned
   });
 
   const rows = rs.rows as unknown as Row[];
+  const userCategories = await listUserCategories(userId);
   const changes: Change[] = [];
   const vendorRuleCache = new Map<string, string | null>();
   const learnedCache = new Map<string, string | null>();
@@ -63,6 +65,18 @@ async function planChanges(userId: string): Promise<{ changes: Change[]; scanned
       if (vr) {
         target = vr;
         reason = "vendor-rule";
+      }
+    }
+
+    // Keywords on the user's own categories, same precedence as at write time.
+    if (!target) {
+      const haystack = `${r.vendor ?? ""} ${r.note ?? ""}`.toLowerCase();
+      const hit = haystack.trim()
+        ? userCategories.find((cat) => cat.keywords.some((k) => haystack.includes(k)))
+        : undefined;
+      if (hit) {
+        target = hit.name;
+        reason = "keyword";
       }
     }
 

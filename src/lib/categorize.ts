@@ -271,16 +271,27 @@ function vendorTokens(raw: string | null | undefined): string[] {
 
 /* ---------- rule layer: family + car ---------- */
 
-// Full names of family members. Money sent to any of these is Family spending,
-// no matter which bank or wallet it went through.
-export const FAMILY_MEMBERS = ["Ijaz Ahmad Chatta", "Huda Ijaz", "Habib Ullah"];
+// People whose payments always mean the same thing.
+//
+// `aliases` exist because banks rarely send a full name. A RAAST transfer to
+// Ijaz arrives as "I.AHMED": no surname at all, and "Ahmed" spelled
+// differently. Matching the full name alone can never resolve that, so each
+// person carries the short forms their transfers actually appear as.
+export type PersonRule = { name: string; aliases: string[]; category: Category };
 
-// Named people whose payments always mean the same thing. Matched with the
-// same fuzzy logic as family names, so bank-mangled spellings still land.
-const PERSON_RULES: { names: string[]; category: Category }[] = [
-  { names: FAMILY_MEMBERS, category: "Family" },
-  { names: ["Ansab Bangash"], category: "Donations" },
+export const PEOPLE: PersonRule[] = [
+  {
+    name: "Ijaz Ahmad Chatta",
+    aliases: ["ijaz ahmad", "ijaz ahmed", "i ahmed", "i ahmad", "ijaz chatta", "ijaz"],
+    category: "Family",
+  },
+  { name: "Huda Ijaz", aliases: ["huda ijaz", "huda"], category: "Family" },
+  { name: "Habib Ullah", aliases: ["habib ullah", "habibullah"], category: "Family" },
+  { name: "Ansab Bangash", aliases: ["ansab bangash", "ansab"], category: "Donations" },
 ];
+
+// Kept for the existing tests/imports that reference family names directly.
+export const FAMILY_MEMBERS = PEOPLE.filter((p) => p.category === "Family").map((p) => p.name);
 
 // Relationship words that identify a payee as family on their own. Matched
 // against the payee/vendor only - never the note - so that a note like
@@ -412,33 +423,75 @@ const CAR_KEYWORDS = [
   "mtag",
 ];
 
-// True when `vendor` plausibly names `member`, tolerant of how bank feeds
+// Soundex. Names in this ledger arrive spelled however the sending bank felt
+// that day - Ahmad/Ahmed, Chatta/Chattha, Habib/Habeeb - and soundex collapses
+// exactly that kind of vowel/doubled-consonant variation onto one code.
+function soundex(token: string): string {
+  const s = token.toUpperCase().replace(/[^A-Z]/g, "");
+  if (!s) return "";
+  const code = (ch: string) =>
+    "BFPV".includes(ch) ? "1"
+    : "CGJKQSXZ".includes(ch) ? "2"
+    : "DT".includes(ch) ? "3"
+    : ch === "L" ? "4"
+    : "MN".includes(ch) ? "5"
+    : ch === "R" ? "6"
+    : "";
+
+  let out = s[0];
+  let prev = code(s[0]);
+  for (const ch of s.slice(1)) {
+    const c = code(ch);
+    // H and W are transparent: they don't break a run of the same code.
+    if (c && c !== prev) out += c;
+    if (!"HW".includes(ch)) prev = c;
+    if (out.length === 4) break;
+  }
+  return (out + "000").slice(0, 4);
+}
+
+// True when one vendor token plausibly stands for one name token.
+function tokenMatches(vendorTok: string, nameTok: string): boolean {
+  if (vendorTok === nameTok) return true;
+  // Initials: a lone "i" stands in for "ijaz".
+  if (vendorTok.length === 1) return nameTok.startsWith(vendorTok);
+  // Truncation in either direction, once there's enough to be meaningful.
+  const shorter = vendorTok.length < nameTok.length ? vendorTok : nameTok;
+  if (shorter.length >= 3 && (vendorTok.startsWith(nameTok) || nameTok.startsWith(vendorTok))) {
+    return true;
+  }
+  // Spelling variants of the same name.
+  return shorter.length >= 3 && soundex(vendorTok) === soundex(nameTok);
+}
+
+// True when `vendorToks` plausibly names `target`, tolerant of how bank feeds
 // mangle names: truncation ("Ijaz Ahmad Chatt"), initials ("Ijaz A Chatta"),
 // wallet suffixes, and run-together spellings ("Habibullah").
-function matchesFamilyMember(vendorToks: string[], member: string): boolean {
-  const memberToks = vendorTokens(member);
-  if (!memberToks.length || !vendorToks.length) return false;
+//
+// Every token of the target must be accounted for, and at least one match must
+// be a real word rather than a bare initial - so "H U" never counts as Habib
+// Ullah. Short forms are handled by giving each person explicit aliases rather
+// than by loosening this, which would start matching unrelated people.
+function nameMatches(vendorToks: string[], target: string): boolean {
+  const targetToks = vendorTokens(target);
+  if (!targetToks.length || !vendorToks.length) return false;
 
   // "habibullah" written as one word still matches "Habib Ullah".
-  if (vendorToks.join("").includes(memberToks.join(""))) return true;
+  if (vendorToks.join("").includes(targetToks.join(""))) return true;
 
   let strongMatches = 0;
-  for (const mt of memberToks) {
-    const hit = vendorToks.find((vt) => {
-      if (vt === mt) return true;
-      // Initials: a lone "a" stands in for "ahmad".
-      if (vt.length === 1) return mt.startsWith(vt);
-      // Truncation, in either direction, once there's enough to be meaningful.
-      const shorter = vt.length < mt.length ? vt : mt;
-      return shorter.length >= 3 && (vt.startsWith(mt) || mt.startsWith(vt));
-    });
+  for (const nt of targetToks) {
+    const hit = vendorToks.find((vt) => tokenMatches(vt, nt));
     if (!hit) return false;
     if (hit.length >= 3) strongMatches++;
   }
-
-  // Every part of the name matched, and at least one match was a real word
-  // rather than a bare initial - so "H U" alone never counts as Habib Ullah.
   return strongMatches >= 1;
+}
+
+// A person matches on their full name or on any of their registered aliases.
+function matchesPerson(vendorToks: string[], person: PersonRule): boolean {
+  if (nameMatches(vendorToks, person.name)) return true;
+  return person.aliases.some((a) => nameMatches(vendorToks, a));
 }
 
 // Layer 1. Returns a canonical category when a deterministic rule fires,
@@ -453,11 +506,11 @@ export function matchRuleCategory(
   if (vendorToks.some((t) => FAMILY_TERMS.has(t))) return "Family";
 
   const noteToks = vendorTokens(note);
-  for (const rule of PERSON_RULES) {
+  for (const person of PEOPLE) {
     // The payee field is the strong signal; a name written into the note
     // ("sent to Habib Ullah") counts too.
-    if (rule.names.some((n) => matchesFamilyMember(vendorToks, n))) return rule.category;
-    if (rule.names.some((n) => matchesFamilyMember(noteToks, n))) return rule.category;
+    if (matchesPerson(vendorToks, person)) return person.category;
+    if (matchesPerson(noteToks, person)) return person.category;
   }
 
   if (CAR_KEYWORDS.some((k) => haystack.includes(k))) return "Car";

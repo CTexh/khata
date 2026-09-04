@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Expense, YearlyPoint } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
-import { CATEGORIES } from "@/lib/categorize";
 
 type View = "month" | "year" | "categories";
 
@@ -66,6 +65,287 @@ function fromLocalDateTime(local: string): string {
   return new Date(local + ":00Z").toISOString();
 }
 
+/* ---------- categories ---------- */
+
+type UserCategory = { name: string; keywords: string[] };
+
+function useCategories() {
+  const [categories, setCategories] = useState<UserCategory[]>([]);
+
+  const reload = useCallback(async () => {
+    const res = await fetch("/api/categories");
+    if (!res.ok) return;
+    const d = await res.json();
+    setCategories(d.categories ?? []);
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { categories, setCategories, reload };
+}
+
+// Categories are always picked, never typed - that is what stops the list
+// sprouting "Furniture", "Grocery" and "Groceries" as separate things. New
+// ones are made deliberately in Manage categories.
+function CategorySelect({
+  value,
+  onChange,
+  categories,
+  disabled,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  categories: UserCategory[];
+  disabled?: boolean;
+  ariaLabel: string;
+}) {
+  // An expense may already carry a category that has since been renamed or
+  // removed; keep showing it rather than silently switching it to something
+  // else the moment this renders.
+  const missing = value && !categories.some((c) => c.name === value);
+
+  return (
+    <select
+      className="field"
+      aria-label={ariaLabel}
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">Uncategorised</option>
+      {missing && <option value={value}>{value}</option>}
+      {categories.map((c) => (
+        <option key={c.name} value={c.name}>
+          {c.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function ManageCategoriesModal({
+  categories,
+  onClose,
+  onChanged,
+}: {
+  categories: UserCategory[];
+  onClose: () => void;
+  onChanged: (next: UserCategory[]) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newKeywords, setNewKeywords] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editKeywords, setEditKeywords] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const send = async (method: string, body?: unknown, qs = "") => {
+    setBusy(true);
+    setError("");
+    const res = await fetch(`/api/categories${qs}`, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    setBusy(false);
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(d.error ?? "Something went wrong");
+      return false;
+    }
+    onChanged(d.categories ?? []);
+    return true;
+  };
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    if (await send("POST", { name: newName.trim(), keywords: newKeywords.trim() })) {
+      setNewName("");
+      setNewKeywords("");
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    if (await send("PATCH", { name: editing, newName: editName, keywords: editKeywords })) {
+      setEditing(null);
+    }
+  };
+
+  return (
+    <div
+      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-hidden backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.75)", overscrollBehavior: "none" }}
+      onClick={onClose}
+    >
+      <div
+        className="modal-panel card rise w-full max-w-lg overflow-y-auto"
+        style={{ color: "var(--ink)", overscrollBehavior: "contain" }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cats-title"
+      >
+        <div
+          className="flex items-center justify-between p-5 border-b sticky top-0 z-10"
+          style={{ borderColor: "var(--hairline)", background: "var(--surface)" }}
+        >
+          <h2 id="cats-title" className="text-[16px] font-semibold">
+            Manage categories
+          </h2>
+          <button
+            onClick={onClose}
+            type="button"
+            aria-label="Close"
+            className="inline-flex h-10 w-10 items-center justify-center text-[20px] opacity-50 hover:opacity-100 transition"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={add} className="p-5 flex flex-col gap-2 border-b" style={{ borderColor: "var(--hairline)" }}>
+          <p className="text-[13px] font-semibold">New category</p>
+          <input
+            className="field"
+            aria-label="New category name"
+            placeholder="Name, e.g. Gym"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+          />
+          <input
+            className="field"
+            aria-label="New category keywords"
+            placeholder="Auto-match keywords, comma separated (optional)"
+            value={newKeywords}
+            onChange={(e) => setNewKeywords(e.target.value)}
+          />
+          <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+            Keywords make it automatic: anything whose payee or note contains one
+            lands here on its own.
+          </p>
+          <div className="form-actions">
+            <button className="btn btn-primary !py-2 text-[13px]" disabled={busy || !newName.trim()}>
+              {busy ? "Saving…" : "Add category"}
+            </button>
+          </div>
+        </form>
+
+        {error && (
+          <p className="text-[13px] px-5 pt-3" style={{ color: "var(--bad)" }} role="alert">
+            {error}
+          </p>
+        )}
+
+        <ul className="p-5 flex flex-col gap-2">
+          {categories.map((c) => (
+            <li key={c.name} className="rounded-xl px-3 py-2.5" style={{ background: "var(--surface-2)" }}>
+              {editing === c.name ? (
+                <div className="flex flex-col gap-2">
+                  <input
+                    className="field"
+                    aria-label="Category name"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                  />
+                  <input
+                    className="field"
+                    aria-label="Category keywords"
+                    placeholder="Keywords, comma separated"
+                    value={editKeywords}
+                    onChange={(e) => setEditKeywords(e.target.value)}
+                  />
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="btn btn-ghost !py-2 text-[12px]"
+                      onClick={() => setEditing(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary !py-2 text-[12px]"
+                      onClick={saveEdit}
+                      disabled={busy}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : confirmDelete === c.name ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-[13px]">
+                    Delete <strong>{c.name}</strong>? Its expenses go back to
+                    uncategorised so you can re-sort them.
+                  </p>
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="btn btn-ghost !py-2 text-[12px]"
+                      onClick={() => setConfirmDelete(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger !py-2 text-[12px]"
+                      disabled={busy}
+                      onClick={async () => {
+                        if (await send("DELETE", undefined, `?name=${encodeURIComponent(c.name)}`)) {
+                          setConfirmDelete(null);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold truncate">{c.name}</p>
+                    <p className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
+                      {c.keywords.length ? c.keywords.join(", ") : "No auto-match keywords"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      className="text-[12px] underline underline-offset-2 cursor-pointer"
+                      style={{ color: "var(--muted)" }}
+                      onClick={() => {
+                        setEditing(c.name);
+                        setEditName(c.name);
+                        setEditKeywords(c.keywords.join(", "));
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="text-[12px] underline underline-offset-2 cursor-pointer"
+                      style={{ color: "var(--bad)" }}
+                      onClick={() => setConfirmDelete(c.name)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- detail modal ---------- */
 
 function DetailModal({
@@ -79,6 +359,7 @@ function DetailModal({
   onSaved: (updated: Expense) => void;
   onDelete: () => void;
 }) {
+  const { categories } = useCategories();
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
@@ -331,12 +612,11 @@ function DetailModal({
                 <label className="block text-[12px] font-medium mb-1.5" style={{ color: isDark ? "#b0b0b0" : "#666666" }}>
                   Category
                 </label>
-                <input
-                  className="field"
-                  aria-label="Category"
-                  placeholder="Groceries, Transport, etc. (optional)"
+                <CategorySelect
+                  ariaLabel="Category"
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
+                  categories={categories}
+                  onChange={setCategory}
                 />
               </div>
               <div>
@@ -408,6 +688,7 @@ function ExpenseForm({
   const [category, setCategory] = useState(editing?.category ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const { categories } = useCategories();
   // Once the user edits the category themselves, stop overwriting it.
   const [categoryTouched, setCategoryTouched] = useState(Boolean(editing?.category));
   const [autoFilled, setAutoFilled] = useState(false);
@@ -528,23 +809,16 @@ function ExpenseForm({
             </span>
           )}
         </label>
-        <input
-          className="field"
-          aria-label="Expense category"
-          placeholder="Starts typing a vendor and this fills itself"
-          list="expense-categories"
+        <CategorySelect
+          ariaLabel="Expense category"
           value={category}
-          onChange={(e) => {
-            setCategory(e.target.value);
+          categories={categories}
+          onChange={(v) => {
+            setCategory(v);
             setCategoryTouched(true);
             setAutoFilled(false);
           }}
         />
-        <datalist id="expense-categories">
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
       </div>
       <div>
         <label className="block text-[13px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
@@ -598,10 +872,11 @@ type RecatChange = {
   amount: number;
   from: string | null;
   to: string;
-  reason: "rule" | "vendor-rule" | "tidy" | "learned";
+  reason: "rule" | "vendor-rule" | "keyword" | "tidy" | "learned";
 };
 
 const REASON_LABEL: Record<RecatChange["reason"], string> = {
+  keyword: "keyword on one of your categories",
   rule: "family/car rule",
   "vendor-rule": "your rule for this payee",
   tidy: "same category, consistent spelling",
@@ -1069,7 +1344,15 @@ type CategoryPoint = { category: string; total: number; count: number };
 
 // One row of the "needs a category" queue. Assigning here also teaches the
 // rule for that payee, so the same transfer never has to be sorted twice.
-function ReviewRow({ expense, onAssigned }: { expense: Expense; onAssigned: () => void }) {
+function ReviewRow({
+  expense,
+  categories,
+  onAssigned,
+}: {
+  expense: Expense;
+  categories: UserCategory[];
+  onAssigned: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -1121,9 +1404,9 @@ function ReviewRow({ expense, onAssigned }: { expense: Expense; onAssigned: () =
           <option value="" disabled>
             {busy ? "Saving…" : "Pick a category…"}
           </option>
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
+          {categories.map((c) => (
+            <option key={c.name} value={c.name}>
+              {c.name}
             </option>
           ))}
         </select>
@@ -1211,6 +1494,8 @@ function CategoriesView({
   const [data, setData] = useState<{ total: number; categories: CategoryPoint[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [rows, setRows] = useState<Expense[] | null>(null);
+  const { categories, setCategories } = useCategories();
+  const [managing, setManaging] = useState(false);
 
   const monthParam = scope === "month" ? `&month=${month}` : "";
   const periodLabel = scope === "month" ? `${MONTH_NAMES[month - 1]} ${year}` : String(year);
@@ -1331,11 +1616,26 @@ function CategoriesView({
         )}
 
         <div className="form-actions mt-5">
+          <button
+            type="button"
+            className="btn btn-ghost !py-2 text-[13px]"
+            onClick={() => setManaging(true)}
+          >
+            Manage categories
+          </button>
           <a className="btn btn-ghost !py-2 text-[13px]" href={exportHref} download>
             Download Excel{selected ? ` · ${selected}` : ""}
           </a>
         </div>
       </div>
+
+      {managing && (
+        <ManageCategoriesModal
+          categories={categories}
+          onClose={() => setManaging(false)}
+          onChanged={setCategories}
+        />
+      )}
 
       {selected && (
         <section className="card p-5 sm:p-6 rise">
@@ -1370,6 +1670,7 @@ function CategoriesView({
                   <ReviewRow
                     key={e.id}
                     expense={e}
+                    categories={categories}
                     onAssigned={() => setRows((cur) => cur?.filter((r) => r.id !== e.id) ?? null)}
                   />
                 ) : (
