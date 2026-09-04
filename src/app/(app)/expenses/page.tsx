@@ -1320,6 +1320,20 @@ function ExpensesView({
   // the list only appears once a category has been picked - and until then it
   // isn't even fetched.
   const showHistory = scope === "month" || Boolean(selected);
+  const historyRef = useRef<HTMLElement>(null);
+
+  // Picking a bar is a request to see those expenses, and they sit below a
+  // full-height chart - so bring them to the reader rather than making them
+  // scroll past everything they just filtered out.
+  useEffect(() => {
+    if (!selected) return;
+    const el = historyRef.current;
+    if (!el) return;
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  }, [selected]);
 
   useEffect(() => {
     if (!showHistory) {
@@ -1484,7 +1498,7 @@ function ExpensesView({
       )}
 
       {showHistory && (
-      <section className="card p-5 sm:p-6 rise">
+      <section ref={historyRef} className="card p-5 sm:p-6 rise">
         <div className="flex items-center justify-between mb-4 gap-3">
           <div className="min-w-0">
             <p className="font-semibold truncate">{selected ?? "History"}</p>
