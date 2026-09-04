@@ -150,16 +150,6 @@ const CATEGORY_ALIASES: Record<string, Category> = {
   subscription: "Subscriptions",
   subscriptions: "Subscriptions",
 
-  // Person-to-person money the rules can't place. Kept as a real category so
-  // unknown transfers are visibly "a transfer I haven't sorted yet" rather
-  // than blank, and so they group together for review.
-  transfer: "Transfer",
-  transfers: "Transfer",
-  "mobile wallet transfer": "Transfer",
-  "funds transfer": "Transfer",
-  ibft: "Transfer",
-  raast: "Transfer",
-
   "personal care": "Personal Care",
   grooming: "Personal Care",
   salon: "Personal Care",
@@ -172,14 +162,41 @@ const CATEGORY_ALIASES: Record<string, Category> = {
   fitness: "Personal Care",
 };
 
+// What the bank writes when it has no idea what a payment was for: these name
+// the rail the money took, not the spending. Never accepted from the feed - an
+// expense nothing can explain has to land in review for a human decision,
+// rather than in a bucket that merely looks answered. "Transfer" stays a real
+// category so it can still be chosen by hand.
+const FEED_CATCHALLS = new Set([
+  "transfer",
+  "transfers",
+  "funds transfer",
+  "fund transfer",
+  "mobile wallet transfer",
+  "ibft",
+  "raast",
+  "payment",
+  "other",
+  "misc",
+  "miscellaneous",
+  "uncategorized",
+  "uncategorised",
+]);
+
+// True when a stored category is really just the bank shrugging - used by the
+// re-categorise pass to clear those back to uncategorised for a human.
+export function isUnexplainedCategory(raw: string | null | undefined): boolean {
+  const key = (raw ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  return key.length > 0 && FEED_CATCHALLS.has(key);
+}
+
 // Folds a free-text category onto the canonical list.
 //
 // `strict` is for categories that came from the email-sync routine rather than
 // from a person. Those are only ever guesses scraped out of a bank message, so
 // anything that isn't recognised is dropped, leaving the expense uncategorised
-// and waiting for review - that is what stops the feed inventing categories.
-// The bank's own "Transfer"/"RAAST" wording does map, so person-to-person money
-// the rules can't place lands in Transfer instead of nowhere.
+// and waiting for review - that is what stops the feed inventing categories,
+// and it covers the bank's own "Transfer"/"RAAST" wording too.
 //
 // Left non-strict (the default) an unrecognised value is passed through as-is,
 // which is how typing a brand-new category in the form creates one.
@@ -190,6 +207,8 @@ export function canonicalCategory(
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return null;
   const key = trimmed.toLowerCase().replace(/\s+/g, " ");
+
+  if (strict && FEED_CATCHALLS.has(key)) return null;
 
   const mapped = CATEGORY_ALIASES[key];
   if (mapped) return mapped;

@@ -912,12 +912,13 @@ type RecatChange = {
   note: string | null;
   amount: number;
   from: string | null;
-  to: string;
-  reason: "rule" | "vendor-rule" | "keyword" | "tidy" | "learned";
+  to: string | null;
+  reason: "rule" | "vendor-rule" | "keyword" | "tidy" | "learned" | "unexplained";
 };
 
 const REASON_LABEL: Record<RecatChange["reason"], string> = {
   keyword: "keyword on one of your categories",
+  unexplained: "nothing explains it - needs your decision",
   rule: "family/car rule",
   "vendor-rule": "your rule for this payee",
   tidy: "same category, consistent spelling",

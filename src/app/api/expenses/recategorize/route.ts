@@ -7,7 +7,12 @@ import {
   learnedCategoryForVendor,
   listUserCategories,
 } from "@/lib/db";
-import { canonicalCategory, matchRuleCategory, normalizeVendor } from "@/lib/categorize";
+import {
+  canonicalCategory,
+  isUnexplainedCategory,
+  matchRuleCategory,
+  normalizeVendor,
+} from "@/lib/categorize";
 
 export const dynamic = "force-dynamic";
 
@@ -27,8 +32,8 @@ type Change = {
   note: string | null;
   amount: number;
   from: string | null;
-  to: string;
-  reason: "rule" | "vendor-rule" | "keyword" | "tidy" | "learned";
+  to: string | null;
+  reason: "rule" | "vendor-rule" | "keyword" | "tidy" | "learned" | "unexplained";
   vendorKey: string;
 };
 
@@ -88,15 +93,24 @@ async function planChanges(userId: string): Promise<{ changes: Change[]; scanned
       }
     }
 
+    // Nothing explains this and the stored value is only the bank's shrug
+    // ("Transfer", "RAAST"). Clear it so it lands in review for a decision
+    // rather than sitting in a bucket that looks answered.
+    let clear = false;
+    if (!target && isUnexplainedCategory(current)) {
+      clear = true;
+      reason = "unexplained";
+    }
+
     // No rule applies, so just fold the existing value onto the canonical
     // spelling ("Grocery" -> "Groceries") and leave the meaning alone.
-    if (!target && current) {
+    if (!clear && !target && current) {
       target = canonicalCategory(current);
       reason = "tidy";
     }
 
     // Never had a category at all - fall back to what this payee usually is.
-    if (!target && !current && vendorKey) {
+    if (!clear && !target && !current && vendorKey) {
       if (!learnedCache.has(vendorKey)) {
         learnedCache.set(vendorKey, await learnedCategoryForVendor(userId, vendorKey));
       }
@@ -107,7 +121,7 @@ async function planChanges(userId: string): Promise<{ changes: Change[]; scanned
       }
     }
 
-    if (target && target !== current) {
+    if (clear || (target && target !== current)) {
       changes.push({
         id: r.id,
         expense_date: r.expense_date,
@@ -115,7 +129,7 @@ async function planChanges(userId: string): Promise<{ changes: Change[]; scanned
         note: r.note,
         amount: Number(r.amount),
         from: current,
-        to: target,
+        to: clear ? null : target,
         reason,
         vendorKey,
       });
@@ -135,7 +149,7 @@ export async function GET() {
   // Grouped counts make the summary readable when there are hundreds of rows.
   const summary = new Map<string, number>();
   for (const ch of changes) {
-    const key = `${ch.from ?? "(none)"} → ${ch.to}`;
+    const key = `${ch.from ?? "(none)"} → ${ch.to ?? "Uncategorised"}`;
     summary.set(key, (summary.get(key) ?? 0) + 1);
   }
 
