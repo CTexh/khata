@@ -1316,13 +1316,22 @@ function ExpensesView({
       .then(setData);
   }, [year, month, scope, monthParam, refreshKey]);
 
+  // A whole year of expenses is a wall of rows nobody reads, so over a year
+  // the list only appears once a category has been picked - and until then it
+  // isn't even fetched.
+  const showHistory = scope === "month" || Boolean(selected);
+
   useEffect(() => {
+    if (!showHistory) {
+      setExpenses(null);
+      return;
+    }
     setExpenses(null);
     const categoryParam = selected ? `&category=${encodeURIComponent(selected)}` : "";
     fetch(`/api/expenses?year=${year}${monthParam}${categoryParam}`)
       .then((r) => r.json())
       .then(setExpenses);
-  }, [selected, year, month, scope, monthParam, refreshKey]);
+  }, [showHistory, selected, year, month, scope, monthParam, refreshKey]);
 
   const nav = (dir: -1 | 1) => {
     if (scope === "year") {
@@ -1448,6 +1457,13 @@ function ExpensesView({
           >
             Manage categories
           </button>
+          <button
+            type="button"
+            className="btn btn-ghost !py-2 text-[13px]"
+            onClick={onRecategorize}
+          >
+            Re-categorise
+          </button>
           <a className="btn btn-ghost !py-2 text-[13px]" href={exportHref} download>
             Download Excel{selected ? ` · ${selected}` : ""}
           </a>
@@ -1462,6 +1478,7 @@ function ExpensesView({
         />
       )}
 
+      {showHistory && (
       <section className="card p-5 sm:p-6 rise">
         <div className="flex items-center justify-between mb-4 gap-3">
           <div className="min-w-0">
@@ -1482,14 +1499,6 @@ function ExpensesView({
                 Clear
               </button>
             )}
-            <button
-              type="button"
-              onClick={onRecategorize}
-              className="text-[12px] underline underline-offset-2 cursor-pointer"
-              style={{ color: "var(--muted)" }}
-            >
-              Re-categorise
-            </button>
             {!isNarrowed && (
               <p className="text-[12px]" style={{ color: "var(--muted)" }}>
                 {filtered?.length ?? 0} {filtered?.length === 1 ? "expense" : "expenses"}
@@ -1533,6 +1542,7 @@ function ExpensesView({
           </ul>
         )}
       </section>
+      )}
     </>
   );
 }
