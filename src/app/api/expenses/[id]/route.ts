@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { db, getExpense } from "@/lib/db";
+import {
+  db,
+  getExpense,
+  ensureCategoryTables,
+  resolveExpenseCategory,
+  upsertVendorRule,
+} from "@/lib/db";
+import { canonicalCategory } from "@/lib/categorize";
 import { getSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -35,12 +42,37 @@ export async function PUT(req: Request, { params }: Params) {
 
   const expenseDate = expenseDateTime.substring(0, 10);
 
+  await ensureCategoryTables();
+  const resolved = await resolveExpenseCategory({
+    userId: session.userId,
+    vendor,
+    note,
+    provided: category,
+    explicit: true,
+  });
+
   const c = await db();
   await c.execute({
-    sql: "UPDATE expenses SET amount = ?, note = ?, expense_date = ?, expense_datetime = ?, vendor = ?, category = ? WHERE id = ? AND user_id = ?",
-    args: [amount, note, expenseDate, expenseDateTime, vendor, category, id, session.userId],
+    sql: "UPDATE expenses SET amount = ?, note = ?, expense_date = ?, expense_datetime = ?, vendor = ?, category = ?, vendor_key = ? WHERE id = ? AND user_id = ?",
+    args: [
+      amount,
+      note,
+      expenseDate,
+      expenseDateTime,
+      vendor,
+      resolved.category,
+      resolved.vendorKey || null,
+      id,
+      session.userId,
+    ],
   });
-  return NextResponse.json({ ok: true });
+
+  // Editing an expense is where corrections happen, so a category set by hand
+  // here becomes the standing rule for that payee.
+  if (category && resolved.vendorKey && category !== existing.category) {
+    await upsertVendorRule(session.userId, resolved.vendorKey, canonicalCategory(category) ?? category);
+  }
+  return NextResponse.json({ ok: true, category: resolved.category });
 }
 
 export async function DELETE(_req: Request, { params }: Params) {

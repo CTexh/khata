@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Expense, YearlyPoint } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
+import { CATEGORIES } from "@/lib/categorize";
 
 type View = "month" | "year";
 
@@ -20,6 +21,17 @@ const CATEGORY_COLORS: Record<string, { bg: string; darkBg: string; text: string
   Restaurants: { bg: "#FFF3CD", darkBg: "#8B6F47", text: "#856404", darkText: "#FFE66D" },
   "Mobile Wallet Transfer": { bg: "#CCE5FF", darkBg: "#1E3A8A", text: "#0C47A1", darkText: "#93C5FD" },
   "Bank Fees": { bg: "#FFD9D9", darkBg: "#6B1F1F", text: "#A91F1F", darkText: "#FCA5A5" },
+  // Canonical set (see src/lib/categorize.ts)
+  Family: { bg: "#FCE7F3", darkBg: "#7A2E58", text: "#9D174D", darkText: "#F9A8D4" },
+  Car: { bg: "#DBEAFE", darkBg: "#1E40AF", text: "#1E3A8A", darkText: "#93C5FD" },
+  "Bills & Utilities": { bg: "#D4EDDA", darkBg: "#2D5C3E", text: "#155724", darkText: "#6FD676" },
+  Rent: { bg: "#EDE9FE", darkBg: "#4C1D95", text: "#5B21B6", darkText: "#C4B5FD" },
+  "Mobile Top-up": { bg: "#CFFAFE", darkBg: "#155E75", text: "#155E75", darkText: "#A5F3FC" },
+  Health: { bg: "#F8D7DA", darkBg: "#7A2B2B", text: "#721C24", darkText: "#FF6B6B" },
+  Subscriptions: { bg: "#E0E7FF", darkBg: "#3730A3", text: "#3730A3", darkText: "#A5B4FC" },
+  "Bank Charges": { bg: "#FFD9D9", darkBg: "#6B1F1F", text: "#A91F1F", darkText: "#FCA5A5" },
+  Transfer: { bg: "#CCE5FF", darkBg: "#1E3A8A", text: "#0C47A1", darkText: "#93C5FD" },
+  Other: { bg: "#E9ECEF", darkBg: "#404040", text: "#495057", darkText: "#BFBFBF" },
 };
 
 function getCategoryColor(category?: string) {
@@ -391,6 +403,48 @@ function ExpenseForm({
   const [category, setCategory] = useState(editing?.category ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Once the user edits the category themselves, stop overwriting it.
+  const [categoryTouched, setCategoryTouched] = useState(Boolean(editing?.category));
+  const [autoFilled, setAutoFilled] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+
+  // Ask the server what this payee usually is, and pre-fill it. Debounced so
+  // it fires once the user stops typing rather than on every keystroke.
+  useEffect(() => {
+    if (categoryTouched) return;
+    const v = vendor.trim();
+    const n = note.trim();
+    if (!v && !n) {
+      setAutoFilled(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setSuggesting(true);
+      try {
+        const res = await fetch("/api/expenses/categorize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vendor: v, note: n }),
+        });
+        if (!res.ok || cancelled) return;
+        const d = await res.json();
+        if (cancelled || !d.category) return;
+        setCategory(d.category);
+        setAutoFilled(true);
+      } catch {
+        // Suggestion is a convenience - failing to get one is not an error.
+      } finally {
+        if (!cancelled) setSuggesting(false);
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [vendor, note, categoryTouched]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -443,18 +497,6 @@ function ExpenseForm({
       </div>
       <div>
         <label className="block text-[13px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
-          Note
-        </label>
-        <input
-          className="field"
-          aria-label="Expense note"
-          placeholder="What was it for? (optional)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-      </div>
-      <div>
-        <label className="block text-[13px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
           Vendor/Merchant
         </label>
         <input
@@ -466,15 +508,49 @@ function ExpenseForm({
         />
       </div>
       <div>
-        <label className="block text-[13px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
+        <label
+          className="flex items-center gap-2 text-[13px] font-medium mb-1.5"
+          style={{ color: "var(--muted)" }}
+        >
           Category
+          {suggesting && <span className="text-[11px]">checking…</span>}
+          {!suggesting && autoFilled && (
+            <span
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+            >
+              AUTO
+            </span>
+          )}
         </label>
         <input
           className="field"
           aria-label="Expense category"
-          placeholder="Groceries, Transport, etc. (optional)"
+          placeholder="Starts typing a vendor and this fills itself"
+          list="expense-categories"
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
+          onChange={(e) => {
+            setCategory(e.target.value);
+            setCategoryTouched(true);
+            setAutoFilled(false);
+          }}
+        />
+        <datalist id="expense-categories">
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+      </div>
+      <div>
+        <label className="block text-[13px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
+          Note
+        </label>
+        <input
+          className="field"
+          aria-label="Expense note"
+          placeholder="What was it for? (optional)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
         />
       </div>
       <div>
@@ -504,6 +580,189 @@ function ExpenseForm({
         </button>
       </div>
     </form>
+  );
+}
+
+/* ---------- re-categorise (backfill) ---------- */
+
+type RecatChange = {
+  id: string;
+  expense_date: string;
+  vendor: string | null;
+  note: string | null;
+  amount: number;
+  from: string | null;
+  to: string;
+  reason: "rule" | "vendor-rule" | "tidy" | "learned";
+};
+
+const REASON_LABEL: Record<RecatChange["reason"], string> = {
+  rule: "family/car rule",
+  "vendor-rule": "your rule for this payee",
+  tidy: "same category, consistent spelling",
+  learned: "how you usually categorise this payee",
+};
+
+// Shows exactly what a re-categorisation would change before anything is
+// written, so a bad rule can be spotted rather than silently rewriting history.
+function RecategorizeModal({ onClose, onApplied }: { onClose: () => void; onApplied: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [data, setData] = useState<{
+    scanned: number;
+    total: number;
+    summary: { label: string; count: number }[];
+    changes: RecatChange[];
+  } | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/expenses/recategorize")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Couldn't build a preview"))))
+      .then(setData)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const apply = async () => {
+    setApplying(true);
+    const res = await fetch("/api/expenses/recategorize", { method: "POST" });
+    setApplying(false);
+    if (!res.ok) {
+      setError("Couldn't apply the changes");
+      return;
+    }
+    onApplied();
+  };
+
+  return (
+    <div
+      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-hidden backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.75)", overscrollBehavior: "none" }}
+      onClick={onClose}
+    >
+      <div
+        className="modal-panel card rise w-full max-w-xl overflow-y-auto"
+        style={{ color: "var(--ink)", overscrollBehavior: "contain" }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="recat-title"
+      >
+        <div
+          className="flex items-center justify-between p-5 border-b sticky top-0 z-10"
+          style={{ borderColor: "var(--hairline)", background: "var(--surface)" }}
+        >
+          <h2 id="recat-title" className="text-[16px] font-semibold">
+            Re-categorise expenses
+          </h2>
+          <button
+            onClick={onClose}
+            type="button"
+            aria-label="Close"
+            className="inline-flex h-10 w-10 items-center justify-center text-[20px] opacity-50 hover:opacity-100 transition"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="p-5 flex flex-col gap-3">
+          {loading && (
+            <p className="text-[13px]" style={{ color: "var(--muted)" }} role="status">
+              Working out what would change…
+            </p>
+          )}
+
+          {error && (
+            <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
+              {error}
+            </p>
+          )}
+
+          {data && !loading && (
+            <>
+              <p className="text-[13px]" style={{ color: "var(--muted)" }}>
+                Scanned {data.scanned} expenses.{" "}
+                {data.total === 0 ? (
+                  <>Nothing needs changing.</>
+                ) : (
+                  <>
+                    <strong style={{ color: "var(--ink)" }}>{data.total}</strong> would change.
+                    Nothing is saved until you apply.
+                  </>
+                )}
+              </p>
+
+              {data.summary.length > 0 && (
+                <ul className="flex flex-col gap-1">
+                  {data.summary.map((s) => (
+                    <li
+                      key={s.label}
+                      className="flex items-center justify-between text-[13px] py-1.5 px-3 rounded-lg"
+                      style={{ background: "var(--surface-2)" }}
+                    >
+                      <span className="truncate">{s.label}</span>
+                      <span className="tabular font-semibold shrink-0 ml-3">{s.count}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {data.changes.length > 0 && (
+                <details>
+                  <summary className="text-[13px] cursor-pointer" style={{ color: "var(--muted)" }}>
+                    See individual expenses
+                  </summary>
+                  <ul className="flex flex-col gap-2 mt-2">
+                    {data.changes.map((ch) => (
+                      <li
+                        key={ch.id}
+                        className="text-[12px] py-2 px-3 rounded-lg"
+                        style={{ background: "var(--surface-2)" }}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-semibold truncate">
+                            {ch.vendor || ch.note || "Expense"}
+                          </span>
+                          <span className="tabular shrink-0">{fmtRs(ch.amount)}</span>
+                        </div>
+                        <div style={{ color: "var(--muted)" }}>
+                          {fmtDateLabel(ch.expense_date)} · {ch.from ?? "uncategorised"} →{" "}
+                          <strong style={{ color: "var(--ink)" }}>{ch.to}</strong> ·{" "}
+                          {REASON_LABEL[ch.reason]}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  {data.total > data.changes.length && (
+                    <p className="text-[12px] mt-2" style={{ color: "var(--muted)" }}>
+                      Showing the first {data.changes.length} of {data.total}.
+                    </p>
+                  )}
+                </details>
+              )}
+            </>
+          )}
+        </div>
+
+        <div
+          className="form-actions p-5 border-t"
+          style={{ borderColor: "var(--hairline)" }}
+        >
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={apply}
+            disabled={applying || loading || !data || data.total === 0}
+          >
+            {applying ? "Applying…" : data ? `Apply ${data.total} change${data.total === 1 ? "" : "s"}` : "Apply"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -568,12 +827,14 @@ function MonthView({
   onNav,
   refreshKey,
   onViewDetail,
+  onRecategorize,
 }: {
   year: number;
   month: number;
   onNav: (dir: -1 | 1) => void;
   refreshKey: number;
   onViewDetail: (e: Expense) => void;
+  onRecategorize: () => void;
 }) {
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [search, setSearch] = useState("");
@@ -635,11 +896,21 @@ function MonthView({
       </div>
 
       <section className="card p-5 sm:p-6 rise">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-3">
           <p className="font-semibold">History</p>
-          <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-            {filtered?.length ?? 0} {filtered?.length === 1 ? "expense" : "expenses"}
-          </p>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={onRecategorize}
+              className="text-[12px] underline underline-offset-2 cursor-pointer"
+              style={{ color: "var(--muted)" }}
+            >
+              Re-categorise
+            </button>
+            <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+              {filtered?.length ?? 0} {filtered?.length === 1 ? "expense" : "expenses"}
+            </p>
+          </div>
         </div>
 
         <input
@@ -798,6 +1069,7 @@ export default function ExpensesPage() {
   const [adding, setAdding] = useState(false);
   const [viewingDetail, setViewingDetail] = useState<Expense | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [recategorizing, setRecategorizing] = useState(false);
 
   const navMonth = (dir: -1 | 1) => {
     let m = month + dir;
@@ -841,6 +1113,16 @@ export default function ExpensesPage() {
         />
       )}
 
+      {recategorizing && (
+        <RecategorizeModal
+          onClose={() => setRecategorizing(false)}
+          onApplied={() => {
+            setRecategorizing(false);
+            refresh();
+          }}
+        />
+      )}
+
       {viewingDetail && (
         <DetailModal
           expense={viewingDetail}
@@ -875,6 +1157,7 @@ export default function ExpensesPage() {
           onNav={navMonth}
           refreshKey={refreshKey}
           onViewDetail={setViewingDetail}
+          onRecategorize={() => setRecategorizing(true)}
         />
       )}
       {view === "year" && (

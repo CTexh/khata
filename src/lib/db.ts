@@ -1,5 +1,6 @@
 import { createClient, type Client } from "@libsql/client";
 import { randomUUID } from "crypto";
+import { canonicalCategory, matchRuleCategory, normalizeVendor } from "@/lib/categorize";
 
 let client: Client | null = null;
 
@@ -364,6 +365,141 @@ export async function yearlyExpenseTotals(userId: string, year: number): Promise
     const m = i + 1;
     return map.get(m) ?? { month: m, total: 0, count: 0 };
   });
+}
+
+/* ---------- expense categorisation ----------
+ * See src/lib/categorize.ts for the deterministic half. This half holds the
+ * two layers that need the database: per-vendor rules the user has taught by
+ * setting a category by hand, and the category they've historically used most
+ * for the same vendor.
+ */
+
+let categoryTablesEnsured = false;
+
+export async function ensureCategoryTables(): Promise<void> {
+  if (categoryTablesEnsured) return;
+  const c = await db();
+  await c.execute(`CREATE TABLE IF NOT EXISTS expense_vendor_rules (
+    user_id TEXT NOT NULL,
+    vendor_key TEXT NOT NULL,
+    category TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, vendor_key)
+  )`);
+  // Normalised payee, so "EURO STORE CROW" and "Euro Store Crow" look up the
+  // same learned category. Written on every insert/update from here on, and
+  // backfilled for older rows by the re-categorise action.
+  try {
+    await c.execute(`ALTER TABLE expenses ADD COLUMN vendor_key TEXT`);
+  } catch {
+    // Column already exists.
+  }
+  try {
+    await c.execute(
+      `CREATE INDEX IF NOT EXISTS idx_expenses_vendor_key ON expenses (user_id, vendor_key)`
+    );
+  } catch {
+    // Index already exists.
+  }
+  categoryTablesEnsured = true;
+}
+
+// Records "for this payee, I mean this category" - taught implicitly whenever
+// the user saves an expense with a category by hand.
+export async function upsertVendorRule(
+  userId: string,
+  vendorKey: string,
+  category: string
+): Promise<void> {
+  if (!vendorKey || !category) return;
+  await ensureCategoryTables();
+  const c = await db();
+  await c.execute({
+    sql: `INSERT INTO expense_vendor_rules (user_id, vendor_key, category, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(user_id, vendor_key) DO UPDATE SET category = excluded.category, updated_at = excluded.updated_at`,
+    args: [userId, vendorKey, category, new Date().toISOString()],
+  });
+}
+
+export async function getVendorRule(userId: string, vendorKey: string): Promise<string | null> {
+  if (!vendorKey) return null;
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT category FROM expense_vendor_rules WHERE user_id = ? AND vendor_key = ?`,
+    args: [userId, vendorKey],
+  });
+  return (rs.rows[0]?.category as string) ?? null;
+}
+
+// The category this user has used most often for this payee before.
+export async function learnedCategoryForVendor(
+  userId: string,
+  vendorKey: string
+): Promise<string | null> {
+  if (!vendorKey) return null;
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT category, COUNT(*) AS uses
+          FROM expenses
+          WHERE user_id = ? AND vendor_key = ? AND category IS NOT NULL AND category != ''
+          GROUP BY category
+          ORDER BY uses DESC
+          LIMIT 1`,
+    args: [userId, vendorKey],
+  });
+  return (rs.rows[0]?.category as string) ?? null;
+}
+
+export type CategoryResolution = {
+  category: string | null;
+  vendorKey: string;
+  // Which layer decided, so the UI can explain itself and the re-categorise
+  // preview can show why each row is changing.
+  source: "vendor-rule" | "rule" | "provided" | "learned" | "none";
+};
+
+// The full pipeline. `provided` is whatever category came in on the request -
+// typed by the user, or supplied by the email-sync routine.
+//
+// `explicit` marks a category a human chose in the UI right now. That always
+// wins, otherwise an older vendor rule would quietly discard the correction
+// the user just made.
+//
+// Failing that, a vendor rule wins: it is the user's standing instruction
+// about this exact payee, so it beats even the built-in family/car rules.
+// The built-in rules come next and deliberately outrank a `provided` category
+// from the feed, because the bank labels money sent to family as "Transfer" -
+// overriding that is the entire point.
+export async function resolveExpenseCategory(opts: {
+  userId: string;
+  vendor: string | null;
+  note: string | null;
+  provided: string | null;
+  explicit?: boolean;
+}): Promise<CategoryResolution> {
+  const vendorKey = normalizeVendor(opts.vendor);
+
+  if (opts.explicit) {
+    const chosen = canonicalCategory(opts.provided);
+    if (chosen) return { category: chosen, vendorKey, source: "provided" };
+  }
+
+  const vendorRule = await getVendorRule(opts.userId, vendorKey);
+  if (vendorRule) return { category: vendorRule, vendorKey, source: "vendor-rule" };
+
+  const rule = matchRuleCategory(opts.vendor, opts.note);
+  if (rule) return { category: rule, vendorKey, source: "rule" };
+
+  const provided = canonicalCategory(opts.provided);
+  if (provided) return { category: provided, vendorKey, source: "provided" };
+
+  const learned = await learnedCategoryForVendor(opts.userId, vendorKey);
+  if (learned) return { category: learned, vendorKey, source: "learned" };
+
+  return { category: null, vendorKey, source: "none" };
 }
 
 /* ---------- subscriptions (scoped per user) ----------
