@@ -267,14 +267,22 @@ function vendorTokens(raw: string | null | undefined): string[] {
   let s = (raw ?? "").toLowerCase();
   if (!s.trim()) return [];
 
-  // Drop the trailing "(Easypaisa)" / "(NayaPay)" wallet marker.
+  // Drop the trailing "(Easypaisa)" / "(NayaPay)" wallet marker, and the
+  // account/reference debris a full bank line carries:
+  // "Bank AL Habib a/c *4010 - RAAST transfer to X (Ref BAHL26090317...)".
   s = s.replace(/\([^)]*\)/g, " ");
+  s = s.replace(/\ba\s*\/\s*c\b/g, " ");
+  s = s.replace(/\bref\b/g, " ");
   for (const phrase of BANK_PHRASES) s = s.replace(new RegExp(phrase, "g"), " ");
 
-  return s
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t && !BANK_TOKENS.has(t));
+  return (
+    s
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      // Anything with a digit in it is an account number or a reference code,
+      // never part of a payee's name.
+      .filter((t) => t && !/\d/.test(t) && !BANK_TOKENS.has(t))
+  );
 }
 
 /* ---------- rule layer: family + car ---------- */
@@ -486,12 +494,19 @@ function tokenMatches(vendorTok: string, nameTok: string): boolean {
 // be a real word rather than a bare initial - so "H U" never counts as Habib
 // Ullah. Short forms are handled by giving each person explicit aliases rather
 // than by loosening this, which would start matching unrelated people.
-function nameMatches(vendorToks: string[], target: string): boolean {
+function nameMatches(vendorToks: string[], target: string, allowExtraWords = false): boolean {
   const targetToks = vendorTokens(target);
   if (!targetToks.length || !vendorToks.length) return false;
 
-  // "habibullah" written as one word still matches "Habib Ullah".
-  if (vendorToks.join("").includes(targetToks.join(""))) return true;
+  // "habibullah" written as one word still matches "Habib Ullah", and vice
+  // versa. Compared as whole strings, and only when one side is a single
+  // token: a substring scan across joined tokens matches straight through word
+  // boundaries, which is how "ALI AHMAD khan" once matched the alias
+  // "i ahmad" (…al|i ahmad|khan…) and filed a stranger as family.
+  const vJoined = vendorToks.join("");
+  const tJoined = targetToks.join("");
+  if (vendorToks.length === 1 && vendorToks[0] === tJoined) return true;
+  if (targetToks.length === 1 && vJoined === targetToks[0]) return true;
 
   let strongMatches = 0;
   for (const nt of targetToks) {
@@ -499,13 +514,32 @@ function nameMatches(vendorToks: string[], target: string): boolean {
     if (!hit) return false;
     if (hit.length >= 3) strongMatches++;
   }
+
+  // The payee must BE this person, not merely contain them. Without this,
+  // leftover words are ignored and strangers get adopted: "Sana Ijazi" and
+  // "Ijazul Haq" matched the alias "ijaz", "Nasir Habib" matched
+  // "habibullah" by truncation, and "Ali Habib Ullah Khan Tareen" matched
+  // outright. Misses are cheap here - they land in Transfer and are taught
+  // once - whereas a false positive quietly misfiles money as family.
+  // Relaxed for notes, which are prose ("sent to Habib Ullah") rather than a
+  // bare payee, so extra words there are expected rather than suspicious.
+  if (!allowExtraWords && !vendorToks.every((vt) => targetToks.some((nt) => tokenMatches(vt, nt)))) {
+    return false;
+  }
+
+  // At least one match was a real word rather than a bare initial, so "H U"
+  // never counts as Habib Ullah.
   return strongMatches >= 1;
 }
 
 // A person matches on their full name or on any of their registered aliases.
-function matchesPerson(vendorToks: string[], person: PersonRule): boolean {
-  if (nameMatches(vendorToks, person.name)) return true;
-  return person.aliases.some((a) => nameMatches(vendorToks, a));
+function matchesPerson(
+  vendorToks: string[],
+  person: PersonRule,
+  allowExtraWords = false
+): boolean {
+  if (nameMatches(vendorToks, person.name, allowExtraWords)) return true;
+  return person.aliases.some((a) => nameMatches(vendorToks, a, allowExtraWords));
 }
 
 // Layer 1. Returns a canonical category when a deterministic rule fires,
@@ -524,7 +558,9 @@ export function matchRuleCategory(
     // The payee field is the strong signal; a name written into the note
     // ("sent to Habib Ullah") counts too.
     if (matchesPerson(vendorToks, person)) return person.category;
-    if (matchesPerson(noteToks, person)) return person.category;
+    // A note is a sentence, so only the person's full name counts there -
+    // short aliases like "ijaz" are far too easy to trip over in prose.
+    if (nameMatches(noteToks, person.name, true)) return person.category;
   }
 
   if (CAR_KEYWORDS.some((k) => haystack.includes(k))) return "Car";
