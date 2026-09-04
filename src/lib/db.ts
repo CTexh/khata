@@ -453,7 +453,10 @@ export async function listUserCategories(userId: string): Promise<UserCategory[]
 
   const read = async () =>
     c.execute({
-      sql: `SELECT name, keywords FROM expense_categories WHERE user_id = ? ORDER BY sort_order ASC, name ASC`,
+      // Alphabetical: this list is scanned to find a known name, so seed order
+      // just makes it a hunt. The breakdown chart stays sorted by amount,
+      // since there the question is what costs most, not where a name sits.
+      sql: `SELECT name, keywords FROM expense_categories WHERE user_id = ? ORDER BY name COLLATE NOCASE ASC`,
       args: [userId],
     });
 
