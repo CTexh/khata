@@ -1362,11 +1362,16 @@ function ExpensesView({
         (e.category?.toLowerCase().includes(q) ?? false)
       );
     })
-    .sort(
-      (a, b) =>
+    // Two different questions, two orderings. The plain month list is a
+    // ledger - what happened, most recent first. Drilling into a category
+    // asks where the money went, so the biggest amounts lead and equal
+    // amounts fall back to newest.
+    .sort((a, b) => {
+      const byDate =
         new Date(b.expense_datetime || b.expense_date).getTime() -
-        new Date(a.expense_datetime || a.expense_date).getTime()
-    );
+        new Date(a.expense_datetime || a.expense_date).getTime();
+      return selected ? b.amount - a.amount || byDate : byDate;
+    });
 
   const shownTotal = filtered?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
   const isNarrowed = Boolean(selected) || Boolean(search.trim());
