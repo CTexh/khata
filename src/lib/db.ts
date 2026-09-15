@@ -1410,7 +1410,9 @@ export type UndoStep =
   | { op: "remove_category"; name: string }
   | { op: "rename_category"; from: string; to: string }
   | { op: "restore_category"; category: CategoryRow; expenseIds: string[]; rules: RuleRow[] }
-  | { op: "set_category_keywords"; name: string; keywords: string | null };
+  | { op: "set_category_keywords"; name: string; keywords: string | null }
+  | { op: "remove_expense"; id: string; amount: number; vendor: string | null }
+  | { op: "set_email_reminders"; on: boolean };
 
 const UNDO_OPS = new Set<string>([
   "set_due_date",
@@ -1426,6 +1428,8 @@ const UNDO_OPS = new Set<string>([
   "rename_category",
   "restore_category",
   "set_category_keywords",
+  "remove_expense",
+  "set_email_reminders",
 ]);
 
 // Undo steps are written only by this app, so a known op is trusted as shaped.
@@ -1545,6 +1549,76 @@ export async function undoLastAssistantEntry(userId: string): Promise<UndoResult
     peopleRemoved: removablePeople.map((p) => p.name as string),
     steps: undoSteps,
   };
+}
+
+/* ---------- assistant feedback ---------- */
+
+// Suggestions people give the assistant, and messages it couldn't handle -
+// the list to improve it from. Shown to admins on the Admin page.
+let feedbackTableEnsured = false;
+async function ensureFeedbackTable(): Promise<void> {
+  if (feedbackTableEnsured) return;
+  if (await schemaCurrent("assistant_feedback", "1")) {
+    feedbackTableEnsured = true;
+    return;
+  }
+  const c = await db();
+  await c.execute(`CREATE TABLE IF NOT EXISTS assistant_feedback (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+  await markSchema("assistant_feedback", "1");
+  feedbackTableEnsured = true;
+}
+
+export type AssistantFeedback = {
+  id: string;
+  username: string;
+  kind: "suggestion" | "not_understood";
+  text: string;
+  created_at: string;
+};
+
+export async function recordAssistantFeedback(
+  userId: string,
+  kind: AssistantFeedback["kind"],
+  text: string
+): Promise<void> {
+  await ensureFeedbackTable();
+  const c = await db();
+  await c.execute({
+    sql: "INSERT INTO assistant_feedback (id, user_id, kind, text, created_at) VALUES (?, ?, ?, ?, ?)",
+    args: [randomUUID(), userId, kind, text.slice(0, 500), new Date().toISOString()],
+  });
+}
+
+export async function listAssistantFeedback(limit = 100): Promise<AssistantFeedback[]> {
+  await ensureFeedbackTable();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT f.id, COALESCE(u.username, 'deleted user') AS username, f.kind, f.text, f.created_at
+          FROM assistant_feedback f LEFT JOIN users u ON u.id = f.user_id
+          ORDER BY f.created_at DESC LIMIT ?`,
+    args: [limit],
+  });
+  return rs.rows.map((r) => ({
+    id: r.id as string,
+    username: r.username as string,
+    kind: r.kind === "suggestion" ? "suggestion" : "not_understood",
+    text: r.text as string,
+    created_at: r.created_at as string,
+  }));
+}
+
+// Deletes one item, or all of them when no id is given.
+export async function deleteAssistantFeedback(id?: string): Promise<void> {
+  await ensureFeedbackTable();
+  const c = await db();
+  if (id) await c.execute({ sql: "DELETE FROM assistant_feedback WHERE id = ?", args: [id] });
+  else await c.execute("DELETE FROM assistant_feedback");
 }
 
 /* ---------- Udhar Khata from the assistant ---------- */
@@ -1927,6 +2001,14 @@ export function undoStatements(userId: string, steps: UndoStep[]): Statement[] {
           sql: "UPDATE expense_categories SET keywords = ? WHERE user_id = ? AND name = ?",
           args: [step.keywords, userId, step.name],
         });
+        break;
+
+      case "remove_expense":
+        out.push({ sql: "DELETE FROM expenses WHERE id = ? AND user_id = ?", args: [step.id, userId] });
+        break;
+
+      case "set_email_reminders":
+        out.push({ sql: "UPDATE users SET email_reminders = ? WHERE id = ?", args: [step.on ? 1 : 0, userId] });
         break;
     }
   }

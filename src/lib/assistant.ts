@@ -40,15 +40,22 @@ import {
   updateSubscriptionFields,
   updateUserCategory,
   listExpensesInRange,
+  listTx,
+  getProfileSettings,
+  updateUserProfile,
+  recordAssistantFeedback,
   type Expense,
   type ExpenseRow,
   type LedgerPerson,
   type LedgerWrite,
 } from "@/lib/db";
 import {
+  NOT_UNDERSTOOD,
+  answerAppQuestion,
   detectCommand,
   matchExpenses,
   understandMessage,
+  type Insight,
   type Action,
   type CategoryAction,
   type ChatTurn,
@@ -59,6 +66,7 @@ import {
 } from "@/lib/assistant-actions";
 import {
   GeminiBusyError,
+  addDays,
   pakistanToday,
   parseOffline,
   personKey,
@@ -106,6 +114,13 @@ import {
   rangeLabel,
   subscriptionsOverviewReply,
   whenPhrase,
+  FEEDBACK_REPLY,
+  appHelpReply,
+  compareReply,
+  expensesBatchReply,
+  personHistoryReply,
+  remindersReply,
+  udharDueReply,
   type ExpenseView,
 } from "@/lib/assistant-replies";
 
@@ -133,7 +148,7 @@ export type AssistantLog = {
   msg: string; // tail of the message id
   type: "text" | "image" | "audio";
   outcome: string;
-  kind?: "expense" | "ledger" | "query" | "due_date" | "expense_edit" | "expense_delete" | "person" | "subscription" | "category" | "command";
+  kind?: string;
   queryType?: string;
   direction?: "lend" | "repayment";
   entries?: number;
@@ -261,6 +276,12 @@ async function act(
 
   if (!outcome.ok) {
     log.outcome = "rejected";
+    // Kept for the Admin page, so what people ask for that the assistant
+    // can't do becomes the list of what to teach it next.
+    const said = (heard ?? input.text).trim();
+    if (outcome.reason === NOT_UNDERSTOOD && said) {
+      await recordAssistantFeedback(input.userId, "not_understood", said).catch(() => {});
+    }
     return refusalReply(outcome.reason, outcome.question ? QUESTION_REFUSAL_HEADING : undefined);
   }
   switch (outcome.kind) {
@@ -278,6 +299,19 @@ async function act(
       return runSubscription(input, outcome.sub, log);
     case "category":
       return runCategory(input, outcome.category, log);
+    case "expenses_batch":
+      return saveExpenses(input, outcome.expenses, categories, log);
+    case "insight":
+      return answerInsight(input.userId, outcome.insight, people, log);
+    case "app_question":
+      return answerHelp(outcome.question, log);
+    case "reminders":
+      return setReminders(input, outcome.on, log);
+    case "feedback":
+      await recordAssistantFeedback(input.userId, "suggestion", outcome.text);
+      log.kind = "feedback";
+      log.outcome = "feedback_saved";
+      return FEEDBACK_REPLY;
   }
   if (outcome.kind === "query") return answerQuery(input.userId, outcome.query, people, log);
   if (outcome.kind === "due_date") return saveDueDate(input, outcome.due, people, log);
@@ -901,6 +935,136 @@ async function runCategory(input: AssistantInput, category: CategoryAction, log:
       return categoryKeywordsReply({ name: category.name, keywords: category.keywords });
     }
   }
+}
+
+/* ---------- several expenses at once ---------- */
+
+async function saveExpenses(
+  input: AssistantInput,
+  expenses: ParsedExpense[],
+  categories: string[],
+  log: AssistantLog
+): Promise<string> {
+  const saved: { id: string; amount: number; vendor: string | null; note: string; category: string | null }[] = [];
+  for (const expense of expenses) {
+    const resolution = await resolveExpenseCategory({
+      userId: input.userId,
+      vendor: expense.vendor,
+      note: expense.note,
+      provided: expense.categoryHint,
+      explicit: false,
+    });
+    const category =
+      resolution.category ??
+      categories.find((c) => c.toLowerCase() === expense.categoryHint?.toLowerCase()) ??
+      null;
+    const id = await insertExpense({
+      userId: input.userId,
+      amount: expense.amount,
+      note: `${SOURCE_LABEL}: ${expense.note}`,
+      expenseDateTime: toStoredDateTime(expense.date),
+      vendor: expense.vendor,
+      category,
+      vendorKey: resolution.vendorKey,
+    });
+    saved.push({ id, amount: expense.amount, vendor: expense.vendor, note: expense.note, category });
+  }
+  // One UNDO removes the whole message's worth.
+  await attachInboundUndo(
+    input.messageId,
+    saved.map((e) => ({ op: "remove_expense" as const, id: e.id, amount: e.amount, vendor: e.vendor }))
+  );
+  log.kind = "expenses";
+  log.entries = saved.length;
+  log.outcome = "added";
+  return expensesBatchReply(saved);
+}
+
+/* ---------- insights ---------- */
+
+async function answerInsight(userId: string, insight: Insight, people: LedgerPerson[], log: AssistantLog): Promise<string> {
+  log.kind = "insight";
+  log.queryType = insight.type;
+  log.outcome = "answered";
+  const today = pakistanToday();
+
+  if (insight.type === "person_history") {
+    const person = onePerson(people, insight.person, log);
+    if (typeof person === "string") return person;
+    const txs = await listTx(person.id);
+    return personHistoryReply({
+      name: person.name,
+      balance: person.balance,
+      lent: person.lent,
+      received: person.received,
+      dueDate: person.dueDate,
+      entries: txs.map((t) => ({ amount: t.amount, note: t.note, date: t.created_at.slice(0, 10) })),
+    });
+  }
+
+  if (insight.type === "compare") {
+    const [now, before] = await Promise.all([
+      listExpensesInRange(userId, insight.a.from, insight.a.to),
+      listExpensesInRange(userId, insight.b.from, insight.b.to),
+    ]);
+    const inCategory = (e: Expense) => !insight.category || (e.category || "Uncategorised") === insight.category;
+    const a = now.filter(inCategory);
+    const b = before.filter(inCategory);
+    const sum = (list: Expense[]) => list.reduce((s, e) => s + e.amount, 0);
+    const byCategory = (list: Expense[]) => {
+      const m = new Map<string, number>();
+      for (const e of list) m.set(e.category || "Uncategorised", (m.get(e.category || "Uncategorised") ?? 0) + e.amount);
+      return m;
+    };
+    const ca = byCategory(a);
+    const cb = byCategory(b);
+    const changes = insight.category
+      ? []
+      : [...new Set([...ca.keys(), ...cb.keys()])]
+          .map((category) => ({ category, delta: (ca.get(category) ?? 0) - (cb.get(category) ?? 0) }))
+          .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+    return compareReply({
+      a: { label: insight.a.label, total: sum(a), count: a.length },
+      b: { label: insight.b.label, total: sum(b), count: b.length },
+      category: insight.category,
+      changes,
+    });
+  }
+
+  const horizon = addDays(today, insight.days);
+  const owing = people.filter((p) => p.balance >= 0.005 && p.dueDate);
+  const row = (p: LedgerPerson) => ({ name: p.name, balance: p.balance, dueDate: p.dueDate as string });
+  return udharDueReply({
+    days: insight.days,
+    overdue: owing.filter((p) => (p.dueDate as string) < today).map(row).sort((x, y) => x.dueDate.localeCompare(y.dueDate)),
+    soon: owing
+      .filter((p) => (p.dueDate as string) >= today && (p.dueDate as string) <= horizon)
+      .map(row)
+      .sort((x, y) => x.dueDate.localeCompare(y.dueDate)),
+  });
+}
+
+/* ---------- the app itself ---------- */
+
+async function answerHelp(question: string, log: AssistantLog): Promise<string> {
+  log.kind = "help_question";
+  try {
+    const answer = await answerAppQuestion(question, health);
+    log.outcome = answer ? "answered" : "help_fallback";
+    return answer ? appHelpReply(answer) : HELP_REPLY;
+  } catch {
+    log.outcome = "help_fallback";
+    return HELP_REPLY;
+  }
+}
+
+async function setReminders(input: AssistantInput, on: boolean, log: AssistantLog): Promise<string> {
+  log.kind = "reminders";
+  const settings = await getProfileSettings(input.userId);
+  await updateUserProfile(input.userId, { emailReminders: on });
+  await attachInboundUndo(input.messageId, [{ op: "set_email_reminders", on: settings?.emailReminders ?? true }]);
+  log.outcome = on ? "reminders_on" : "reminders_off";
+  return remindersReply({ on, email: settings?.email ?? null });
 }
 
 // Runs an action that has already been understood, without calling the model.

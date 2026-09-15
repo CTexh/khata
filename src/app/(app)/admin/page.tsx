@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { UserSummary } from "@/lib/db";
+import type { AssistantFeedback, UserSummary } from "@/lib/db";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { fmtWhen } from "@/lib/format";
@@ -189,6 +189,82 @@ function UserSheet({ user, onClose, onChanged }: { user: UserSummary; onClose: (
   );
 }
 
+/* ---------- assistant feedback ---------- */
+
+// What people asked the assistant for that it can't do yet, and messages it
+// didn't understand - the list to improve it from.
+function FeedbackSection() {
+  const { data: items, refresh } = useCached<AssistantFeedback[]>("/api/admin/feedback");
+  const [busy, setBusy] = useState(false);
+
+  const remove = async (id?: string) => {
+    setBusy(true);
+    await fetch(`/api/admin/feedback${id ? `?id=${encodeURIComponent(id)}` : ""}`, { method: "DELETE" });
+    await refresh().catch(() => {});
+    setBusy(false);
+  };
+
+  return (
+    <section className="flex flex-col gap-3" aria-labelledby="feedback-title">
+      <div className="section-head">
+        <h2 id="feedback-title" className="section-title">
+          Assistant feedback
+        </h2>
+        {items && items.length > 0 && (
+          <button type="button" className="pill-link" disabled={busy} onClick={() => remove()}>
+            Clear all
+          </button>
+        )}
+      </div>
+      {!items ? (
+        <div className="list-card px-4 py-4 text-[14px]" style={{ color: "var(--muted)" }} role="status">
+          Loading…
+        </div>
+      ) : items.length === 0 ? (
+        <div className="list-card px-4 py-4 text-[14px]" style={{ color: "var(--muted)" }}>
+          Nothing yet. Suggestions people give the assistant, and messages it couldn&apos;t handle, show up here.
+        </div>
+      ) : (
+        <ul className="list-card">
+          {items.map((f) => (
+            <li key={f.id} className="flex items-start gap-3 px-2 py-3">
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <span
+                    className="chip"
+                    style={
+                      f.kind === "suggestion"
+                        ? { background: "var(--good-soft)", color: "var(--good)" }
+                        : { background: "var(--accent-soft)", color: "var(--accent)" }
+                    }
+                  >
+                    {f.kind === "suggestion" ? "Suggestion" : "Not understood"}
+                  </span>
+                  <span className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
+                    {f.username} · {fmtWhen(f.created_at)}
+                  </span>
+                </span>
+                <span className="block text-[14px] mt-1 break-words">{f.text}</span>
+              </span>
+              <button
+                type="button"
+                className="chat-round !w-9 !h-9 shrink-0"
+                aria-label="Remove"
+                disabled={busy}
+                onClick={() => remove(f.id)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 /* ---------- page ---------- */
 
 export default function AdminPage() {
@@ -254,6 +330,8 @@ export default function AdminPage() {
           ))}
         </ul>
       )}
+
+      <FeedbackSection />
 
       {open && <UserSheet user={open} onClose={close} onChanged={refresh} />}
 

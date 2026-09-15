@@ -1,4 +1,5 @@
 import {
+  APP_GUIDE,
   MAX_HISTORY_TURNS,
   NOT_UNDERSTOOD,
   TOOLS,
@@ -146,6 +147,28 @@ check("recent", call("recent_expenses").query?.type, "recent_expenses");
 check("spending this week", call("spending_total", { period: "this_week" }).query?.label, "This week");
 check("list biggest in a category", [call("list_expenses", { sort: "biggest", category: "car" }).query?.type, call("list_expenses", { sort: "biggest", category: "car" }).query?.category, call("list_expenses", { sort: "biggest" }).query?.sort], ["expense_list", "Car", "biggest"]);
 check("subscriptions overview", call("subscriptions_overview").query?.type, "subscriptions_overview");
+
+/* more actions */
+const batch = call("add_expenses", { items: [{ amount: 3000, vendor: "Shell", category: "car" }, { amount: 800, note: "lunch" }] });
+check("several expenses", [batch.kind, batch.expenses?.length, batch.expenses?.[0].categoryHint], ["expenses_batch", 2, "car"]);
+check("one item is a plain expense", call("add_expenses", { items: [{ amount: 500, vendor: "Tea" }] }).kind, "expense");
+check("a bad item refuses the whole batch", call("add_expenses", { items: [{ amount: 500 }, { amount: -1 }] }).ok, false);
+check("an empty batch is refused", call("add_expenses", { items: [] }).ok, false);
+check("person history", call("person_history", { person: "abdurrehman" }).insight, { type: "person_history", person: "Abdur Rehman" });
+check("history for someone unknown", call("person_history", { person: "Bilal" }).ok, false);
+check(
+  "compare this month with the same days last month",
+  call("compare_spending", {}).insight,
+  { type: "compare", a: { from: "2026-09-01", to: "2026-09-15", label: "This month" }, b: { from: "2026-08-01", to: "2026-08-15", label: "Last month" }, category: null }
+);
+check("compare this week", call("compare_spending", { period: "this week", category: "food" }).insight?.b, { from: "2026-09-07", to: "2026-09-08", label: "Last week" });
+check("compare in a category", call("compare_spending", { category: "food" }).insight?.category, "Food & Dining");
+check("compare an unknown category", call("compare_spending", { category: "furniture" }).ok, false);
+check("who is due", [call("udhar_due").insight, call("udhar_due", { days: 400 }).insight?.days], [{ type: "udhar_due", days: 7 }, 90]);
+check("app question", call("app_help", { question: "how do I add a subscription?" }), { ok: true, kind: "app_question", question: "how do I add a subscription?" });
+check("reminders on and off", [call("set_email_reminders", { on: false }), call("set_email_reminders", {}).ok], [{ ok: true, kind: "reminders", on: false }, false]);
+check("feedback", call("send_feedback", { text: "add budgets" }), { ok: true, kind: "feedback", text: "add budgets" });
+check("app guide covers every tab", ["Mera Khata", "Udhar Khata", "Subscriptions", "Email reminders", "Welcome tour"].every((w) => APP_GUIDE.includes(w)), true);
 check("subscriptions due", call("subscriptions_due").query?.type, "subscriptions_due");
 check("commands", [call("undo_last").command, call("show_help").command, call("list_categories").command], ["undo", "help", "list_categories"]);
 check("not understood", call("not_understood").reason, NOT_UNDERSTOOD);

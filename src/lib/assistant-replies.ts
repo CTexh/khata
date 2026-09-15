@@ -122,6 +122,14 @@ export const HELP_REPLY = join([
   "how much on fuel this month?",
   "show my biggest expenses this week",
   "which subscriptions are due?",
+  "show Ali's history",
+  "this month vs last month",
+  "who has to pay me back this week?",
+  "",
+  "*The app*",
+  "how do I set up email reminders?",
+  "turn off my email reminders",
+  "I wish the app had budgets",
   "",
   "Reply *UNDO* to reverse the last change.",
 ]);
@@ -501,5 +509,117 @@ export function undoStepLine(step: UndoStep): string {
       return `Category back: ${step.category.name}`;
     case "set_category_keywords":
       return `Keywords for ${step.name} put back`;
+    case "remove_expense":
+      return `Expense removed: ${fmtRs(step.amount)}${step.vendor ? ` · ${step.vendor}` : ""}`;
+    case "set_email_reminders":
+      return `Email reminders turned ${step.on ? "on" : "off"} again`;
   }
+}
+
+/* ---------- more answers ---------- */
+
+export function expensesBatchReply(items: { amount: number; vendor: string | null; note: string; category: string | null }[]): string {
+  const total = items.reduce((sum, e) => sum + e.amount, 0);
+  return join([
+    `*${items.length} expenses added*`,
+    "",
+    ...items.map((e) => `${fmtRs(e.amount)} · ${e.vendor || e.note || "Expense"} (${e.category ?? "Uncategorised"})`),
+    "",
+    `Total: ${fmtRs(total)}`,
+    "",
+    "Reply *UNDO* to remove them.",
+  ]);
+}
+
+export const HISTORY_SHOWN = 15;
+
+export function personHistoryReply(o: {
+  name: string;
+  balance: number;
+  lent: number;
+  received: number;
+  dueDate: string | null;
+  entries: { amount: number; note: string; date: string }[];
+}): string {
+  const out = [`*${o.name}'s khata*`, "", balanceLine(o.balance), `Lent ${fmtRs(o.lent)} · Paid back ${fmtRs(o.received)}`];
+  if (o.dueDate && o.balance >= 0.005) out.push(`Follow-up date: ${fmtDateLabel(o.dueDate)}`);
+  out.push("", "*History*");
+  if (!o.entries.length) out.push("No entries yet.");
+  for (const e of o.entries.slice(0, HISTORY_SHOWN)) {
+    const what = e.amount > 0 ? `Lent ${fmtRs(e.amount)}` : `Paid back ${fmtRs(-e.amount)}`;
+    out.push(`${fmtDateLabel(e.date)} · ${what}${e.note ? ` · ${e.note.replace(/^(WhatsApp|Assistant):\s*/, "")}` : ""}`);
+  }
+  if (o.entries.length > HISTORY_SHOWN) out.push("", `Showing the latest ${HISTORY_SHOWN} of ${o.entries.length}.`);
+  return join(out);
+}
+
+export function compareReply(o: {
+  a: { label: string; total: number; count: number };
+  b: { label: string; total: number; count: number };
+  category: string | null;
+  changes: { category: string; delta: number }[];
+}): string {
+  const diff = o.a.total - o.b.total;
+  const pct = o.b.total > 0 ? Math.round((Math.abs(diff) / o.b.total) * 100) : null;
+  const trend =
+    Math.abs(diff) < 0.005
+      ? "The same as before."
+      : `${diff > 0 ? "Up" : "Down"} ${fmtRs(Math.abs(diff))}${pct !== null ? ` (${diff > 0 ? "+" : "−"}${pct}%)` : ""}`;
+  const out = [
+    `*${o.category ? `${o.category}: ` : ""}${o.a.label} vs ${o.b.label.toLowerCase()}*`,
+    "",
+    `${o.a.label}: ${fmtRs(o.a.total)} (${o.a.count} ${o.a.count === 1 ? "expense" : "expenses"})`,
+    `${o.b.label}, same days: ${fmtRs(o.b.total)} (${o.b.count} ${o.b.count === 1 ? "expense" : "expenses"})`,
+    "",
+    trend,
+  ];
+  const moved = o.changes.filter((c) => Math.abs(c.delta) >= 0.005).slice(0, 3);
+  if (moved.length) {
+    out.push("", "*Biggest changes*", ...moved.map((c) => `${c.category}: ${c.delta > 0 ? "+" : "−"}${fmtRs(Math.abs(c.delta))}`));
+  }
+  return join(out);
+}
+
+export function udharDueReply(o: {
+  days: number;
+  overdue: { name: string; balance: number; dueDate: string }[];
+  soon: { name: string; balance: number; dueDate: string }[];
+}): string {
+  if (!o.overdue.length && !o.soon.length) {
+    return join([
+      "*Nobody is due*",
+      "",
+      `No follow-up dates in the next ${o.days} days. Set one by saying: Ali will pay back on the 1st.`,
+    ]);
+  }
+  const line = (p: { name: string; balance: number; dueDate: string }) => `${p.name}: ${fmtRs(p.balance)} · ${fmtDateLabel(p.dueDate)}`;
+  const out = ["*Who is due to pay back*"];
+  if (o.overdue.length) out.push("", "*Overdue*", ...o.overdue.map(line));
+  if (o.soon.length) out.push("", `*Next ${o.days} days*`, ...o.soon.map(line));
+  const total = [...o.overdue, ...o.soon].reduce((sum, p) => sum + p.balance, 0);
+  out.push("", `Total: ${fmtRs(total)}`);
+  return join(out);
+}
+
+export function remindersReply(o: { on: boolean; email: string | null }): string {
+  if (!o.on) return join(["*Email reminders off*", "", "You won't get reminder emails until you turn them back on.", "", "Reply *UNDO* to change it back."]);
+  return join([
+    "*Email reminders on*",
+    "",
+    o.email
+      ? `Reminders go to ${o.email}: subscriptions and follow-ups at 6pm, your daily recap at 4:30am.`
+      : "Add your email address in Edit profile so the reminders have somewhere to go.",
+    "",
+    "Reply *UNDO* to change it back.",
+  ]);
+}
+
+export const FEEDBACK_REPLY = join([
+  "*Thanks - noted*",
+  "",
+  "Your suggestion has been saved for the next round of improvements to Khata.",
+]);
+
+export function appHelpReply(answer: string): string {
+  return join(["*Khata help*", "", answer]);
 }

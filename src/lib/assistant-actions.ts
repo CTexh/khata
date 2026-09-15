@@ -6,12 +6,15 @@
 import {
   IMAGE_ATTEMPT_MS,
   TEXT_ATTEMPT_MS,
+  addDays,
   amountProblem,
   callGemini,
   cleanString,
   daysBetween,
+  matchCategory,
   matchPeople,
   newPersonName,
+  periodRange,
   personKey,
   round2,
   validYmd,
@@ -20,6 +23,7 @@ import {
   type Attempt,
   type HealthStore,
   type ParseOutcome,
+  type ParsedExpense,
 } from "./expense-parse.ts";
 import { isUnexplainedCategory } from "./categorize.ts";
 
@@ -65,7 +69,20 @@ export type Action =
   | { ok: true; kind: "person_delete"; person: string }
   | { ok: true; kind: "subscription"; sub: SubscriptionAction }
   | { ok: true; kind: "category"; category: CategoryAction }
-  | { ok: true; kind: "command"; command: Command };
+  | { ok: true; kind: "command"; command: Command }
+  | { ok: true; kind: "expenses_batch"; expenses: ParsedExpense[] }
+  | { ok: true; kind: "insight"; insight: Insight }
+  | { ok: true; kind: "app_question"; question: string }
+  | { ok: true; kind: "reminders"; on: boolean }
+  | { ok: true; kind: "feedback"; text: string };
+
+// Questions answered from the user's records that need more than a single
+// total: one person's history, one period against the one before, who is due.
+export type DayRange = { from: string; to: string; label: string };
+export type Insight =
+  | { type: "person_history"; person: string }
+  | { type: "compare"; a: DayRange; b: DayRange; category: string | null }
+  | { type: "udhar_due"; days: number };
 
 export type ActionContext = {
   today: string;
@@ -287,6 +304,53 @@ export const TOOLS = [
     { name: S("Category name as in the list"), keywords: { type: "ARRAY", items: S("Keyword") } },
     ["name", "keywords"]
   ),
+  fn(
+    "add_expenses",
+    "Record SEVERAL separate expenses from one message, e.g. 'fuel 3000 and lunch 800'. Use add_expense when there is only one.",
+    {
+      items: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            amount: N("Amount paid, in rupees"),
+            vendor: S("Shop, company or person paid"),
+            note: S("What it was for"),
+            date: S("YYYY-MM-DD, resolved against today"),
+            category: S("Best match from the user's categories, only if one clearly fits"),
+          },
+          required: ["amount"],
+        },
+      },
+    },
+    ["items"]
+  ),
+  fn(
+    "person_history",
+    "Show one person's full Udhar Khata history: every amount lent and paid back, with dates.",
+    { person: S("Name as in the Udhar Khata list") },
+    ["person"]
+  ),
+  fn("compare_spending", "Compare spending with the period before: this week vs last week, this month vs last month (default), or this year vs last year, optionally in one category.", {
+    period: S("this_week, this_month or this_year"),
+    category: S("One of the user's categories, only if one was named"),
+  }),
+  fn("udhar_due", "Who is overdue or due to pay back soon, from the follow-up dates set in Udhar Khata.", {
+    days: N("How many days ahead to look, default 7"),
+  }),
+  fn(
+    "app_help",
+    "A question about using the Khata app itself: how to do something, where a feature is, what a screen or setting does, reminders, the welcome tour, privacy.",
+    { question: S("The question, in the user's words") },
+    ["question"]
+  ),
+  fn("set_email_reminders", "Turn the user's email reminders on or off.", { on: B("true to turn them on, false to turn them off") }, ["on"]),
+  fn(
+    "send_feedback",
+    "The user suggests an improvement, asks for a feature Khata doesn't have, or reports a problem with the app.",
+    { text: S("The suggestion or problem, in the user's words") },
+    ["text"]
+  ),
   fn("list_categories", "Show the user's categories."),
   fn("undo_last", "Undo the last thing the assistant added or changed."),
   fn("show_help", "Explain what the assistant can do."),
@@ -315,6 +379,10 @@ export function buildSystemPrompt(o: {
     "- Money given or lent to someone in the Udhar Khata list is lend_money, not an expense. Money they returned is record_repayment.",
     "- Paying a shop, bill, company or service is add_expense. Paying a subscription the user already has is mark_subscription_paid.",
     "- 'it', 'that', 'the last one' after something was added refers to that entry.",
+    "- Several expenses in one message (fuel 3000 and lunch 800) go to add_expenses.",
+    "- 'Compare', 'vs', 'more or less than last month' is compare_spending; a person's history or statement is person_history; who is due or overdue is udhar_due.",
+    "- A question about using the Khata app itself (how do I, where is, what does this do, reminders, settings) is app_help.",
+    "- A wish for something the app can't do, a suggestion or a problem report is send_feedback - not not_understood.",
     'Use the earlier messages in this conversation to resolve references like "it", "him" or "change that to 2500".',
     "Always use names exactly as they appear in these lists, matching misspellings and nicknames to the closest one:",
     `Udhar Khata people: ${list(o.people)}.`,
@@ -441,6 +509,7 @@ export function nextDueDate(today: string, day: number): string {
 export const NOT_UNDERSTOOD =
   "I couldn't tell what to do with that. Try: fuel 3000 shell, who owes me?, mark Netflix paid - or tap What can I say?";
 export const MAX_CATEGORY_NAME = 40;
+export const MAX_BATCH_EXPENSES = 20;
 
 const refuse = (reason: string): Action => ({ ok: false, reason });
 
@@ -546,6 +615,68 @@ export function interpretCall(call: FunctionCall | null, ctx: ActionContext): Ac
         : refuse(name.reason);
     }
 
+    case "add_expenses": {
+      const items = (Array.isArray(a.items) ? a.items : []).slice(0, MAX_BATCH_EXPENSES);
+      const expenses: ParsedExpense[] = [];
+      for (const raw of items) {
+        const item = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const one = v({
+          intent: "expense",
+          amount: item.amount,
+          currency: item.currency,
+          vendor: item.vendor,
+          note: item.note,
+          date: item.date,
+          category_hint: item.category,
+        });
+        // One unreadable item stops the lot: saving the rest would look complete.
+        if (!one.ok) return one;
+        if (one.kind === "expense") expenses.push(one.expense);
+      }
+      if (!expenses.length) return refuse("I couldn't find the expenses in that. Try: fuel 3000 and lunch 800");
+      return expenses.length === 1
+        ? { ok: true, kind: "expense", expense: expenses[0] }
+        : { ok: true, kind: "expenses_batch", expenses };
+    }
+    case "person_history": {
+      const person = onePerson(a.person, ctx);
+      return typeof person === "string"
+        ? { ok: true, kind: "insight", insight: { type: "person_history", person } }
+        : refuse(person.reason);
+    }
+    case "compare_spending": {
+      const asked = cleanString(a.period, 20)?.toLowerCase().replace(/[\s-]+/g, "_") ?? "";
+      const previousOf: Record<string, string> = { this_week: "last_week", this_month: "last_month", this_year: "last_year" };
+      const period = asked in previousOf ? asked : "this_month";
+      const now = periodRange(period, ctx.today) as DayRange;
+      const before = periodRange(previousOf[period], ctx.today) as DayRange;
+      // Like with like: the same number of days into the previous period.
+      const sameDay = addDays(before.from, daysBetween(now.from, now.to));
+      const hint = cleanString(a.category, 60);
+      const category = matchCategory(hint, ctx.categories);
+      if (hint && !category) return refuse(`You don't have a category called ${hint}.`);
+      return {
+        ok: true,
+        kind: "insight",
+        insight: { type: "compare", a: now, b: { ...before, to: sameDay < before.to ? sameDay : before.to }, category },
+      };
+    }
+    case "udhar_due": {
+      const days = wholeNumber(a.days);
+      return { ok: true, kind: "insight", insight: { type: "udhar_due", days: days !== null && days > 0 ? Math.min(days, 90) : 7 } };
+    }
+    case "app_help": {
+      const question = cleanString(a.question, 300) ?? cleanString(ctx.text, 300);
+      return question ? { ok: true, kind: "app_question", question } : refuse("What would you like to know about the app?");
+    }
+    case "set_email_reminders":
+      return typeof a.on === "boolean"
+        ? { ok: true, kind: "reminders", on: a.on }
+        : refuse("Should I turn email reminders on or off?");
+    case "send_feedback": {
+      const text = cleanString(a.text, 500) ?? cleanString(ctx.text, 500);
+      return text ? { ok: true, kind: "feedback", text } : refuse("What should I pass on?");
+    }
     case "list_categories":
       return { ok: true, kind: "command", command: "list_categories" };
     case "undo_last":
@@ -845,4 +976,58 @@ export async function understandMessage(opts: {
     subscriptions: opts.subscriptions,
   });
   return { action, model, attempts, transcript };
+}
+
+/* ---------- questions about the app itself ---------- */
+
+// What the assistant knows about Khata, for "how do I..." questions. Keep in
+// step with the app: anything not described here, it says isn't available.
+export const APP_GUIDE = `Khata is a personal finance app for Pakistan. Amounts are in rupees (Rs) and dates follow Pakistan time.
+
+Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Admin accounts also have the assistant button in the middle. The profile picture (top right) opens: Edit profile, Welcome tour, Admin (admins only), Log out. The moon/sun button switches dark and light mode.
+
+Home: switch Today / This Week / This Month to see the total spent, the change against the previous period and that period's expenses. Cards show money owed to you and subscriptions still to pay. Admins also get the Ask Khata box (type, camera for a bill photo, microphone for a voice note).
+
+Mera Khata: tap the round + button to log an expense (amount, paid to, category, note, date and time). Categories fill in automatically from the payee. Month / Year switch with arrows to move between periods. "Where it went" shows the top categories (Show all for the rest). Tap a category chip to filter the list; the search button searches amount, note, vendor or category. Tap any expense to see it, edit it or delete it. Expenses without a category show a prompt to sort them. The ... menu has Manage categories (add, rename, delete, keywords that auto-match), Re-categorise (preview and apply category fixes) and Download Excel.
+
+Udhar Khata: money people owe you. Tap + to add a borrower (name, amount, note, follow-up date). Filter Owes you / Settled / All. Tap a person to record Lent more or Paid back, set or clear the follow-up (reach-out) date, see their history, or delete them.
+
+Subscriptions: tap + to add one (name, monthly amount, first due date; a logo is found automatically). Tap one to Mark paid, Pause or Resume, see the next payment, total paid, a payment timeline and history, or delete it. Past-due unpaid ones show Overdue.
+
+Email reminders: in Edit profile, add an email address and keep "Send me reminders" on. Emails come from the app's Gmail. At 6pm: a subscription the day before it is due and on the due day if still unpaid, and a person on their follow-up date. At 4:30am: a recap of the previous day (expenses, Udhar Khata changes, subscriptions due or paid, and a nudge to add anything missed). On the 1st: last month's summary. Each email links to the exact record. Turning the switch off stops them.
+
+Assistant (admin accounts): add expenses by typing, voice note or bill photo; lend money or record paybacks; set follow-up dates; edit or delete expenses; manage subscriptions and categories; answer questions about spending, balances and subscriptions; compare periods; show a person's history; turn email reminders on or off; take suggestions. The + menu has Camera, Photos, Undo last change and What can I say?. UNDO reverses the assistant's last change from the past 24 hours.
+
+Accounts and security: sign up with a username and password, or an admin creates the account. After 10 wrong passwords an account is locked for 15 minutes. Admins can create users, reset passwords, delete users and read assistant feedback. Data shown in the app is kept on the device for speed and cleared on logout. New accounts see a short welcome tour, which can be replayed from the profile menu.
+
+Not available: budgets, multiple currencies, bank syncing inside the app, shared/family accounts, exporting Udhar Khata, recurring expenses other than subscriptions.`;
+
+const HELP_INSTRUCTIONS = [
+  "You answer questions about using the Khata app, using only the guide below.",
+  "Answer in at most six short lines of plain text. Put screen and button names in *asterisks* (single asterisks, no other markdown, no bullet symbols).",
+  "Give the exact taps to follow. If the guide doesn't cover it, say it isn't available yet and that they can suggest it to the assistant. Never invent features.",
+  "",
+  APP_GUIDE,
+].join("\n");
+
+// A plain-text answer (no function calling) from the same model fallbacks as
+// every other assistant request. Null when the model returns nothing usable.
+export async function answerAppQuestion(question: string, health?: HealthStore): Promise<string | null> {
+  const request = JSON.stringify({
+    systemInstruction: { parts: [{ text: HELP_INSTRUCTIONS }] },
+    contents: [{ role: "user", parts: [{ text: question }] }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 400 },
+  });
+  const { body } = await callGemini({ request, perAttemptMs: TEXT_ATTEMPT_MS, health });
+  try {
+    const data = JSON.parse(body) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const text = (data.candidates?.[0]?.content?.parts ?? [])
+      .map((part) => part.text ?? "")
+      .join("")
+      .replace(/\*\*/g, "*")
+      .trim();
+    return text ? text.slice(0, 1200) : null;
+  } catch {
+    return null;
+  }
 }

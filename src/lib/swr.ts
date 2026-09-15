@@ -15,8 +15,10 @@ import { useCallback, useEffect, useReducer } from "react";
 type Entry = { data: unknown; at: number };
 
 const PREFIX = "khata-cache:v1:";
-// A page mounting again within this window reuses the answer it just got.
-const DEDUPE_MS = 2_000;
+// Data this fresh is shown without asking the server again, so moving between
+// tabs doesn't send a round of requests each time. Changes still refresh at
+// once (invalidate), as does coming back to the app (visibilitychange).
+const DEDUPE_MS = 30_000;
 
 const mem = new Map<string, Entry>();
 const inflight = new Map<string, Promise<unknown>>();
@@ -60,6 +62,12 @@ export function peek<T>(key: string): T | undefined {
   return (mem.get(key) ?? readStored(key))?.data as T | undefined;
 }
 
+// True when a key's cached answer is recent enough to use without asking again.
+export function isFresh(key: string): boolean {
+  const entry = mem.get(key) ?? readStored(key);
+  return Boolean(entry) && Date.now() - (entry as Entry).at <= DEDUPE_MS;
+}
+
 // Fetches a URL once however many components ask at the same moment, and
 // shares the answer with all of them.
 export function fetchKey<T>(key: string): Promise<T> {
@@ -86,10 +94,34 @@ export function fetchKey<T>(key: string): Promise<T> {
   return request;
 }
 
-export function prefetch(keys: string[]) {
+// One request that answers several keys at once (see /api/bootstrap). Each
+// key it covers is registered as in flight straight away, so any page that
+// asks for one meanwhile waits for this response instead of sending its own
+// request. A key the response doesn't include - or a failed response - falls
+// back to that key's own endpoint.
+export function primeFrom(url: string, keys: string[]) {
+  const loader = fetch(url, { cache: "no-store" }).then((res) => {
+    if (!res.ok) throw new HttpError(res.status);
+    return res.json() as Promise<{ data: Record<string, unknown> }>;
+  });
   for (const key of keys) {
-    const entry = mem.get(key) ?? readStored(key);
-    if (!entry || Date.now() - entry.at > DEDUPE_MS) fetchKey(key).catch(() => {});
+    if (inflight.has(key)) continue;
+    const pending: Promise<unknown> = loader.then(
+      ({ data }) => {
+        inflight.delete(key);
+        if (!data || !(key in data)) return fetchKey(key);
+        store(key, { data: data[key], at: Date.now() });
+        failures.delete(key);
+        notify(key);
+        return data[key];
+      },
+      () => {
+        inflight.delete(key);
+        return fetchKey(key);
+      }
+    );
+    pending.catch(() => {});
+    inflight.set(key, pending);
   }
 }
 

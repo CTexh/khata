@@ -5,7 +5,7 @@ import type { Expense } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
 import { categoryEmoji, categoryVars } from "@/lib/category-style";
 import { Sheet, SheetRow } from "@/components/Sheet";
-import { fetchKey, invalidate, peek, useCached } from "@/lib/swr";
+import { fetchKey, invalidate, isFresh, peek, useCached } from "@/lib/swr";
 
 // Expense times are stored as Pakistan wall-clock time with a Z suffix - the
 // assistant saves them the same way - so they are read and written as they
@@ -57,7 +57,11 @@ function loadCategories(): Promise<UserCategory[]> {
   if (categoryCache) return Promise.resolve(categoryCache);
   // Show the last known list straight away; the fetch below refreshes it.
   const warm = peek<{ categories?: UserCategory[] }>("/api/categories");
-  if (warm?.categories) publishCategories(warm.categories);
+  if (warm?.categories) {
+    publishCategories(warm.categories);
+    // Loaded moments ago (by the app's opening request, say): no need to ask again.
+    if (isFresh("/api/categories")) return Promise.resolve(warm.categories);
+  }
   categoryInflight ??= fetchKey<{ categories?: UserCategory[] }>("/api/categories")
     .then((d) => {
       const list: UserCategory[] = d.categories ?? [];

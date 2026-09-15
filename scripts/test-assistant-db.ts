@@ -190,6 +190,45 @@ check("spending answer", reply.startsWith("*Spent in"), true);
 reply = await act({ ok: true, kind: "command", command: "list_categories" });
 check("categories listed", [reply.startsWith("*Your categories*"), reply.includes("Travel")], [true, true]);
 
+/* ---------- several expenses, reminders, feedback, insights ---------- */
+
+reply = await act({
+  ok: true,
+  kind: "expenses_batch",
+  expenses: [
+    { amount: 100, vendor: "Tea Stall", note: "tea", date: today, categoryHint: null },
+    { amount: 250, vendor: "Metro Bus", note: "bus", date: today, categoryHint: null },
+  ],
+});
+const batchCount = () => count("SELECT COUNT(*) AS n FROM expenses WHERE user_id = ? AND vendor IN ('Tea Stall', 'Metro Bus')", [userId]);
+check("batch added", [reply.startsWith("*2 expenses added*"), reply.includes("Total: Rs 350"), await batchCount()], [true, true, 2]);
+reply = await undo();
+check("batch undone together", [reply.includes("Expense removed: Rs 100 · Tea Stall"), reply.includes("Expense removed: Rs 250 · Metro Bus"), await batchCount()], [true, true, 0]);
+
+await dbm.ensureUserEmailColumns();
+const remindersFlag = async () => Number((await one("SELECT email_reminders FROM users WHERE id = ?", [userId]))?.email_reminders);
+reply = await act({ ok: true, kind: "reminders", on: false });
+check("reminders turned off", [reply.startsWith("*Email reminders off*"), await remindersFlag()], [true, 0]);
+reply = await undo();
+check("reminders undo", [reply.includes("Email reminders turned on again"), await remindersFlag()], [true, 1]);
+
+reply = await act({ ok: true, kind: "feedback", text: "please add budgets" });
+check("suggestion saved", [reply.startsWith("*Thanks - noted*"), (await dbm.listAssistantFeedback()).some((f) => f.text === "please add budgets" && f.kind === "suggestion")], [true, true]);
+await runAction({ userId, messageId: `test-${randomUUID()}`, text: "what's the weather", image: null, audio: null }, { ok: false, reason: "I couldn't tell what to do with that. Try: fuel 3000 shell, who owes me?, mark Netflix paid - or tap What can I say?" });
+check("not understood is logged for review", (await dbm.listAssistantFeedback()).some((f) => f.text === "what's the weather" && f.kind === "not_understood"), true);
+await dbm.deleteAssistantFeedback();
+check("feedback cleared", (await dbm.listAssistantFeedback()).length, 0);
+
+await act({ ok: true, kind: "ledger", ledger: { direction: "lend", entries: [{ person: "Zara Test", amount: 1500, isNew: true }], note: "books" } });
+await act({ ok: true, kind: "ledger", ledger: { direction: "repayment", entries: [{ person: "Zara Test", amount: 500, isNew: false }], note: null } });
+reply = await act({ ok: true, kind: "insight", insight: { type: "person_history", person: "Zara Test" } });
+check("person history", [reply.startsWith("*Zara Test's khata*"), reply.includes("Lent Rs 1,500"), reply.includes("Paid back Rs 500")], [true, true, true]);
+await c.execute({ sql: "UPDATE people SET due_date = ? WHERE user_id = ? AND name = 'Zara Test'", args: [today, userId] });
+reply = await act({ ok: true, kind: "insight", insight: { type: "udhar_due", days: 7 } });
+check("who is due", [reply.startsWith("*Who is due to pay back*"), reply.includes("Zara Test: Rs 1,000")], [true, true]);
+reply = await act({ ok: true, kind: "insight", insight: { type: "compare", a: { from: today, to: today, label: "Today" }, b: { from: "2000-01-01", to: "2000-01-01", label: "Yesterday" }, category: null } });
+check("compare answers", [reply.startsWith("*Today vs yesterday*"), reply.includes("Yesterday, same days: Rs 0")], [true, true]);
+
 /* ---------- another user's data is never touched ---------- */
 
 await c.execute({

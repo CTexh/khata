@@ -7,7 +7,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
-import { clearCache, prefetch, useCached } from "@/lib/swr";
+import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
 
 type CurrentUser = { id: string; username: string; name?: string | null; isAdmin: boolean; createdAt?: string | null };
@@ -148,30 +148,36 @@ const TABS = [
   { href: "/subscriptions", label: "Subs", Icon: RepeatIcon },
 ] as const;
 
+// Everything the tabs show when the app opens comes from one request instead
+// of eight. Started during the first render - before any page's effects run -
+// so the pages' own requests for these keys wait for it rather than racing it.
+let primed = false;
+function primeAppData() {
+  if (primed || typeof window === "undefined") return;
+  primed = true;
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const month = (d: Date) => `year=${d.getFullYear()}&month=${d.getMonth() + 1}`;
+  primeFrom(`/api/bootstrap?y=${now.getFullYear()}&m=${now.getMonth() + 1}`, [
+    "/api/auth/me",
+    "/api/people",
+    "/api/subscriptions",
+    `/api/expenses?${month(now)}`,
+    `/api/expenses?${month(prev)}`,
+    `/api/expenses/categories?${month(now)}`,
+    `/api/expenses/categories?${month(prev)}`,
+    "/api/categories",
+  ]);
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
+  primeAppData();
   const { data: me, refresh: refreshMe } = useCached<{ user: CurrentUser | null }>("/api/auth/me");
   const user = me?.user ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
 
-  // Warm the cache for every tab as soon as the app opens, so switching
-  // between Home, Khata, Udhar and Subs never waits on the database.
-  useEffect(() => {
-    if (!user) return;
-    const now = new Date();
-    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const month = (d: Date) => `year=${d.getFullYear()}&month=${d.getMonth() + 1}`;
-    prefetch([
-      "/api/people",
-      "/api/subscriptions",
-      `/api/expenses?${month(now)}`,
-      `/api/expenses?${month(prev)}`,
-      `/api/expenses/categories?${month(now)}`,
-      `/api/expenses/categories?${month(prev)}`,
-      "/api/categories",
-    ]);
-  }, [user]);
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });

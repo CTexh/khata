@@ -59,6 +59,13 @@ const cases: {
   { text: "paid electricity bill 8500", want: "add_expense", kind: "expense" },
   { text: "kal 1200 ka khana khaya kfc", want: "add_expense", kind: "expense" },
   { text: "paid netflix", want: "mark_subscription_paid", kind: "subscription" },
+  { text: "fuel 3000 and lunch 800", want: "add_expenses", kind: "expenses_batch" },
+  { text: "show me ali's full history", want: "person_history", kind: "insight" },
+  { text: "compare this month with last month", want: "compare_spending", kind: "insight" },
+  { text: "who has to pay me back this week", want: "udhar_due", kind: "insight" },
+  { text: "how do I set up email reminders?", want: "app_help", kind: "app_question" },
+  { text: "turn off my email reminders", want: "set_email_reminders", kind: "reminders" },
+  { text: "I wish the app had a budget feature", want: "send_feedback", kind: "feedback" },
 ];
 
 let good = 0;
