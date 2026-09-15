@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
 import { claimInboundMessage, getInboundReply, saveInboundReply } from "@/lib/db";
 import { runAssistant } from "@/lib/assistant";
+import { sanitizeHistory, type ChatTurn } from "@/lib/assistant-actions";
 
 export const dynamic = "force-dynamic";
 // Bounds the work scheduled with after(): reading a bill photo or voice note
@@ -45,6 +46,15 @@ export async function POST(req: Request) {
 
   const text = String(form.get("text") ?? "").trim().slice(0, MAX_TEXT);
 
+  // Recent turns from the page, so a follow-up like "change it to 2500" has
+  // something to refer to.
+  let history: ChatTurn[] = [];
+  try {
+    history = sanitizeHistory(JSON.parse(String(form.get("history") ?? "[]")));
+  } catch {
+    // Unreadable history: the message is answered on its own.
+  }
+
   const file = form.get("image");
   let image: { data: string; mimeType: string } | null = null;
   if (file instanceof File && file.size > 0) {
@@ -87,7 +97,7 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
-      const { reply } = await runAssistant({ userId, messageId, channel: "app", text, image, audio });
+      const { reply } = await runAssistant({ userId, messageId, channel: "app", text, image, audio, history });
       await saveInboundReply(messageId, reply || "Done.");
     } catch (err) {
       console.error(JSON.stringify({ evt: "assistant", msg: requestId.slice(-8), outcome: "reply_not_saved", error: (err as Error).message.slice(0, 300) }));

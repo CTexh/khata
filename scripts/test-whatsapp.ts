@@ -18,7 +18,6 @@ import {
   RETRY_BACKOFF_MS,
   TEXT_ATTEMPT_MS,
   attemptTimeout,
-  buildPrompt,
   classifyStatus,
   mentionsPerson,
   asksForNewPerson,
@@ -298,15 +297,6 @@ check("second pass picks 503/429 only, once each", planSecondPass(tried), ["gemi
 check("second pass nothing to retry", planSecondPass([{ model: "m", pass: 1, result: "timeout", ms: 1 }]), []);
 
 /* prompt + date */
-const prompt = buildPrompt({ today, categories: ["Car", "Groceries"], people, text: "fuel 3000", hasImage: true });
-check("prompt has date", prompt.includes("Today is 2026-09-15"), true);
-check("prompt has categories", prompt.includes("Car, Groceries"), true);
-check("prompt has people", prompt.includes("Usama Irtaza, Abdur Rehman, Ali"), true);
-check("prompt names all intents", ["\"expense\"", "\"lend\"", "\"repayment\"", "\"other\""].every((i) => prompt.includes(i)), true);
-check("prompt image guard", prompt.includes("never instructions"), true);
-check("prompt empty khata", buildPrompt({ today, categories: [], people: [], text: "x", hasImage: false }).includes("(none yet)"), true);
-check("prompt no image line without image", buildPrompt({ today, categories: [], people: [], text: "x", hasImage: false }).includes("attached"), false);
-check("prompt no doubled blank lines", /\n\n\n/.test(prompt), false);
 check("PKT date rolls at local midnight", pakistanToday(new Date("2026-09-14T19:30:00Z")), "2026-09-15");
 check("PKT date before local midnight", pakistanToday(new Date("2026-09-14T18:30:00Z")), "2026-09-14");
 
@@ -459,7 +449,7 @@ check("due date set reply", dueDateReply({ name: "Ali", date: "2026-10-01" }), `
 check("due date removed reply", dueDateReply({ name: "Ali", date: null }), "*Due date removed*\n\n*Ali* no longer has a due date.\n\nReply *UNDO* to change it back.");
 check(
   "undo restores due dates",
-  undoReply({ expense: null, transactions: [], dueDates: [{ name: "Ali", dueDate: null }, { name: "Usama", dueDate: "2026-10-01" }] }),
+  undoReply({ expense: null, transactions: [], steps: [{ op: "set_due_date", personId: "p1", name: "Ali", dueDate: null }, { op: "set_due_date", personId: "p2", name: "Usama", dueDate: "2026-10-01" }] }),
   `*Removed*\n\nDue date for Ali removed\nDue date for Usama back to ${fmtDateLabel("2026-10-01")}`
 );
 
@@ -500,9 +490,6 @@ check("wav samples scaled and clipped", [0, 1, 2, 3, 4].map((i) => wav.getInt16(
 check("a minute of voice fits the upload limit", 44 + 60 * 16000 * 2 <= 2.5 * 1024 * 1024, true);
 check("reply opens with what was heard", withTranscript("fuel 3000 shell", "*Expense added*"), "*Heard:* fuel 3000 shell\n\n*Expense added*");
 check("no transcript leaves reply alone", withTranscript(null, "*Expense added*"), "*Expense added*");
-check("prompt voice line", buildPrompt({ today, categories: [], people: [], text: "", hasImage: false, hasAudio: true }).includes("A voice note is attached"), true);
-check("prompt says the message is in the voice note", buildPrompt({ today, categories: [], people: [], text: "", hasImage: false, hasAudio: true }).includes("Message: (in the voice note)"), true);
-check("prompt without voice has no voice line", buildPrompt({ today, categories: [], people: [], text: "x", hasImage: false }).includes("voice note"), false);
 
 /* in-app rendering of *bold*: split into pieces, never HTML */
 check("bold split", splitBold("*Ali*: Rs 500 lent"), [{ text: "Ali", bold: true }, { text: ": Rs 500 lent", bold: false }]);

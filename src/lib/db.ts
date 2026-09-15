@@ -1187,20 +1187,83 @@ function idList(raw: unknown): string[] {
   }
 }
 
-// How to put back something a WhatsApp message changed, rather than added.
-export type UndoStep = { op: "set_due_date"; personId: string; name: string; dueDate: string | null };
+// Rows as stored, kept whole inside undo steps so a delete can be reversed exactly.
+export type ExpenseRow = {
+  id: string;
+  user_id: string;
+  amount: number;
+  note: string;
+  expense_date: string;
+  expense_datetime: string;
+  created_at: string;
+  vendor: string | null;
+  category: string | null;
+  vendor_key: string | null;
+};
+export type SubscriptionRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  amount: number;
+  due_day: number;
+  logo_url: string | null;
+  active: number;
+  created_at: string;
+};
+export type PaymentRow = {
+  id: string;
+  subscription_id: string;
+  period: string;
+  due_date: string;
+  paid_at: string | null;
+  created_at: string;
+  reminder_day_before_sent_at: string | null;
+  reminder_due_today_sent_at: string | null;
+};
+export type PersonRow = { id: string; name: string; created_at: string; user_id: string; due_date: string | null };
+export type TxRow = { id: string; person_id: string; amount: number; note: string; created_at: string };
+export type CategoryRow = { name: string; keywords: string | null; sort_order: number; created_at: string };
+export type RuleRow = { vendor_key: string; category: string; updated_at: string };
 
+// How to put back something an assistant message changed, rather than added.
+// Written before the change, so UNDO restores exactly what was there.
+export type UndoStep =
+  | { op: "set_due_date"; personId: string; name: string; dueDate: string | null }
+  | { op: "restore_expense"; row: ExpenseRow }
+  | { op: "revert_expense"; before: ExpenseRow; rule: { vendorKey: string; category: string | null } | null }
+  | { op: "remove_subscription"; id: string; name: string }
+  | { op: "restore_subscription"; sub: SubscriptionRow; payments: PaymentRow[] }
+  | { op: "revert_subscription"; before: SubscriptionRow }
+  | { op: "unmark_paid"; name: string; paymentId: string; addedPaymentId: string | null }
+  | { op: "rename_person"; personId: string; name: string; renamedTo: string }
+  | { op: "restore_person"; person: PersonRow; transactions: TxRow[] }
+  | { op: "remove_category"; name: string }
+  | { op: "rename_category"; from: string; to: string }
+  | { op: "restore_category"; category: CategoryRow; expenseIds: string[]; rules: RuleRow[] }
+  | { op: "set_category_keywords"; name: string; keywords: string | null };
+
+const UNDO_OPS = new Set<string>([
+  "set_due_date",
+  "restore_expense",
+  "revert_expense",
+  "remove_subscription",
+  "restore_subscription",
+  "revert_subscription",
+  "unmark_paid",
+  "rename_person",
+  "restore_person",
+  "remove_category",
+  "rename_category",
+  "restore_category",
+  "set_category_keywords",
+]);
+
+// Undo steps are written only by this app, so a known op is trusted as shaped.
 function parseUndoSteps(raw: unknown): UndoStep[] {
   try {
     const parsed = JSON.parse((raw as string) ?? "[]");
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (s): s is UndoStep =>
-        s?.op === "set_due_date" &&
-        typeof s.personId === "string" &&
-        typeof s.name === "string" &&
-        (s.dueDate === null || typeof s.dueDate === "string")
-    );
+    return parsed.filter((step): step is UndoStep => typeof step?.op === "string" && UNDO_OPS.has(step.op));
   } catch {
     return [];
   }
@@ -1218,7 +1281,7 @@ export type UndoResult = {
   expense: { amount: number; vendor: string | null } | null;
   transactions: { name: string; amount: number }[];
   peopleRemoved: string[];
-  dueDates: { name: string; dueDate: string | null }[];
+  steps: UndoStep[];
 };
 
 // Reverses the most recent thing added over WhatsApp in the last 24 hours -
@@ -1300,25 +1363,18 @@ export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult 
       args: [p.id as string, userId, p.id as string],
     });
   }
-  // Values saved before a WhatsApp change, put back as they were.
-  const dueDates: { name: string; dueDate: string | null }[] = [];
-  for (const step of undoSteps) {
-    statements.push({
-      sql: "UPDATE people SET due_date = ? WHERE id = ? AND user_id = ?",
-      args: [step.dueDate, step.personId, userId],
-    });
-    dueDates.push({ name: step.name, dueDate: step.dueDate });
-  }
+  // Anything the message changed rather than added, put back as it was.
+  statements.push(...undoStatements(userId, undoSteps));
   await c.batch(statements, "write");
 
-  if (!expenseRow && !txRows.length && !removablePeople.length && !dueDates.length) return null;
+  if (!expenseRow && !txRows.length && !removablePeople.length && !undoSteps.length) return null;
   return {
     expense: expenseRow
       ? { amount: Number(expenseRow.amount), vendor: (expenseRow.vendor as string) ?? null }
       : null,
     transactions: txRows.map((t) => ({ name: t.name as string, amount: Number(t.amount) })),
     peopleRemoved: removablePeople.map((p) => p.name as string),
-    dueDates,
+    steps: undoSteps,
   };
 }
 
@@ -1499,4 +1555,502 @@ export async function getInboundReply(
   });
   const row = rs.rows[0];
   return row ? { reply: (row.reply as string) ?? null } : null;
+}
+
+/* ---------- undo: putting changed things back ---------- */
+
+type Statement = { sql: string; args: (string | number | null)[] };
+
+// The statements that reverse each step, in order. Every one is scoped to the
+// user, so a step can never touch someone else's data.
+export function undoStatements(userId: string, steps: UndoStep[]): Statement[] {
+  const out: Statement[] = [];
+  const now = new Date().toISOString();
+  for (const step of steps) {
+    switch (step.op) {
+      case "set_due_date":
+        out.push({
+          sql: "UPDATE people SET due_date = ? WHERE id = ? AND user_id = ?",
+          args: [step.dueDate, step.personId, userId],
+        });
+        break;
+
+      case "restore_expense": {
+        const r = step.row;
+        if (r.user_id !== userId) break;
+        out.push({
+          sql: `INSERT OR IGNORE INTO expenses (id, user_id, amount, note, expense_date, expense_datetime, created_at, vendor, category, vendor_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [r.id, r.user_id, r.amount, r.note, r.expense_date, r.expense_datetime, r.created_at, r.vendor, r.category, r.vendor_key],
+        });
+        break;
+      }
+
+      case "revert_expense": {
+        const b = step.before;
+        out.push({
+          sql: `UPDATE expenses SET amount = ?, note = ?, expense_date = ?, expense_datetime = ?, vendor = ?, category = ?, vendor_key = ?
+                WHERE id = ? AND user_id = ?`,
+          args: [b.amount, b.note, b.expense_date, b.expense_datetime, b.vendor, b.category, b.vendor_key, b.id, userId],
+        });
+        if (step.rule) {
+          out.push(
+            step.rule.category === null
+              ? {
+                  sql: "DELETE FROM expense_vendor_rules WHERE user_id = ? AND vendor_key = ?",
+                  args: [userId, step.rule.vendorKey],
+                }
+              : {
+                  sql: `INSERT INTO expense_vendor_rules (user_id, vendor_key, category, updated_at) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(user_id, vendor_key) DO UPDATE SET category = excluded.category, updated_at = excluded.updated_at`,
+                  args: [userId, step.rule.vendorKey, step.rule.category, now],
+                }
+          );
+        }
+        break;
+      }
+
+      case "remove_subscription":
+        out.push(
+          {
+            sql: `DELETE FROM subscription_payments WHERE subscription_id IN (SELECT id FROM subscriptions WHERE id = ? AND user_id = ?)`,
+            args: [step.id, userId],
+          },
+          { sql: "DELETE FROM subscriptions WHERE id = ? AND user_id = ?", args: [step.id, userId] }
+        );
+        break;
+
+      case "restore_subscription": {
+        const sub = step.sub;
+        if (sub.user_id !== userId) break;
+        out.push({
+          sql: `INSERT OR IGNORE INTO subscriptions (id, user_id, name, amount, due_day, logo_url, created_at, active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [sub.id, sub.user_id, sub.name, sub.amount, sub.due_day, sub.logo_url, sub.created_at, sub.active],
+        });
+        for (const p of step.payments) {
+          out.push({
+            sql: `INSERT OR IGNORE INTO subscription_payments
+                    (id, subscription_id, period, due_date, paid_at, created_at, reminder_day_before_sent_at, reminder_due_today_sent_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [p.id, sub.id, p.period, p.due_date, p.paid_at, p.created_at, p.reminder_day_before_sent_at, p.reminder_due_today_sent_at],
+          });
+        }
+        break;
+      }
+
+      case "revert_subscription": {
+        const b = step.before;
+        out.push({
+          sql: "UPDATE subscriptions SET name = ?, amount = ?, due_day = ?, active = ? WHERE id = ? AND user_id = ?",
+          args: [b.name, b.amount, b.due_day, b.active, b.id, userId],
+        });
+        break;
+      }
+
+      case "unmark_paid":
+        out.push({
+          sql: `UPDATE subscription_payments SET paid_at = NULL
+                WHERE id = ? AND subscription_id IN (SELECT id FROM subscriptions WHERE user_id = ?)`,
+          args: [step.paymentId, userId],
+        });
+        // The next month's entry that marking paid added - but only if nothing
+        // has been paid against it since.
+        if (step.addedPaymentId) {
+          out.push({
+            sql: `DELETE FROM subscription_payments
+                  WHERE id = ? AND paid_at IS NULL AND subscription_id IN (SELECT id FROM subscriptions WHERE user_id = ?)`,
+            args: [step.addedPaymentId, userId],
+          });
+        }
+        break;
+
+      case "rename_person":
+        out.push({ sql: "UPDATE people SET name = ? WHERE id = ? AND user_id = ?", args: [step.name, step.personId, userId] });
+        break;
+
+      case "restore_person": {
+        const p = step.person;
+        if (p.user_id !== userId) break;
+        out.push({
+          sql: "INSERT OR IGNORE INTO people (id, name, created_at, user_id, due_date) VALUES (?, ?, ?, ?, ?)",
+          args: [p.id, p.name, p.created_at, p.user_id, p.due_date],
+        });
+        for (const t of step.transactions) {
+          out.push({
+            sql: "INSERT OR IGNORE INTO transactions (id, person_id, amount, note, created_at) VALUES (?, ?, ?, ?, ?)",
+            args: [t.id, p.id, t.amount, t.note, t.created_at],
+          });
+        }
+        break;
+      }
+
+      case "remove_category":
+        out.push(
+          { sql: "DELETE FROM expense_categories WHERE user_id = ? AND name = ?", args: [userId, step.name] },
+          { sql: "UPDATE expenses SET category = NULL WHERE user_id = ? AND category = ?", args: [userId, step.name] },
+          { sql: "DELETE FROM expense_vendor_rules WHERE user_id = ? AND category = ?", args: [userId, step.name] }
+        );
+        break;
+
+      case "rename_category":
+        out.push(
+          { sql: "UPDATE expense_categories SET name = ? WHERE user_id = ? AND name = ?", args: [step.to, userId, step.from] },
+          { sql: "UPDATE expenses SET category = ? WHERE user_id = ? AND category = ?", args: [step.to, userId, step.from] },
+          { sql: "UPDATE expense_vendor_rules SET category = ? WHERE user_id = ? AND category = ?", args: [step.to, userId, step.from] }
+        );
+        break;
+
+      case "restore_category": {
+        const k = step.category;
+        out.push({
+          sql: "INSERT OR IGNORE INTO expense_categories (user_id, name, keywords, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
+          args: [userId, k.name, k.keywords, k.sort_order, k.created_at],
+        });
+        // Only expenses still uncategorised go back: one given a new category
+        // since the delete keeps it.
+        for (let i = 0; i < step.expenseIds.length; i += 100) {
+          const ids = step.expenseIds.slice(i, i + 100);
+          out.push({
+            sql: `UPDATE expenses SET category = ? WHERE user_id = ? AND category IS NULL AND id IN (${ids.map(() => "?").join(", ")})`,
+            args: [k.name, userId, ...ids],
+          });
+        }
+        for (const r of step.rules) {
+          out.push({
+            sql: "INSERT OR IGNORE INTO expense_vendor_rules (user_id, vendor_key, category, updated_at) VALUES (?, ?, ?, ?)",
+            args: [userId, r.vendor_key, r.category, r.updated_at],
+          });
+        }
+        break;
+      }
+
+      case "set_category_keywords":
+        out.push({
+          sql: "UPDATE expense_categories SET keywords = ? WHERE user_id = ? AND name = ?",
+          args: [step.keywords, userId, step.name],
+        });
+        break;
+    }
+  }
+  return out;
+}
+
+/* ---------- assistant: expenses ---------- */
+
+function toExpenseRow(r: Record<string, unknown>): ExpenseRow {
+  return {
+    id: r.id as string,
+    user_id: r.user_id as string,
+    amount: Number(r.amount),
+    note: (r.note as string) ?? "",
+    expense_date: r.expense_date as string,
+    expense_datetime: (r.expense_datetime as string) ?? "",
+    created_at: r.created_at as string,
+    vendor: (r.vendor as string) ?? null,
+    category: (r.category as string) ?? null,
+    vendor_key: (r.vendor_key as string) ?? null,
+  };
+}
+
+export async function getExpenseRow(userId: string, id: string): Promise<ExpenseRow | null> {
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute({ sql: "SELECT * FROM expenses WHERE id = ? AND user_id = ?", args: [id, userId] });
+  return rs.rows[0] ? toExpenseRow(rs.rows[0]) : null;
+}
+
+export async function listExpenseRowsSince(userId: string, sinceYmd: string, limit = 400): Promise<ExpenseRow[]> {
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT * FROM expenses WHERE user_id = ? AND expense_date >= ? ORDER BY expense_date DESC, created_at DESC LIMIT ?",
+    args: [userId, sinceYmd, limit],
+  });
+  return rs.rows.map(toExpenseRow);
+}
+
+// The expense most recently added by the assistant (in the app or on
+// WhatsApp) that still exists - what "it" or "the last one" means.
+export async function lastAddedExpenseId(userId: string): Promise<string | null> {
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT w.expense_id FROM whatsapp_inbound w JOIN expenses e ON e.id = w.expense_id AND e.user_id = w.user_id
+          WHERE w.user_id = ? ORDER BY w.created_at DESC LIMIT 1`,
+    args: [userId],
+  });
+  return (rs.rows[0]?.expense_id as string) ?? null;
+}
+
+export async function latestExpenseId(userId: string): Promise<string | null> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT id FROM expenses WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+    args: [userId],
+  });
+  return (rs.rows[0]?.id as string) ?? null;
+}
+
+// Applies the given changes and returns the row before and after, plus the
+// payee rule it replaced when the category was corrected - everything UNDO
+// needs to put it back.
+export async function editExpenseRow(
+  userId: string,
+  id: string,
+  changes: { amount?: number; vendor?: string; note?: string; category?: string | null; date?: string }
+): Promise<{ before: ExpenseRow; after: ExpenseRow; rule: { vendorKey: string; category: string | null } | null } | null> {
+  const before = await getExpenseRow(userId, id);
+  if (!before) return null;
+
+  const vendor = changes.vendor !== undefined ? changes.vendor : before.vendor;
+  const time = before.expense_datetime.includes("T") ? before.expense_datetime.slice(10) : "T00:00:00Z";
+  const after: ExpenseRow = {
+    ...before,
+    amount: changes.amount ?? before.amount,
+    note: changes.note ?? before.note,
+    vendor,
+    vendor_key: normalizeVendor(vendor) || null,
+    category: changes.category !== undefined ? changes.category : before.category,
+    expense_date: changes.date ?? before.expense_date,
+    expense_datetime: changes.date ? `${changes.date}${time}` : before.expense_datetime,
+  };
+
+  const c = await db();
+  await c.execute({
+    sql: `UPDATE expenses SET amount = ?, note = ?, expense_date = ?, expense_datetime = ?, vendor = ?, category = ?, vendor_key = ?
+          WHERE id = ? AND user_id = ?`,
+    args: [after.amount, after.note, after.expense_date, after.expense_datetime, after.vendor, after.category, after.vendor_key, id, userId],
+  });
+
+  // A category corrected by hand becomes the standing rule for that payee, as
+  // it does when an expense is edited in the app.
+  let rule: { vendorKey: string; category: string | null } | null = null;
+  if (changes.category && after.vendor_key && changes.category !== before.category) {
+    const previous = await getVendorRule(userId, after.vendor_key);
+    await upsertVendorRule(userId, after.vendor_key, changes.category);
+    rule = { vendorKey: after.vendor_key, category: previous };
+  }
+  return { before, after, rule };
+}
+
+export async function deleteExpenseRow(userId: string, id: string): Promise<ExpenseRow | null> {
+  const before = await getExpenseRow(userId, id);
+  if (!before) return null;
+  const c = await db();
+  await c.execute({ sql: "DELETE FROM expenses WHERE id = ? AND user_id = ?", args: [id, userId] });
+  return before;
+}
+
+/* ---------- assistant: subscriptions ---------- */
+
+function toSubscriptionRow(r: Record<string, unknown>): SubscriptionRow {
+  return {
+    id: r.id as string,
+    user_id: r.user_id as string,
+    name: r.name as string,
+    amount: Number(r.amount),
+    due_day: Number(r.due_day),
+    logo_url: (r.logo_url as string) ?? null,
+    active: Number(r.active ?? 1),
+    created_at: r.created_at as string,
+  };
+}
+
+function toPaymentRow(r: Record<string, unknown>): PaymentRow {
+  return {
+    id: r.id as string,
+    subscription_id: r.subscription_id as string,
+    period: r.period as string,
+    due_date: r.due_date as string,
+    paid_at: (r.paid_at as string) ?? null,
+    created_at: r.created_at as string,
+    reminder_day_before_sent_at: (r.reminder_day_before_sent_at as string) ?? null,
+    reminder_due_today_sent_at: (r.reminder_due_today_sent_at as string) ?? null,
+  };
+}
+
+export async function listSubscriptionRows(userId: string): Promise<SubscriptionRow[]> {
+  await ensureTablesExist();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at ASC",
+    args: [userId],
+  });
+  return rs.rows.map(toSubscriptionRow);
+}
+
+export async function getSubscriptionSnapshot(
+  userId: string,
+  id: string
+): Promise<{ sub: SubscriptionRow; payments: PaymentRow[] } | null> {
+  await ensureTablesExist();
+  const c = await db();
+  const rs = await c.execute({ sql: "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?", args: [id, userId] });
+  if (!rs.rows[0]) return null;
+  const payments = await c.execute({
+    sql: "SELECT * FROM subscription_payments WHERE subscription_id = ? ORDER BY period ASC",
+    args: [id],
+  });
+  return { sub: toSubscriptionRow(rs.rows[0]), payments: payments.rows.map(toPaymentRow) };
+}
+
+export async function updateSubscriptionFields(
+  userId: string,
+  id: string,
+  fields: { name?: string; amount?: number; due_day?: number; active?: boolean }
+): Promise<{ before: SubscriptionRow; after: SubscriptionRow } | null> {
+  const snapshot = await getSubscriptionSnapshot(userId, id);
+  if (!snapshot) return null;
+  const before = snapshot.sub;
+  const after: SubscriptionRow = {
+    ...before,
+    name: fields.name ?? before.name,
+    amount: fields.amount ?? before.amount,
+    due_day: fields.due_day ?? before.due_day,
+    active: fields.active === undefined ? before.active : fields.active ? 1 : 0,
+  };
+  const c = await db();
+  await c.execute({
+    sql: "UPDATE subscriptions SET name = ?, amount = ?, due_day = ?, active = ? WHERE id = ? AND user_id = ?",
+    args: [after.name, after.amount, after.due_day, after.active, id, userId],
+  });
+  return { before, after };
+}
+
+// Same rule as marking paid in the app - the oldest unpaid month is paid and
+// the next month rolled in - but it reports which rows it touched, so UNDO can
+// reverse exactly that.
+export async function markSubscriptionPaidTracked(
+  userId: string,
+  id: string
+): Promise<
+  | { status: "paid"; paymentId: string; period: string; addedPaymentId: string | null; nextDueDate: string }
+  | { status: "nothing_due" }
+  | null
+> {
+  await ensureTablesExist();
+  const c = await db();
+  const subRs = await c.execute({ sql: "SELECT due_day FROM subscriptions WHERE id = ? AND user_id = ?", args: [id, userId] });
+  if (!subRs.rows[0]) return null;
+  const dueDay = Number(subRs.rows[0].due_day);
+
+  await ensurePeriodPayment(id, dueDay, currentPeriodStr());
+  const unpaidRs = await c.execute({
+    sql: "SELECT id, period FROM subscription_payments WHERE subscription_id = ? AND paid_at IS NULL ORDER BY period ASC LIMIT 1",
+    args: [id],
+  });
+  const unpaid = unpaidRs.rows[0];
+  if (!unpaid) return { status: "nothing_due" };
+
+  const now = new Date().toISOString();
+  await c.execute({ sql: "UPDATE subscription_payments SET paid_at = ? WHERE id = ?", args: [now, unpaid.id as string] });
+
+  const next = nextPeriod(unpaid.period as string);
+  const nextDueDate = clampedDateForPeriod(next, dueDay);
+  const addedId = randomUUID();
+  const added = await c.execute({
+    sql: `INSERT OR IGNORE INTO subscription_payments (id, subscription_id, period, due_date, paid_at, created_at)
+          VALUES (?, ?, ?, ?, NULL, ?)`,
+    args: [addedId, id, next, nextDueDate, now],
+  });
+  return {
+    status: "paid",
+    paymentId: unpaid.id as string,
+    period: unpaid.period as string,
+    addedPaymentId: added.rowsAffected === 1 ? addedId : null,
+    nextDueDate,
+  };
+}
+
+/* ---------- assistant: people ---------- */
+
+export async function getPersonSnapshot(
+  userId: string,
+  id: string
+): Promise<{ person: PersonRow; transactions: TxRow[] } | null> {
+  const c = await db();
+  const rs = await c.execute({ sql: "SELECT * FROM people WHERE id = ? AND user_id = ?", args: [id, userId] });
+  const r = rs.rows[0];
+  if (!r) return null;
+  const tx = await c.execute({ sql: "SELECT * FROM transactions WHERE person_id = ? ORDER BY created_at ASC", args: [id] });
+  return {
+    person: {
+      id: r.id as string,
+      name: r.name as string,
+      created_at: r.created_at as string,
+      user_id: r.user_id as string,
+      due_date: (r.due_date as string) ?? null,
+    },
+    transactions: tx.rows.map((t) => ({
+      id: t.id as string,
+      person_id: t.person_id as string,
+      amount: Number(t.amount),
+      note: (t.note as string) ?? "",
+      created_at: t.created_at as string,
+    })),
+  };
+}
+
+// Returns the name it replaced, or null when the person isn't this user's.
+export async function renamePersonRow(userId: string, id: string, name: string): Promise<string | null> {
+  const snapshot = await getPersonSnapshot(userId, id);
+  if (!snapshot) return null;
+  const c = await db();
+  await c.execute({ sql: "UPDATE people SET name = ? WHERE id = ? AND user_id = ?", args: [name, id, userId] });
+  return snapshot.person.name;
+}
+
+// Same as deleting a person in the app: their entries go with them.
+export async function deletePersonRow(userId: string, id: string): Promise<void> {
+  const c = await db();
+  await c.batch(
+    [
+      {
+        sql: "DELETE FROM transactions WHERE person_id IN (SELECT id FROM people WHERE id = ? AND user_id = ?)",
+        args: [id, userId],
+      },
+      { sql: "DELETE FROM people WHERE id = ? AND user_id = ?", args: [id, userId] },
+    ],
+    "write"
+  );
+}
+
+/* ---------- assistant: categories ---------- */
+
+// Everything a category change affects, so UNDO can put it all back: the
+// category, the expenses in it, and the payee rules that point at it.
+export async function getCategorySnapshot(
+  userId: string,
+  name: string
+): Promise<{ category: CategoryRow; expenseIds: string[]; rules: RuleRow[] } | null> {
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT name, keywords, sort_order, created_at FROM expense_categories WHERE user_id = ? AND name = ?",
+    args: [userId, name],
+  });
+  const r = rs.rows[0];
+  if (!r) return null;
+  const [expenses, rules] = await Promise.all([
+    c.execute({ sql: "SELECT id FROM expenses WHERE user_id = ? AND category = ? LIMIT 2000", args: [userId, name] }),
+    c.execute({
+      sql: "SELECT vendor_key, category, updated_at FROM expense_vendor_rules WHERE user_id = ? AND category = ?",
+      args: [userId, name],
+    }),
+  ]);
+  return {
+    category: {
+      name: r.name as string,
+      keywords: (r.keywords as string) ?? null,
+      sort_order: Number(r.sort_order),
+      created_at: r.created_at as string,
+    },
+    expenseIds: expenses.rows.map((e) => e.id as string),
+    rules: rules.rows.map((x) => ({
+      vendor_key: x.vendor_key as string,
+      category: x.category as string,
+      updated_at: x.updated_at as string,
+    })),
+  };
 }

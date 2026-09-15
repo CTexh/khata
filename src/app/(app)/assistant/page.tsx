@@ -27,7 +27,13 @@ const MAX_VOICE_SECONDS = 60;
 // well inside this.
 const REPLY_WAIT_MS = 90_000;
 const POLL_EVERY_MS = 1_500;
-const EXAMPLES = ["fuel 3000 shell", "who owes me?", "what did I spend this month?", "Ali paid me back 500"];
+const EXAMPLES = [
+  "fuel 3000 shell",
+  "who owes me?",
+  "mark Netflix paid",
+  "change the last one to 2500",
+  "what did I spend this month?",
+];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -327,6 +333,16 @@ export default function AssistantPage() {
     const form = new FormData();
     form.set("id", requestId);
     form.set("text", message);
+    // Recent turns, so follow-ups like "change it to 2500" have something to refer to.
+    form.set(
+      "history",
+      JSON.stringify(
+        messages
+          .filter((m) => !m.pending && !m.failed && m.text)
+          .slice(-12)
+          .map((m) => ({ role: m.role, text: m.text }))
+      )
+    );
     if (sentPhoto) form.set("image", sentPhoto.blob, "photo.jpg");
     if (voice) form.set("audio", voice.audio, "voice.wav");
 

@@ -4,6 +4,7 @@
 // Relative import with an extension so this also runs under
 // scripts/test-whatsapp.ts, where the @/ alias doesn't exist.
 import { MONTH_NAMES, fmtDateLabel, fmtRs } from "./format.ts";
+import type { UndoStep } from "@/lib/db";
 
 const join = (lines: string[]) => lines.join("\n");
 
@@ -63,7 +64,7 @@ export function undoReply(
     expense: { amount: number; vendor: string | null } | null;
     transactions: { name: string; amount: number }[];
     peopleRemoved?: string[];
-    dueDates?: { name: string; dueDate: string | null }[];
+    steps?: UndoStep[];
   } | null
 ): string {
   if (!u) return join(["*Nothing to undo*", "", "There's nothing from the last 24 hours to remove."]);
@@ -79,9 +80,7 @@ export function undoReply(
     );
   }
   for (const name of u.peopleRemoved ?? []) out.push(`Removed ${name} from Udhar Khata`);
-  for (const d of u.dueDates ?? []) {
-    out.push(d.dueDate ? `Due date for ${d.name} back to ${fmtDateLabel(d.dueDate)}` : `Due date for ${d.name} removed`);
-  }
+  for (const step of u.steps ?? []) out.push(undoStepLine(step));
   return join(out);
 }
 
@@ -98,22 +97,31 @@ export const HELP_REPLY = join([
   "",
   "*Expenses*",
   "fuel 3000 shell",
-  "dinner 2.5k yesterday",
-  "or a photo of a bill or receipt",
+  "change the last one to 2500",
+  "delete yesterday's fuel",
+  "or a photo of a bill, or a voice note",
   "",
   "*Udhar Khata*",
   "add 700 each to Usama and Ali",
-  "add new borrower Habib Ullah with 500",
   "Ali paid me back 1000",
   "Ali will pay back on the 1st",
+  "rename Ali to Ali Raza",
+  "",
+  "*Subscriptions*",
+  "add Spotify 1200 due on the 5th",
+  "mark Netflix paid",
+  "pause YouTube Premium",
+  "",
+  "*Categories*",
+  "create category Travel with keywords flight, hotel",
+  "rename Tech to Gadgets",
   "",
   "*Questions*",
-  "how much does Ali owe?",
   "who owes me?",
   "what did I spend this month?",
   "which subscriptions are due?",
   "",
-  "Reply *UNDO* to remove the last thing I added.",
+  "Reply *UNDO* to reverse the last change.",
 ]);
 
 export const BUSY_REPLY = join([
@@ -234,4 +242,216 @@ export function dueDateReply(o: { name: string; date: string | null }): string {
 // noticed before the saved result is trusted.
 export function withTranscript(transcript: string | null, reply: string): string {
   return transcript ? join([`*Heard:* ${transcript}`, "", reply]) : reply;
+}
+
+/* ---------- changes to existing records ---------- */
+
+export type ExpenseView = { amount: number; vendor: string | null; category: string | null; date: string; note: string };
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export function ordinal(n: number): string {
+  const suffix = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${suffix[(v - 20) % 10] ?? suffix[v] ?? suffix[0]}`;
+}
+
+const describe = (e: ExpenseView) => e.vendor || e.note || "Expense";
+const categoryText = (c: string | null) => c ?? "Uncategorised";
+
+export function expenseEditedReply(o: { before: ExpenseView; after: ExpenseView }): string {
+  const { before: b, after: a } = o;
+  const changes = [
+    b.amount !== a.amount ? `Amount: ${fmtRs(b.amount)} → ${fmtRs(a.amount)}` : null,
+    b.vendor !== a.vendor ? `Vendor: ${b.vendor ?? "none"} → ${a.vendor ?? "none"}` : null,
+    b.category !== a.category ? `Category: ${categoryText(b.category)} → ${categoryText(a.category)}` : null,
+    b.date !== a.date ? `Date: ${fmtDateLabel(b.date)} → ${fmtDateLabel(a.date)}` : null,
+    b.note !== a.note ? `Note: ${b.note || "none"} → ${a.note || "none"}` : null,
+  ].filter((line): line is string => line !== null);
+  return join([
+    "*Expense updated*",
+    "",
+    `${describe(a)} · ${fmtDateLabel(a.date)}`,
+    "",
+    ...(changes.length ? changes : ["It already had those details."]),
+    "",
+    "Reply *UNDO* to change it back.",
+  ]);
+}
+
+export function expenseDeletedReply(e: ExpenseView): string {
+  return join([
+    "*Expense deleted*",
+    "",
+    `${fmtRs(e.amount)} · ${describe(e)} · ${categoryText(e.category)} · ${fmtDateLabel(e.date)}`,
+    "",
+    "Reply *UNDO* to bring it back.",
+  ]);
+}
+
+export function whichExpenseReply(items: ExpenseView[]): string {
+  return join([
+    "*Which one?*",
+    "",
+    `${plural(items.length, "expense matches", "expenses match")} that:`,
+    ...items.slice(0, 5).map((e) => `${fmtDateLabel(e.date)} · ${fmtRs(e.amount)} · ${describe(e)}`),
+    ...(items.length > 5 ? [`…and ${items.length - 5} more`] : []),
+    "",
+    "Say which, e.g. the Rs 500 one on 14 Sep.",
+  ]);
+}
+
+export function personRenamedReply(o: { from: string; to: string }): string {
+  return join(["*Name changed*", "", `${o.from} → *${o.to}*`, "", "Reply *UNDO* to change it back."]);
+}
+
+export function personDeletedReply(o: { name: string; balance: number; entries: number }): string {
+  return join([
+    "*Removed from Udhar Khata*",
+    "",
+    `*${o.name}*`,
+    `${plural(o.entries, "entry", "entries")} removed`,
+    balanceLine(o.balance),
+    "",
+    "Reply *UNDO* to bring them back.",
+  ]);
+}
+
+export function subscriptionAddedReply(o: { name: string; amount: number; firstDueDate: string }): string {
+  return join([
+    "*Subscription added*",
+    "",
+    `*${o.name}*: ${fmtRs(o.amount)} a month`,
+    `First due: ${fmtDateLabel(o.firstDueDate)}`,
+    "",
+    "Reply *UNDO* to remove it.",
+  ]);
+}
+
+export function subscriptionPaidReply(o: { name: string; amount: number; period: string; nextDueDate: string | null }): string {
+  const [year, month] = o.period.split("-").map(Number);
+  return join([
+    "*Marked paid*",
+    "",
+    `*${o.name}*: ${fmtRs(o.amount)}`,
+    `Paid for ${periodLabel(year, month)}`,
+    ...(o.nextDueDate ? [`Next due: ${fmtDateLabel(o.nextDueDate)}`] : []),
+    "",
+    "Reply *UNDO* to mark it unpaid.",
+  ]);
+}
+
+export function subscriptionActiveReply(o: { name: string; active: boolean }): string {
+  return join([
+    o.active ? "*Subscription resumed*" : "*Subscription paused*",
+    "",
+    `*${o.name}*`,
+    o.active ? "Reminders are back on." : "No reminders until you resume it.",
+    "",
+    "Reply *UNDO* to change it back.",
+  ]);
+}
+
+type SubscriptionView = { name: string; amount: number; dueDay: number };
+
+export function subscriptionEditedReply(o: { before: SubscriptionView; after: SubscriptionView }): string {
+  const { before: b, after: a } = o;
+  const changes = [
+    b.name !== a.name ? `Name: ${b.name} → ${a.name}` : null,
+    b.amount !== a.amount ? `Amount: ${fmtRs(b.amount)} → ${fmtRs(a.amount)}` : null,
+    b.dueDay !== a.dueDay ? `Due: the ${ordinal(b.dueDay)} → the ${ordinal(a.dueDay)}` : null,
+  ].filter((line): line is string => line !== null);
+  return join([
+    "*Subscription updated*",
+    "",
+    `*${a.name}*`,
+    ...(changes.length ? changes : ["It already had those details."]),
+    "",
+    "Reply *UNDO* to change it back.",
+  ]);
+}
+
+export function subscriptionDeletedReply(o: { name: string; payments: number }): string {
+  return join([
+    "*Subscription deleted*",
+    "",
+    `*${o.name}*`,
+    `${plural(o.payments, "payment record", "payment records")} removed`,
+    "",
+    "Reply *UNDO* to bring it back.",
+  ]);
+}
+
+const keywordLine = (keywords: string[]) => (keywords.length ? `Keywords: ${keywords.join(", ")}` : "No keywords");
+
+export function categoryCreatedReply(o: { name: string; keywords: string[] }): string {
+  return join(["*Category created*", "", `*${o.name}*`, keywordLine(o.keywords), "", "Reply *UNDO* to remove it."]);
+}
+
+export function categoryRenamedReply(o: { from: string; to: string; moved: number }): string {
+  return join([
+    "*Category renamed*",
+    "",
+    `${o.from} → *${o.to}*`,
+    ...(o.moved ? [`${plural(o.moved, "expense", "expenses")} moved with it`] : []),
+    "",
+    "Reply *UNDO* to change it back.",
+  ]);
+}
+
+export function categoryDeletedReply(o: { name: string; expenses: number }): string {
+  return join([
+    "*Category deleted*",
+    "",
+    `*${o.name}*`,
+    o.expenses ? `${plural(o.expenses, "expense is", "expenses are")} now uncategorised` : "It had no expenses.",
+    "",
+    "Reply *UNDO* to bring it back.",
+  ]);
+}
+
+export function categoryKeywordsReply(o: { name: string; keywords: string[] }): string {
+  return join(["*Keywords updated*", "", `*${o.name}*`, keywordLine(o.keywords), "", "Reply *UNDO* to change them back."]);
+}
+
+export function categoriesListReply(items: { name: string; keywords: string[] }[]): string {
+  return join([
+    "*Your categories*",
+    "",
+    ...(items.length ? items.map((c) => (c.keywords.length ? `${c.name} (${c.keywords.join(", ")})` : c.name)) : ["None yet."]),
+    "",
+    "Say: create category Travel, to add one.",
+  ]);
+}
+
+// One line per thing UNDO put back.
+export function undoStepLine(step: UndoStep): string {
+  switch (step.op) {
+    case "set_due_date":
+      return step.dueDate ? `Due date for ${step.name} back to ${fmtDateLabel(step.dueDate)}` : `Due date for ${step.name} removed`;
+    case "restore_expense":
+      return `Expense back: ${fmtRs(step.row.amount)}${step.row.vendor ? ` · ${step.row.vendor}` : ""}`;
+    case "revert_expense":
+      return `Expense back to ${fmtRs(step.before.amount)}${step.before.vendor ? ` · ${step.before.vendor}` : ""} (${categoryText(step.before.category)})`;
+    case "remove_subscription":
+      return `Subscription removed: ${step.name}`;
+    case "restore_subscription":
+      return `Subscription back: ${step.sub.name}`;
+    case "revert_subscription":
+      return `${step.before.name} back to ${fmtRs(step.before.amount)}, due on the ${ordinal(step.before.due_day)}${step.before.active ? "" : " (paused)"}`;
+    case "unmark_paid":
+      return `${step.name} marked unpaid again`;
+    case "rename_person":
+      return `${step.renamedTo} renamed back to ${step.name}`;
+    case "restore_person":
+      return `${step.person.name} back in Udhar Khata`;
+    case "remove_category":
+      return `Category removed: ${step.name}`;
+    case "rename_category":
+      return `Category renamed back to ${step.to}`;
+    case "restore_category":
+      return `Category back: ${step.category.name}`;
+    case "set_category_keywords":
+      return `Keywords for ${step.name} put back`;
+  }
 }
