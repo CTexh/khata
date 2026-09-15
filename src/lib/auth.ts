@@ -4,8 +4,17 @@ import crypto from "crypto";
 const SESSION_COOKIE = "khata_session";
 const SESSION_DAYS = 30;
 
+// Signs session cookies. In production a real secret is required: the old
+// fallback string is in the public repository, so a cookie signed with it
+// could be forged by anyone. Without AUTH_SECRET, production refuses to run
+// rather than accept such cookies.
 function secret(): string {
-  return process.env.AUTH_SECRET ?? "khata-dev-secret-change-in-production";
+  const configured = process.env.AUTH_SECRET;
+  if (configured && configured.length >= 32) return configured;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUTH_SECRET must be set to a random value of at least 32 characters");
+  }
+  return "khata-local-development-only-secret";
 }
 
 export function hashPassword(password: string): string {

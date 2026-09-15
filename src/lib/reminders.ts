@@ -1,6 +1,6 @@
 // Reminder emails: what is due on a given day, and how each email reads. No
-// database or network here - the daily job and the test-email route gather
-// the data - so this runs under the scripts/ tests.
+// database or network here - the scheduled jobs gather the data - so this
+// runs under the scripts/ tests.
 //
 // Every reminder is its own email, linking to the record it is about:
 // - a subscription, the evening before it is due and on the day if unpaid

@@ -19,7 +19,6 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
   const [available, setAvailable] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
 
   useEffect(() => {
@@ -58,23 +57,6 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
     if (!ok) return;
     onSaved();
     onClose();
-  };
-
-  const sendTest = async () => {
-    setTesting(true);
-    setMsg(null);
-    if (!(await persist())) {
-      setTesting(false);
-      return;
-    }
-    const res = await fetch("/api/profile/test-email", { method: "POST" });
-    const j = await res.json().catch(() => ({}));
-    setTesting(false);
-    setMsg(
-      res.ok
-        ? { text: `${j.sent} sample emails sent to ${j.to} - one of each reminder. Check your inbox (and spam).` }
-        : { text: j.error ?? "Couldn't send it.", bad: true }
-    );
   };
 
   return (
@@ -121,11 +103,6 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
             <p className="text-[12px]" style={{ color: "var(--muted)" }}>
               Email sending isn&apos;t switched on yet - your address is saved for when it is.
             </p>
-          )}
-          {available && email.trim() && (
-            <button type="button" className="btn btn-ghost" onClick={sendTest} disabled={testing || !loaded}>
-              {testing ? "Sending…" : "Send test emails"}
-            </button>
           )}
         </div>
 

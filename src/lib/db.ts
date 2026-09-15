@@ -49,6 +49,54 @@ export async function ensureUserNameColumn(): Promise<void> {
   }
 }
 
+/* ---------- login throttling ---------- */
+
+// Wrong passwords per username in a rolling window. After this many, logins
+// for that username are refused until the window has passed.
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_WINDOW_MS = 15 * 60_000;
+let loginTableEnsured = false;
+
+async function ensureLoginAttemptsTable(): Promise<void> {
+  if (loginTableEnsured) return;
+  const c = await db();
+  await c.execute(`CREATE TABLE IF NOT EXISTS login_failures (
+    username TEXT PRIMARY KEY,
+    count INTEGER NOT NULL,
+    first_at INTEGER NOT NULL
+  )`);
+  loginTableEnsured = true;
+}
+
+export async function loginLocked(username: string): Promise<boolean> {
+  await ensureLoginAttemptsTable();
+  const c = await db();
+  const rs = await c.execute({ sql: "SELECT count, first_at FROM login_failures WHERE username = ?", args: [username.toLowerCase()] });
+  const r = rs.rows[0];
+  if (!r) return false;
+  return Number(r.count) >= LOGIN_MAX_FAILURES && Date.now() - Number(r.first_at) < LOGIN_WINDOW_MS;
+}
+
+export async function recordLoginFailure(username: string): Promise<void> {
+  await ensureLoginAttemptsTable();
+  const c = await db();
+  const now = Date.now();
+  // A failure after the window has passed starts a fresh count.
+  await c.execute({
+    sql: `INSERT INTO login_failures (username, count, first_at) VALUES (?, 1, ?)
+          ON CONFLICT(username) DO UPDATE SET
+            count = CASE WHEN ? - first_at >= ? THEN 1 ELSE count + 1 END,
+            first_at = CASE WHEN ? - first_at >= ? THEN ? ELSE first_at END`,
+    args: [username.toLowerCase(), now, now, LOGIN_WINDOW_MS, now, LOGIN_WINDOW_MS, now],
+  });
+}
+
+export async function clearLoginFailures(username: string): Promise<void> {
+  await ensureLoginAttemptsTable();
+  const c = await db();
+  await c.execute({ sql: "DELETE FROM login_failures WHERE username = ?", args: [username.toLowerCase()] });
+}
+
 export async function findUserByUsername(username: string): Promise<User | null> {
   const c = await db();
   const rs = await c.execute({
@@ -877,17 +925,21 @@ export type SubscriptionWithStatus = Subscription & {
   history: PaymentRecord[];
 };
 
+// Dates in Pakistan time. UTC (what these used to return) is five hours
+// behind, so between midnight and 5am subscriptions showed yesterday's status
+// and the month rolled over five hours late.
+const pkDate = (ms: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi" }).format(new Date(ms));
+
 function currentPeriodStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return pkDate(Date.now()).slice(0, 7);
 }
 
 export function todayYMD(): string {
-  return new Date().toISOString().split("T")[0];
+  return pkDate(Date.now());
 }
 
 export function tomorrowYMD(): string {
-  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  return pkDate(Date.now() + 24 * 60 * 60 * 1000);
 }
 
 function nextPeriod(period: string): string {
