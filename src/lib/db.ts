@@ -7,7 +7,6 @@ import {
   matchRuleCategory,
   normalizeVendor,
 } from "@/lib/categorize";
-import { normalizePhone } from "@/lib/whatsapp-webhook";
 import type { HealthUpdate, ModelHealth } from "@/lib/expense-parse";
 
 let client: Client | null = null;
@@ -32,7 +31,6 @@ export type User = {
   id: string;
   username: string;
   name: string | null;
-  phone: string | null;
   password_hash: string;
   is_admin: boolean;
   created_at: string;
@@ -51,19 +49,6 @@ export async function ensureUserNameColumn(): Promise<void> {
   }
 }
 
-// Same lazy-migration pattern for the WhatsApp reminder opt-in phone number.
-// (The sending side - WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN - is
-// one shared Meta WhatsApp Business number for the whole app, set via env
-// vars in src/lib/whatsapp.ts, not per-user.)
-export async function ensureUserNotificationColumns(): Promise<void> {
-  const c = await db();
-  try {
-    await c.execute(`ALTER TABLE users ADD COLUMN phone TEXT`);
-  } catch {
-    // Column already exists.
-  }
-}
-
 export async function findUserByUsername(username: string): Promise<User | null> {
   const c = await db();
   const rs = await c.execute({
@@ -76,7 +61,6 @@ export async function findUserByUsername(username: string): Promise<User | null>
     id: r.id as string,
     username: r.username as string,
     name: (r.name as string) ?? null,
-    phone: (r.phone as string) ?? null,
     password_hash: r.password_hash as string,
     is_admin: Number(r.is_admin) === 1,
     created_at: r.created_at as string,
@@ -92,33 +76,23 @@ export async function findUserById(id: string): Promise<User | null> {
     id: r.id as string,
     username: r.username as string,
     name: (r.name as string) ?? null,
-    phone: (r.phone as string) ?? null,
     password_hash: r.password_hash as string,
     is_admin: Number(r.is_admin) === 1,
     created_at: r.created_at as string,
   };
 }
 
-export async function updateUserProfile(userId: string, name: string, phone: string): Promise<void> {
+export async function updateUserProfile(userId: string, name: string): Promise<void> {
   await ensureUserNameColumn();
-  await ensureUserNotificationColumns();
   const c = await db();
-  await c.execute({
-    sql: "UPDATE users SET name = ?, phone = ? WHERE id = ?",
-    args: [name || null, phone || null, userId],
-  });
+  await c.execute({ sql: "UPDATE users SET name = ? WHERE id = ?", args: [name || null, userId] });
 }
 
-export type ReminderRecipient = { id: string; phone: string };
-
-export async function listUsersForReminders(): Promise<ReminderRecipient[]> {
-  await ensureUserNotificationColumns();
+// Everyone the month-end job runs for.
+export async function listUserIds(): Promise<string[]> {
   const c = await db();
-  const rs = await c.execute(`SELECT id, phone FROM users WHERE phone IS NOT NULL AND phone != ''`);
-  return rs.rows.map((r) => ({
-    id: r.id as string,
-    phone: r.phone as string,
-  }));
+  const rs = await c.execute("SELECT id FROM users");
+  return rs.rows.map((r) => r.id as string);
 }
 
 export type UserSummary = {
@@ -451,9 +425,10 @@ export async function ensureCategoryTables(): Promise<void> {
       // Index already exists, or the column it covers predates this build.
     }
   }
-  // One row per WhatsApp message handled. Meta redelivers webhooks it thinks
-  // failed, so the primary key is what stops one message becoming two
-  // expenses; expense_id is what UNDO removes.
+  // One row per assistant message. The table keeps the name it had when
+  // messages also arrived on WhatsApp - renaming a live table isn't worth the
+  // risk. The primary key stops a retried message being processed twice, and
+  // the columns record what each message changed, for UNDO.
   await c.execute(`CREATE TABLE IF NOT EXISTS whatsapp_inbound (
     message_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -790,8 +765,6 @@ export type PaymentRecord = {
   period: string; // "YYYY-MM"
   due_date: string; // "YYYY-MM-DD"
   paid_at: string | null;
-  reminder_day_before_sent_at: string | null;
-  reminder_due_today_sent_at: string | null;
 };
 
 export type SubscriptionWithStatus = Subscription & {
@@ -799,8 +772,6 @@ export type SubscriptionWithStatus = Subscription & {
   current_due_date: string;
   current_payment_id: string;
   paid_this_period: boolean;
-  reminder_day_before_sent: boolean;
-  reminder_due_today_sent: boolean;
   status: "paid" | "due-today" | "due-soon" | "upcoming" | "inactive";
   history: PaymentRecord[];
 };
@@ -873,7 +844,7 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
   if (insertStmts.length > 0) await c.batch(insertStmts, "write");
 
   const histRs = await c.execute({
-    sql: `SELECT id, subscription_id, period, due_date, paid_at, reminder_day_before_sent_at, reminder_due_today_sent_at
+    sql: `SELECT id, subscription_id, period, due_date, paid_at
           FROM subscription_payments WHERE subscription_id IN (${ids.map(() => "?").join(",")}) ORDER BY period DESC`,
     args: ids,
   });
@@ -886,8 +857,6 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
       period: h.period as string,
       due_date: h.due_date as string,
       paid_at: (h.paid_at as string) ?? null,
-      reminder_day_before_sent_at: (h.reminder_day_before_sent_at as string) ?? null,
-      reminder_due_today_sent_at: (h.reminder_due_today_sent_at as string) ?? null,
     });
     historyBySub.set(subId, list);
   }
@@ -921,8 +890,6 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
       current_due_date: current.due_date,
       current_payment_id: current.id,
       paid_this_period: paid,
-      reminder_day_before_sent: !!current.reminder_day_before_sent_at,
-      reminder_due_today_sent: !!current.reminder_due_today_sent_at,
       status,
       history,
     });
@@ -987,20 +954,6 @@ export async function markSubscriptionPaid(subscriptionId: string, userId: strin
 
   // Immediately roll the next month's due entry in, as requested.
   await ensurePeriodPayment(subscriptionId, due_day, nextPeriod(unpaid.period as string));
-}
-
-// The `IS NULL` guard makes this safe to call more than once for the same
-// payment/kind (e.g. a cron retry) without overwriting an earlier timestamp.
-export async function markReminderSent(
-  paymentId: string,
-  kind: "day_before" | "due_today"
-): Promise<void> {
-  const c = await db();
-  const column = kind === "day_before" ? "reminder_day_before_sent_at" : "reminder_due_today_sent_at";
-  await c.execute({
-    sql: `UPDATE subscription_payments SET ${column} = ? WHERE id = ? AND ${column} IS NULL`,
-    args: [new Date().toISOString(), paymentId],
-  });
 }
 
 export async function deleteSubscription(subscriptionId: string, userId: string): Promise<void> {
@@ -1075,8 +1028,8 @@ export async function ensureTablesExist(): Promise<void> {
     // Column already exists.
   }
 
-  // Migration: tracks whether the day-before/due-today WhatsApp reminder has
-  // already gone out for this period, so the daily cron never double-sends.
+  // Columns left from the retired WhatsApp reminders. Kept so older databases
+  // and restored payment rows stay consistent.
   try {
     await c.execute(`ALTER TABLE subscription_payments ADD COLUMN reminder_day_before_sent_at TEXT`);
   } catch {
@@ -1099,10 +1052,10 @@ export async function ensureTablesExist(): Promise<void> {
   tablesEnsured = true;
 }
 
-/* ---------- expense writes shared by the app and WhatsApp ---------- */
+/* ---------- expense writes shared by the app and the assistant ---------- */
 
 // The one place an expense row is written, used by POST /api/expenses and by
-// the WhatsApp webhook, so both store dates and vendor keys the same way.
+// the assistant, so both store dates and vendor keys the same way.
 export async function insertExpense(opts: {
   userId: string;
   amount: number;
@@ -1132,20 +1085,7 @@ export async function insertExpense(opts: {
   return id;
 }
 
-/* ---------- inbound WhatsApp ---------- */
-
-// Profile numbers are free text, so every saved number is normalised before
-// comparing. The users table holds a handful of rows, so reading them all is
-// cheaper than a migration to store a normalised copy.
-export async function findUserIdByPhone(phone: string): Promise<string | null> {
-  const target = normalizePhone(phone);
-  if (!target) return null;
-  await ensureUserNotificationColumns();
-  const c = await db();
-  const rs = await c.execute(`SELECT id, phone FROM users WHERE phone IS NOT NULL AND phone != ''`);
-  const match = rs.rows.find((r) => normalizePhone(r.phone as string) === target);
-  return match ? (match.id as string) : null;
-}
+/* ---------- assistant messages ---------- */
 
 // True only for the first delivery of a message id; a redelivery returns false.
 export async function claimInboundMessage(messageId: string, userId: string): Promise<boolean> {
@@ -1284,13 +1224,12 @@ export type UndoResult = {
   steps: UndoStep[];
 };
 
-// Reverses the most recent thing added over WhatsApp in the last 24 hours -
-// an expense, or a set of Udhar Khata entries and any people that message
-// added. Scoped to WhatsApp on purpose: UNDO should never reach into
-// something added in the app or imported from a bank email. Anything already
-// deleted in the app is skipped, and a person the message added is only
-// removed if nothing else has been recorded against them since.
-export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult | null> {
+// Reverses the most recent thing the assistant added or changed in the last
+// 24 hours. Scoped to the assistant on purpose: UNDO never reaches into
+// something added on the app's own pages or imported from a bank email.
+// Anything already deleted in the app is skipped, and a person the message
+// added is only removed if nothing else has been recorded against them since.
+export async function undoLastAssistantEntry(userId: string): Promise<UndoResult | null> {
   await ensureCategoryTables();
   const c = await db();
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -1378,7 +1317,7 @@ export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult 
   };
 }
 
-/* ---------- Udhar Khata from WhatsApp ---------- */
+/* ---------- Udhar Khata from the assistant ---------- */
 
 export type LedgerPerson = {
   id: string;
@@ -1498,7 +1437,7 @@ export async function saveModelHealth(updates: HealthUpdate[]): Promise<void> {
   );
 }
 
-/* ---------- reads and small writes for WhatsApp questions ---------- */
+/* ---------- reads and small writes for assistant questions ---------- */
 
 export async function listRecentExpenses(userId: string, limit: number): Promise<Expense[]> {
   const c = await db();
@@ -1770,8 +1709,8 @@ export async function listExpenseRowsSince(userId: string, sinceYmd: string, lim
   return rs.rows.map(toExpenseRow);
 }
 
-// The expense most recently added by the assistant (in the app or on
-// WhatsApp) that still exists - what "it" or "the last one" means.
+// The expense most recently added by the assistant that still exists - what
+// "it" or "the last one" means.
 export async function lastAddedExpenseId(userId: string): Promise<string | null> {
   await ensureCategoryTables();
   const c = await db();

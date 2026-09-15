@@ -7,9 +7,9 @@ export const metadata: Metadata = {
   description: "What Khata stores, why, and who processes it.",
 };
 
-// Public on purpose (see PUBLIC_PATHS in src/proxy.ts): Meta requires a
-// privacy policy URL it can open without logging in before the WhatsApp app
-// can be published. Keep this in step with what the app actually does.
+// Public on purpose (see PUBLIC_PATHS in src/proxy.ts): a privacy policy
+// should be readable without an account. Keep this in step with what the app
+// actually does.
 const SECTIONS: { title: string; body: string[] }[] = [
   {
     title: "What Khata is",
@@ -21,27 +21,23 @@ const SECTIONS: { title: string; body: string[] }[] = [
     title: "What we store",
     body: [
       "Your account: username, display name and a hashed password (never the password itself).",
-      "Your WhatsApp number, if you add one in Edit Profile.",
       "What you record: expenses (amount, date, vendor, category and notes), subscriptions, people and ledger entries.",
       "Expenses imported from bank notification emails, where that has been set up for your account.",
-      "For messages sent to the Khata assistant, in the app or on WhatsApp: the message id and which expense or Udhar Khata entries it created or changed, so a message is never added twice and UNDO can reverse it.",
+      "For messages sent to the Khata assistant: the message id and which expense or Udhar Khata entries it created or changed, so a message is never added twice and UNDO can reverse it.",
       "Your conversation with the in-app assistant is kept only in your browser on that device, and is removed when you press Clear.",
     ],
   },
   {
     title: "Assistant messages and photos",
     body: [
-      "Messages you send to the Khata assistant in the app - or to the Khata WhatsApp number from the number saved on your profile - and any photo of a bill or receipt are used to add an expense, record money lent or paid back, set a due date, or answer a question about your own data, and you get a reply confirming it.",
-      "Messages from numbers that are not on any Khata profile are ignored and not stored.",
+      "Messages you send to the Khata assistant - typed, as a voice note, or with a photo of a bill or receipt - are used to add, change or remove your expenses, Udhar Khata entries, subscriptions and categories, or to answer a question about your own data, and you get a reply confirming it.",
       "Photos and voice notes are read once and are not kept. The original message text is kept as the expense's note.",
-      "To stop this, remove your number from Edit Profile; messages from it will then be ignored.",
     ],
   },
   {
     title: "Services that process your data",
     body: [
-      "Meta (WhatsApp Business Platform) delivers messages between you and Khata, and sends subscription reminders and monthly reports to your number.",
-      "Google (Gemini API) reads messages sent to the Khata assistant, bill photos and voice notes, to work out what they describe or ask. So that a message can be matched to the right person, it is also sent the names in your Udhar Khata and your category names. Khata uses Google's free tier, under which Google may use the content sent to it to improve its products.",
+      "Google (Gemini API) reads messages sent to the Khata assistant, bill photos and voice notes, to work out what they describe or ask. So that a message can be matched to the right person, it is also sent the names in your Udhar Khata, your category names and your subscription names. Khata uses Google's free tier, under which Google may use the content sent to it to improve its products.",
       "Vercel hosts the app, and Turso hosts its database.",
     ],
   },
@@ -54,7 +50,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
   {
     title: "Keeping and deleting your data",
     body: [
-      "Your data is kept until it is deleted. You can delete any expense, subscription or ledger entry in the app, and reply UNDO on WhatsApp to remove the last expense or Udhar Khata entry added there in the past 24 hours.",
+      "Your data is kept until it is deleted. You can delete any expense, subscription or ledger entry in the app, and ask the assistant to undo the last change it made in the past 24 hours.",
       "To have your whole account and everything in it deleted, ask the administrator who gave you your account.",
     ],
   },

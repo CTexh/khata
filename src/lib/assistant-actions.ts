@@ -75,6 +75,18 @@ export type ActionContext = {
   subscriptions: string[];
 };
 
+// A message that is only "undo" or "help" is handled without asking the model,
+// so it still works when every model is busy. "undo the fuel one" or "help
+// with rent 5000" go through as normal messages.
+export function detectCommand(text: string): "undo" | "help" | null {
+  const raw = text.trim().toLowerCase();
+  if (raw === "?") return "help";
+  const t = raw.replace(/[.!?]+$/, "");
+  if (t === "undo") return "undo";
+  if (t === "help") return "help";
+  return null;
+}
+
 /* ---------- the functions offered to the model ---------- */
 
 const S = (description: string) => ({ type: "STRING", description });

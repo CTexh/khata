@@ -48,7 +48,7 @@ export type ParseOutcome =
 
 // Largest single amount accepted without question. A misread receipt (an
 // invoice number or phone number taken for the total) is far more likely than
-// a genuine eight-figure payment sent by WhatsApp.
+// a genuine eight-figure payment sent by message.
 export const MAX_AMOUNT = 10_000_000;
 // More people than this in one message is almost certainly a misreading.
 export const MAX_LEDGER_ENTRIES = 20;

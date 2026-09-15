@@ -51,7 +51,7 @@ const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi" }).for
 async function act(action: Action): Promise<string> {
   const messageId = `test-${randomUUID()}`;
   await dbm.claimInboundMessage(messageId, userId);
-  return (await runAction({ userId, messageId, channel: "app", text: "", image: null, audio: null }, action)) ?? "";
+  return (await runAction({ userId, messageId, text: "", image: null, audio: null }, action)) ?? "";
 }
 const undo = () => act({ ok: true, kind: "command", command: "undo" });
 const one = async (sql: string, args: (string | number | null)[] = []) => (await c.execute({ sql, args })).rows[0] ?? null;

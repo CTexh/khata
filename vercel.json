@@ -1,5 +1,8 @@
 {
   "crons": [
-    { "path": "/api/cron/subscription-reminders", "schedule": "0 4 * * *" }
+    {
+      "path": "/api/cron/month-end",
+      "schedule": "0 4 * * *"
+    }
   ]
 }

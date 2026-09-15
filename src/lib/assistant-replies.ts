@@ -1,8 +1,8 @@
-// Every reply Khata sends on WhatsApp, in one place so they all share one
+// Every reply the Khata assistant sends, in one place so they all share one
 // layout: a bold heading, a blank line, one fact per line, and the UNDO hint
-// set apart at the end. WhatsApp renders *text* as bold.
-// Relative import with an extension so this also runs under
-// scripts/test-whatsapp.ts, where the @/ alias doesn't exist.
+// set apart at the end. *text* marks bold; the assistant page renders it.
+// Relative import with an extension so this also runs under the scripts/
+// tests, where the @/ alias doesn't exist.
 import { MONTH_NAMES, fmtDateLabel, fmtRs } from "./format.ts";
 import type { UndoStep } from "@/lib/db";
 
@@ -136,12 +136,6 @@ export const ERROR_REPLY = join([
   "Something went wrong on my side. Please try again in a minute.",
 ]);
 
-export const UNSUPPORTED_REPLY = join([
-  "I can read text messages and photos of bills.",
-  "",
-  "Send *HELP* for examples.",
-]);
-
 export function ambiguousPersonReply(name: string): string {
   return join([
     "*Nothing added*",
@@ -214,7 +208,8 @@ export function recentExpensesReply(
     return join(out);
   }
   for (const e of items) {
-    const what = e.vendor || e.note.replace(/^WhatsApp:\s*/, "") || "Expense";
+    // Older notes carry a "WhatsApp:" source prefix from before the in-app assistant.
+    const what = e.vendor || e.note.replace(/^(WhatsApp|Assistant):\s*/, "") || "Expense";
     out.push(`${fmtDateLabel(e.date)} · ${fmtRs(e.amount)} · ${what}${e.category ? ` (${e.category})` : ""}`);
   }
   return join(out);

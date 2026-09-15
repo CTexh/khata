@@ -1,8 +1,8 @@
-// The Khata assistant: one message in - typed in the app, or sent on WhatsApp -
-// one reply out. Works out what the message records (an expense, money lent or
-// paid back, a due date) or asks (a question about the user's data), saves it,
-// and writes the reply. Nothing here knows how the message arrived or how the
-// reply is delivered; each channel handles that and calls runAssistant().
+// The Khata assistant: one message in, one reply out. Works out what the
+// message records or asks - an expense, money lent or paid back, a change to a
+// subscription or category, a question about the user's data - carries it
+// out, and writes the reply. The in-app route delivers messages and fetches
+// replies; nothing here depends on how that happens.
 import {
   attachInboundExpense,
   attachInboundTransactions,
@@ -18,7 +18,7 @@ import {
   resolveExpenseCategory,
   saveModelHealth,
   setPersonDueDate,
-  undoLastWhatsAppEntry,
+  undoLastAssistantEntry,
   writeLedgerEntries,
   createSubscription,
   createUserCategory,
@@ -44,6 +44,7 @@ import {
   type LedgerWrite,
 } from "@/lib/db";
 import {
+  detectCommand,
   matchExpenses,
   understandMessage,
   type Action,
@@ -66,7 +67,6 @@ import {
   type ParsedLedger,
   type ParsedQuery,
 } from "@/lib/expense-parse";
-import { detectCommand } from "@/lib/whatsapp-webhook";
 import {
   BUSY_REPLY,
   ERROR_REPLY,
@@ -101,24 +101,21 @@ import {
   subscriptionPaidReply,
   whichExpenseReply,
   type ExpenseView,
-} from "@/lib/whatsapp-replies";
+} from "@/lib/assistant-replies";
 
 const health: HealthStore = { load: loadModelHealth, save: saveModelHealth };
-
-export type AssistantChannel = "whatsapp" | "app";
 
 export type AssistantInput = {
   userId: string;
   // Already recorded in whatsapp_inbound by the caller: it is what ties saved
   // entries to this message, so UNDO can reverse them.
   messageId: string;
-  channel: AssistantChannel;
   text: string;
   image: { data: string; mimeType: string } | null;
   // A voice note, already converted to a format Gemini accepts.
   audio: { data: string; mimeType: string } | null;
   // Recent turns of the conversation, so follow-ups like "change it to 2500"
-  // can be understood. WhatsApp sends none.
+  // can be understood.
   history?: ChatTurn[];
 };
 
@@ -127,7 +124,6 @@ export type AssistantInput = {
 // ended. Deliberately no message text, amounts or names.
 export type AssistantLog = {
   evt: "assistant";
-  channel: AssistantChannel;
   msg: string; // tail of the message id
   type: "text" | "image" | "audio";
   outcome: string;
@@ -150,7 +146,6 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantResu
   const started = Date.now();
   const log: AssistantLog = {
     evt: "assistant",
-    channel: input.channel,
     msg: input.messageId.slice(-8),
     type: input.audio ? "audio" : input.image ? "image" : "text",
     outcome: "error",
@@ -184,7 +179,7 @@ async function handle(input: AssistantInput, log: AssistantLog): Promise<string 
     return HELP_REPLY;
   }
   if (command === "undo") {
-    const undone = await undoLastWhatsAppEntry(userId);
+    const undone = await undoLastAssistantEntry(userId);
     log.outcome = undone ? "undone" : "undo_nothing";
     return undoReply(undone);
   }
@@ -253,7 +248,7 @@ async function act(
     return HELP_REPLY;
   }
   if (spoken === "undo") {
-    const undone = await undoLastWhatsAppEntry(input.userId);
+    const undone = await undoLastAssistantEntry(input.userId);
     log.outcome = undone ? "undone" : "undo_nothing";
     return undoReply(undone);
   }
@@ -285,7 +280,7 @@ async function act(
 }
 
 // Where an entry came from, shown in its note in the app.
-const sourceLabel = (channel: AssistantChannel) => (channel === "whatsapp" ? "WhatsApp" : "Assistant");
+const SOURCE_LABEL = "Assistant";
 
 // Every figure in an answer comes from the database. The model only decided
 // which question was asked.
@@ -438,7 +433,7 @@ async function saveExpense(
   const id = await insertExpense({
     userId: input.userId,
     amount: expense.amount,
-    note: `${sourceLabel(input.channel)}: ${expense.note}`,
+    note: `${SOURCE_LABEL}: ${expense.note}`,
     expenseDateTime: toStoredDateTime(expense.date),
     vendor: expense.vendor,
     category,
@@ -517,7 +512,7 @@ async function saveLedger(
     });
   }
 
-  const label = sourceLabel(input.channel);
+  const label = SOURCE_LABEL;
   const { txIds, createdPeople } = await writeLedgerEntries(
     input.userId,
     rows.map((r) => r.write),
@@ -563,7 +558,7 @@ async function runCommand(input: AssistantInput, command: Command, log: Assistan
     return HELP_REPLY;
   }
   if (command === "undo") {
-    const undone = await undoLastWhatsAppEntry(input.userId);
+    const undone = await undoLastAssistantEntry(input.userId);
     log.outcome = undone ? "undone" : "undo_nothing";
     return undoReply(undone);
   }
@@ -853,7 +848,6 @@ async function runCategory(input: AssistantInput, category: CategoryAction, log:
 export async function runAction(input: AssistantInput, action: Action): Promise<string | null> {
   const log: AssistantLog = {
     evt: "assistant",
-    channel: input.channel,
     msg: input.messageId.slice(-8),
     type: "text",
     outcome: "error",

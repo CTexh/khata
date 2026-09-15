@@ -1,5 +1,5 @@
-// Assistant replies use WhatsApp's *bold* markup, so the same text reads well
-// on WhatsApp and in the app. This splits a line into plain and bold pieces the
+// Assistant replies mark bold text as *bold*, which still reads naturally as
+// plain text. This splits a line into plain and bold pieces the
 // page renders as elements - never as HTML, so a name or note containing
 // markup can't inject anything.
 export type Segment = { text: string; bold: boolean };

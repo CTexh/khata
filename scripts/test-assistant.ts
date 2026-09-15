@@ -30,7 +30,7 @@ import {
   subscriptionPaidReply,
   undoStepLine,
   whichExpenseReply,
-} from "../src/lib/whatsapp-replies.ts";
+} from "../src/lib/assistant-replies.ts";
 import { fmtDateLabel } from "../src/lib/format.ts";
 
 let pass = 0;

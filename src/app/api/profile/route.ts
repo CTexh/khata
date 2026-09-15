@@ -9,7 +9,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const user = await findUserById(session.userId);
-  return NextResponse.json({ name: user?.name ?? "", phone: user?.phone ?? "" });
+  return NextResponse.json({ name: user?.name ?? "" });
 }
 
 export async function PATCH(req: Request) {
@@ -18,8 +18,7 @@ export async function PATCH(req: Request) {
 
   const body = await req.json();
   const name = String(body.name ?? "").trim();
-  const phone = String(body.phone ?? "").trim();
 
-  await updateUserProfile(session.userId, name, phone);
+  await updateUserProfile(session.userId, name);
   return NextResponse.json({ success: true });
 }

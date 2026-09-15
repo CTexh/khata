@@ -23,7 +23,7 @@ function status(requestId: string, reply: string | null) {
   return { id: requestId, status: reply === null ? "pending" : "done", reply };
 }
 
-// The in-app assistant. Same engine as WhatsApp, reached with the normal login
+// The in-app assistant, reached with the normal login
 // session. The message is accepted straight away and worked on after the
 // response: a slow model used to keep the phone's request open long enough
 // for the connection to drop, so the page showed an error even though the
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
-      const { reply } = await runAssistant({ userId, messageId, channel: "app", text, image, audio, history });
+      const { reply } = await runAssistant({ userId, messageId, text, image, audio, history });
       await saveInboundReply(messageId, reply || "Done.");
     } catch (err) {
       console.error(JSON.stringify({ evt: "assistant", msg: requestId.slice(-8), outcome: "reply_not_saved", error: (err as Error).message.slice(0, 300) }));

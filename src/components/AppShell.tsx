@@ -12,16 +12,14 @@ type CurrentUser = { id: string; username: string; isAdmin: boolean };
 function EditProfileModal({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
 
   useEffect(() => {
     fetch("/api/profile")
-      .then(async (r): Promise<{ name?: string; phone?: string }> => (r.ok ? r.json() : {}))
+      .then(async (r): Promise<{ name?: string }> => (r.ok ? r.json() : {}))
       .then((d) => {
         setName(d.name ?? "");
-        setPhone(d.phone ?? "");
       })
       // A failed load must still clear the spinner, or the form never appears.
       .finally(() => setLoading(false));
@@ -34,7 +32,7 @@ function EditProfileModal({ onClose }: { onClose: () => void }) {
     const res = await fetch("/api/profile", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, phone }),
+      body: JSON.stringify({ name }),
     });
     setSaving(false);
     setMsg(res.ok ? { text: "Saved." } : { text: "Couldn't save — try again.", bad: true });
@@ -87,21 +85,6 @@ function EditProfileModal({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
               />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
-                WhatsApp number
-              </label>
-              <input
-                className="field"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+923001234567"
-              />
-              <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-                Used for subscription reminders and expense reports.
-              </p>
             </div>
 
             {msg && (

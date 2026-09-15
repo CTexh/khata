@@ -1,10 +1,4 @@
-import { createHmac } from "node:crypto";
-import {
-  detectCommand,
-  extractMessages,
-  normalizePhone,
-  verifySignature,
-} from "../src/lib/whatsapp-webhook.ts";
+import { detectCommand } from "../src/lib/assistant-actions.ts";
 import {
   BUSY_COOLDOWN_MS,
   BROKEN_COOLDOWN_MS,
@@ -51,7 +45,7 @@ import {
   udharSummaryReply,
   withTranscript,
   QUESTION_REFUSAL_HEADING,
-} from "../src/lib/whatsapp-replies.ts";
+} from "../src/lib/assistant-replies.ts";
 import { encodeWav } from "../src/lib/wav.ts";
 import { fmtDateLabel } from "../src/lib/format.ts";
 import { splitBold } from "../src/lib/chat-format.ts";
@@ -66,58 +60,6 @@ function check(label: string, got: unknown, want: unknown) {
     console.log(`FAIL ${label}\n     got: ${JSON.stringify(got)}  want: ${JSON.stringify(want)}`);
   }
 }
-
-/* phone numbers: every way a Pakistani number gets typed matches WhatsApp's form */
-const WA = "923001234567";
-for (const typed of ["03001234567", "0300 1234567", "+92 300 1234567", "+92-300-1234567", "923001234567", "00923001234567", "3001234567"]) {
-  check(`phone "${typed}"`, normalizePhone(typed), WA);
-}
-check("phone empty", normalizePhone(""), null);
-check("phone null", normalizePhone(null), null);
-check("phone too short", normalizePhone("12345"), null);
-check("phone foreign kept", normalizePhone("+44 7700 900123"), "447700900123");
-
-/* signatures */
-const secret = "app-secret";
-const body = '{"entry":[]}';
-const good = "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
-check("sig valid", verifySignature(body, good, secret), true);
-check("sig tampered body", verifySignature(body + " ", good, secret), false);
-check("sig wrong secret", verifySignature(body, good, "other"), false);
-check("sig missing header", verifySignature(body, null, secret), false);
-check("sig no prefix", verifySignature(body, good.slice(7), secret), false);
-check("sig wrong length", verifySignature(body, "sha256=abc", secret), false);
-check("sig empty secret", verifySignature(body, good, ""), false);
-
-/* payload extraction */
-const payload = {
-  entry: [
-    {
-      changes: [
-        { value: { statuses: [{ id: "s1", status: "delivered" }] } },
-        {
-          value: {
-            messages: [
-              { id: "m1", from: WA, type: "text", text: { body: "  fuel 3000 shell " } },
-              { id: "m2", from: WA, type: "image", image: { id: "img9", caption: "bill" } },
-              { id: "m3", from: WA, type: "image", image: { id: "img10" } },
-              { id: "m4", from: WA, type: "audio", audio: { id: "a1" } },
-              { from: WA, type: "text", text: { body: "no id" } },
-            ],
-          },
-        },
-      ],
-    },
-  ],
-};
-const msgs = extractMessages(payload);
-check("extract count (status + id-less skipped)", msgs.length, 4);
-check("extract text trimmed", msgs[0], { id: "m1", from: WA, type: "text", text: "fuel 3000 shell", imageId: null });
-check("extract image caption", msgs[1], { id: "m2", from: WA, type: "image", text: "bill", imageId: "img9" });
-check("extract image no caption", msgs[2].text, "");
-check("extract audio no image id", msgs[3].imageId, null);
-check("extract garbage", extractMessages("nope"), []);
-check("extract null", extractMessages(null), []);
 
 /* commands */
 check("cmd undo", detectCommand("UNDO"), "undo");
