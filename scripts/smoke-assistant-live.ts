@@ -19,7 +19,16 @@ const afterAdding: ChatTurn[] = [
   { role: "assistant", text: "*Expense added* Amount: Rs 3,000 Category: Car Vendor: Shell Reply *UNDO* to remove it." },
 ];
 
-const cases: { text: string; want: string; history?: ChatTurn[]; kind?: string }[] = [
+const cases: {
+  text: string;
+  want: string;
+  history?: ChatTurn[];
+  kind?: string;
+  label?: string;
+  category?: string;
+  month?: number;
+  type?: string;
+}[] = [
   { text: "fuel 3000 shell", want: "add_expense", kind: "expense" },
   { text: "How much abdurrehman owe me", want: "person_balance", kind: "query" },
   { text: "who owes me?", want: "who_owes_me", kind: "query" },
@@ -36,6 +45,20 @@ const cases: { text: string; want: string; history?: ChatTurn[]; kind?: string }
   { text: "what did I spend this month", want: "spending_total", kind: "query" },
   { text: "ali will pay back on 1st october", want: "set_due_date", kind: "due_date" },
   { text: "what's the weather like in lahore", want: "not_understood" },
+  { text: "how much did I spend today", want: "spending_total", kind: "query", label: "Today" },
+  { text: "aaj kitna kharcha hua", want: "spending_total", kind: "query", label: "Today" },
+  { text: "spending this week", want: "spending_total", kind: "query", label: "This week" },
+  { text: "what did I spend this week?", want: "spending_total", kind: "query", label: "This week", type: "spending" },
+  { text: "how much on food last month", want: "spending_total", kind: "query", label: "Last month", category: "Food & Dining" },
+  { text: "how much did I spend on fuel in august", want: "spending_total", kind: "query", month: 8 },
+  { text: "show my biggest expenses this month", want: "list_expenses", kind: "query", type: "expense_list" },
+  { text: "list my subscriptions", want: "subscriptions_overview", kind: "query", type: "subscriptions_overview" },
+  { text: "gave ali 2000", want: "lend_money", kind: "ledger" },
+  { text: "usama ko 500 udhar diye", want: "lend_money", kind: "ledger" },
+  { text: "irtaza ne 300 wapas kiye", want: "record_repayment", kind: "ledger" },
+  { text: "paid electricity bill 8500", want: "add_expense", kind: "expense" },
+  { text: "kal 1200 ka khana khaya kfc", want: "add_expense", kind: "expense" },
+  { text: "paid netflix", want: "mark_subscription_paid", kind: "subscription" },
 ];
 
 let good = 0;
@@ -52,10 +75,21 @@ for (const c of cases) {
       subscriptions,
       today,
     });
-    const action = result.action as { ok: boolean; kind?: string; reason?: string };
+    const action = result.action as {
+      ok: boolean;
+      kind?: string;
+      reason?: string;
+      query?: { type: string; label?: string | null; category: string | null; month: number | null };
+    };
     // interpretCall doesn't expose the function name, so the action kind stands in for it.
-    const picked = action.ok ? action.kind : `refused: ${action.reason}`;
-    const pass = c.kind ? action.ok && action.kind === c.kind : !action.ok;
+    const q = action.query;
+    const picked = action.ok ? `${action.kind}${q ? ` ${q.type}/${q.label ?? q.month}/${q.category}` : ""}` : `refused: ${action.reason}`;
+    const pass =
+      (c.kind ? action.ok && action.kind === c.kind : !action.ok) &&
+      (c.label === undefined || q?.label === c.label) &&
+      (c.category === undefined || q?.category === c.category) &&
+      (c.month === undefined || q?.month === c.month) &&
+      (c.type === undefined || q?.type === c.type);
     if (pass) good++;
     console.log(`${pass ? "ok  " : "MISS"} ${c.text.padEnd(55)} want ${c.want.padEnd(24)} got ${picked}  [${result.model}, ${Date.now() - started}ms]`);
   } catch (err) {

@@ -3,23 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Expense } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
-
-// Category colours live in globals.css as --cat-<slug>-bg/fg, defined once per
-// theme. Reading them as CSS variables means the badge is correct on the very
-// first paint: nothing here has to know whether the app is in dark mode, which
-// is what used to make these colours disagree with the server-rendered HTML.
-// The var() fallback covers categories with no palette entry of their own.
-function categoryVars(category?: string | null): { bg: string; fg: string } {
-  const slug = (category ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  if (!slug) return { bg: "var(--cat-default-bg)", fg: "var(--cat-default-fg)" };
-  return {
-    bg: `var(--cat-${slug}-bg, var(--cat-default-bg))`,
-    fg: `var(--cat-${slug}-fg, var(--cat-default-fg))`,
-  };
-}
+import { categoryEmoji, categoryVars } from "@/lib/category-style";
 
 function toLocalDateTime(iso: string): string {
   if (!iso) return "";
@@ -1091,42 +1075,38 @@ function ExpenseRow({
 }) {
   const categoryColor = categoryVars(expense.category);
 
+  const note = expense.note.replace(/^(WhatsApp|Assistant):\s*/, "");
+
   return (
-    <li className="border-b last:border-b-0" style={{ borderColor: "var(--hairline)" }}>
+    <li>
       <button
         type="button"
-        className="grid w-full items-center gap-3 py-3 px-1 text-left cursor-pointer hover:opacity-75 transition"
-        style={{ gridTemplateColumns: "32% minmax(0, 1fr) 24%" }}
+        className="flex w-full items-center gap-3 py-2.5 text-left cursor-pointer rounded-2xl transition hover:bg-[var(--surface-2)]"
         onClick={onView}
         aria-label={`View ${expense.vendor || "expense"}, ${fmtRs(expense.amount)}`}
       >
-      {/* Category Badge - Fixed Width */}
-      <div className="min-w-0">
-        {expense.category && (
-          <span
-            className="max-w-full overflow-hidden text-ellipsis text-[11px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap inline-block align-middle"
-            style={{
-              background: categoryColor.bg,
-              color: categoryColor.fg,
-            }}
-          >
-            {expense.category}
+        <span className="icon-tile" style={{ background: categoryColor.bg }} aria-hidden>
+          {categoryEmoji(expense.category)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] truncate font-bold" style={{ color: "var(--ink)" }}>
+            {expense.vendor || note || "Expense"}
           </span>
-        )}
-      </div>
-
-      {/* Title and Date */}
-      <div className="min-w-0">
-        <p className="text-[14px] truncate font-medium" style={{ color: "var(--ink)" }}>{expense.vendor || "Expense"}</p>
-        <p className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
-          {fmtDateLabel(expense.expense_date)}
-        </p>
-      </div>
-
-      {/* Amount - Right Aligned */}
-      <span className="tabular text-[14px] font-semibold text-right" style={{ color: "var(--ink)" }}>
-        {fmtRs(expense.amount)}
-      </span>
+          <span className="block text-[12px] truncate" style={{ color: "var(--muted)" }}>
+            {expense.category ? (
+              <span className="font-semibold" style={{ color: categoryColor.fg }}>
+                {expense.category}
+              </span>
+            ) : (
+              "Uncategorised"
+            )}
+            {" · "}
+            {fmtDateLabel(expense.expense_date)}
+          </span>
+        </span>
+        <span className="tabular text-[15px] font-extrabold text-right shrink-0" style={{ color: "var(--ink)" }}>
+          {fmtRs(expense.amount)}
+        </span>
       </button>
     </li>
   );

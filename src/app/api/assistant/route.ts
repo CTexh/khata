@@ -17,6 +17,7 @@ const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 // A minute of 16 kHz mono WAV, the format the page records in, is about 1.9 MB.
 const MAX_AUDIO_BYTES = 2.5 * 1024 * 1024;
 // Chosen by the page, so a retry after a dropped connection is recognised.
+const INLINE_WAIT_MS = 9_000;
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function status(requestId: string, reply: string | null) {
@@ -95,15 +96,25 @@ export async function POST(req: Request) {
     return NextResponse.json(status(requestId, existing.reply));
   }
 
-  after(async () => {
+  const work = (async (): Promise<string | null> => {
     try {
       const { reply } = await runAssistant({ userId, messageId, text, image, audio, history });
-      await saveInboundReply(messageId, reply || "Done.");
+      const final = reply || "Done.";
+      await saveInboundReply(messageId, final);
+      return final;
     } catch (err) {
       console.error(JSON.stringify({ evt: "assistant", msg: requestId.slice(-8), outcome: "reply_not_saved", error: (err as Error).message.slice(0, 300) }));
+      return null;
     }
-  });
+  })();
+  // Keeps the function alive until the work is saved, however long it takes.
+  after(() => work);
 
+  // Most messages are answered in a couple of seconds, so the reply is sent
+  // straight back when it's ready quickly. Only a slow one falls back to the
+  // page fetching it, which keeps a phone from holding a long request open.
+  const quick = await Promise.race([work, new Promise<null>((r) => setTimeout(() => r(null), INLINE_WAIT_MS))]);
+  if (quick !== null) return NextResponse.json(status(requestId, quick));
   return NextResponse.json(status(requestId, null), { status: 202 });
 }
 

@@ -539,12 +539,13 @@ export default function Subscriptions() {
   if (loading) return <Spinner />;
 
   return (
-    <main id="main-content" className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Subscriptions</h2>
-          <p className="text-sm" style={{ color: "var(--muted)" }}>
-            Total this month: <span className="tabular font-semibold">{fmtRs(monthlyTotal)}</span>
+    <div className="flex flex-col gap-5">
+      <div className="hero-panel p-6 flex items-center justify-between gap-4 rise">
+        <div className="min-w-0">
+          <p className="hero-muted text-[14px] font-semibold">Monthly total</p>
+          <p className="text-[34px] font-extrabold tabular leading-tight mt-1 truncate">{fmtRs(monthlyTotal)}</p>
+          <p className="hero-muted text-[13px] mt-1">
+            {activeSubscriptions.length} active · {activeSubscriptions.filter((s) => !s.paid_this_period).length} unpaid
           </p>
         </div>
         <button
@@ -736,6 +737,6 @@ export default function Subscriptions() {
           </>
         )}
       </div>
-    </main>
+    </div>
   );
 }

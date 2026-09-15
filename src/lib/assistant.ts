@@ -39,6 +39,8 @@ import {
   renamePersonRow,
   updateSubscriptionFields,
   updateUserCategory,
+  listExpensesInRange,
+  type Expense,
   type ExpenseRow,
   type LedgerPerson,
   type LedgerWrite,
@@ -100,6 +102,10 @@ import {
   subscriptionEditedReply,
   subscriptionPaidReply,
   whichExpenseReply,
+  expenseListReply,
+  rangeLabel,
+  subscriptionsOverviewReply,
+  whenPhrase,
   type ExpenseView,
 } from "@/lib/assistant-replies";
 
@@ -324,26 +330,17 @@ async function answerQuery(
       );
 
     case "spending": {
-      const year = query.year ?? Number(today.slice(0, 4));
-      const rows = await listExpenses(userId, {
-        year,
-        month: query.month ?? undefined,
-        category: query.category ?? undefined,
-      });
-      const needle = query.vendor?.toLowerCase();
-      const matched = needle
-        ? rows.filter((e) => `${e.vendor ?? ""} ${e.note}`.toLowerCase().includes(needle))
-        : rows;
+      const matched = await expensesFor(userId, query);
       // A breakdown only makes sense for an unfiltered total.
       const byCategory = new Map<string, number>();
-      if (!query.category && !needle) {
+      if (!query.category && !query.vendor) {
         for (const e of matched) {
           const key = e.category || "Uncategorised";
           byCategory.set(key, (byCategory.get(key) ?? 0) + e.amount);
         }
       }
       return spendingReply({
-        label: periodLabel(year, query.month),
+        label: queryLabel(query, today),
         filter: [query.category, query.vendor].filter(Boolean).join(" · ") || null,
         total: matched.reduce((sum, e) => sum + e.amount, 0),
         count: matched.length,
@@ -351,6 +348,46 @@ async function answerQuery(
           .map(([category, total]) => ({ category, total }))
           .sort((a, b) => b.total - a.total),
       });
+    }
+
+    case "expense_list": {
+      const matched = await expensesFor(userId, query);
+      const sorted =
+        query.sort === "biggest"
+          ? [...matched].sort((a, b) => b.amount - a.amount)
+          : matched; // already newest first
+      const hasPeriod = Boolean(query.from || query.year);
+      const what = [query.category, query.vendor].filter(Boolean).join(" · ");
+      const title = `${query.sort === "biggest" ? "Biggest" : "Latest"} ${what ? `${what} ` : ""}expenses${
+        hasPeriod ? ` ${whenPhrase(queryLabel(query, today))}` : ""
+      }`;
+      return expenseListReply({
+        title,
+        items: sorted.slice(0, query.limit ?? 10).map((e) => ({
+          date: e.expense_date,
+          amount: e.amount,
+          vendor: e.vendor ?? null,
+          category: e.category ?? null,
+          note: e.note,
+        })),
+        matched: matched.length,
+        total: matched.reduce((sum, e) => sum + e.amount, 0),
+      });
+    }
+
+    case "subscriptions_overview": {
+      await ensureTablesExist();
+      const subs = await listSubscriptions(userId);
+      return subscriptionsOverviewReply(
+        subs.map((sub) => ({
+          name: sub.name,
+          amount: sub.amount,
+          active: Boolean(sub.active),
+          paid: sub.paid_this_period,
+          dueDate: sub.current_due_date,
+        })),
+        today
+      );
     }
 
     case "recent_expenses": {
@@ -377,6 +414,30 @@ async function answerQuery(
       );
     }
   }
+}
+
+// The expenses a question covers: a day range, a month or year, or - for a
+// list with no period - the most recent ones. Category and search word are
+// applied here so every question type filters the same way.
+async function expensesFor(userId: string, query: ParsedQuery): Promise<Expense[]> {
+  const rows = query.from && query.to
+    ? await listExpensesInRange(userId, query.from, query.to)
+    : query.year
+      ? await listExpenses(userId, { year: query.year, month: query.month ?? undefined })
+      : await listRecentExpenses(userId, 500);
+  const category = query.category?.toLowerCase();
+  const needle = query.vendor?.toLowerCase();
+  return rows.filter((e) => {
+    if (category && (e.category || "Uncategorised").toLowerCase() !== category) return false;
+    if (needle && !`${e.vendor ?? ""} ${e.note} ${e.category ?? ""}`.toLowerCase().includes(needle)) return false;
+    return true;
+  });
+}
+
+function queryLabel(query: ParsedQuery, today: string): string {
+  if (query.label) return query.label;
+  if (query.from && query.to) return rangeLabel(query.from, query.to);
+  return periodLabel(query.year ?? Number(today.slice(0, 4)), query.month);
 }
 
 async function saveDueDate(

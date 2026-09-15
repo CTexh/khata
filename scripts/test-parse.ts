@@ -23,6 +23,9 @@ import {
   pickFlashModel,
   planSecondPass,
   rankFlashModels,
+  matchCategory,
+  periodRange,
+  usesThinking,
   validateParsed,
   type Attempt,
   type ModelHealth,
@@ -40,6 +43,7 @@ import {
   periodLabel,
   recentExpensesReply,
   spendingReply,
+  whenPhrase,
   subscriptionsDueReply,
   udharPersonReply,
   udharSummaryReply,
@@ -328,6 +332,25 @@ check("spending string year accepted", q({ query_type: "spending", year: "2025",
 check("spending category matched to the user's list", q({ query_type: "spending", category_hint: "food & dining" }).query?.category, "Food & Dining");
 check("spending uncategorised allowed", q({ query_type: "spending", category_hint: "uncategorised" }).query?.category, "Uncategorised");
 check("spending unknown category ignored", q({ query_type: "spending", category_hint: "Furniture" }).query?.category, null);
+check("spending unknown category searched as a word", q({ query_type: "spending", category_hint: "Furniture" }).query?.vendor, "Furniture");
+check("spending loose category name", q({ query_type: "spending", category_hint: "food" }).query?.category, "Food & Dining");
+check("spending today", [q({ query_type: "spending", period: "today" }).query?.from, q({ query_type: "spending", period: "today" }).query?.to, q({ query_type: "spending", period: "today" }).query?.label], [today, today, "Today"]);
+check("spending period wins over month", q({ query_type: "spending", period: "this week", month: 9 }).query?.month, null);
+check("period this week starts Monday", periodRange("this_week", "2026-09-15"), { from: "2026-09-14", to: "2026-09-15", label: "This week" });
+check("period last week", periodRange("last_week", "2026-09-15"), { from: "2026-09-07", to: "2026-09-13", label: "Last week" });
+check("period last month over a year end", periodRange("last_month", "2026-01-10"), { from: "2025-12-01", to: "2025-12-31", label: "Last month" });
+check("period last 7 days", periodRange("last_7_days", "2026-09-15")?.from, "2026-09-09");
+check("period unknown", periodRange("fortnight", "2026-09-15"), null);
+check("spending date range", [q({ query_type: "spending", start_date: "2026-09-10", end_date: "2026-09-01" }).query?.from, q({ query_type: "spending", start_date: "2026-09-10", end_date: "2026-09-01" }).query?.to], ["2026-09-01", "2026-09-10"]);
+check("spending single day", q({ query_type: "spending", start_date: "2026-09-12" }).query?.to, "2026-09-12");
+check("spending future range refused", q({ query_type: "spending", start_date: "2026-12-01" }).ok, false);
+check("spending bad range refused", q({ query_type: "spending", start_date: "2026-02-30" }).ok, false);
+check("list defaults to no period, latest 10", [q({ query_type: "expense_list" }).query?.year, q({ query_type: "expense_list" }).query?.sort, q({ query_type: "expense_list" }).query?.limit], [null, "latest", 10]);
+check("list biggest defaults to 5, limit capped", [q({ query_type: "expense_list", sort: "biggest" }).query?.limit, q({ query_type: "expense_list", limit: 99 }).query?.limit], [5, 20]);
+check("match category ambiguous", matchCategory("car", ["Car", "Car Wash"]), "Car");
+check("match category partial ambiguous refused", matchCategory("fo", ["Food", "Football"]), null);
+check("when phrase", [whenPhrase("Today"), whenPhrase("This week"), whenPhrase("August 2026")], ["today", "this week", "in August 2026"]);
+check("thinking only for Flash 3+", [usesThinking("gemini-3.6-flash"), usesThinking("gemini-3.5-flash-lite"), usesThinking("gemini-2.5-flash")], [true, false, false]);
 check("spending vendor kept", q({ query_type: "spending", vendor: " Shell " }).query?.vendor, "Shell");
 check("unknown question type refused", q({ query_type: "weather" }).ok, false);
 check("missing question type refused", q({}).ok, false);

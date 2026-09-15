@@ -73,7 +73,7 @@ for (const name of names.filter((n) => n !== "not_understood")) {
 
 /* system prompt */
 const prompt = buildSystemPrompt({ today, people: ctx.people, categories: ctx.categories, subscriptions: ctx.subscriptions, hasImage: true, hasAudio: false });
-check("prompt date", prompt.includes("Today is 2026-09-15"), true);
+check("prompt date", prompt.includes("Today is Tuesday, 2026-09-15"), true);
 check("prompt lists", [prompt.includes("Ali, Abdur Rehman, Usama Irtaza"), prompt.includes("Car, Groceries"), prompt.includes("Netflix, Spotify Premium")], [true, true, true]);
 check("prompt image line only with image", [prompt.includes("An image is attached"), prompt.includes("voice note is attached")], [true, false]);
 check("prompt empty lists", buildSystemPrompt({ today, people: [], categories: [], subscriptions: [], hasImage: false, hasAudio: true }).includes("Subscriptions: (none yet)."), true);
@@ -143,6 +143,9 @@ check("person balance", call("person_balance", { people: ["abdurrehman"] }).quer
 check("who owes me", call("who_owes_me").query?.type, "udhar_summary");
 check("spending", [call("spending_total", { month: 8, category: "car" }).query?.month, call("spending_total", { month: 8, category: "car" }).query?.category], [8, "Car"]);
 check("recent", call("recent_expenses").query?.type, "recent_expenses");
+check("spending this week", call("spending_total", { period: "this_week" }).query?.label, "This week");
+check("list biggest in a category", [call("list_expenses", { sort: "biggest", category: "car" }).query?.type, call("list_expenses", { sort: "biggest", category: "car" }).query?.category, call("list_expenses", { sort: "biggest" }).query?.sort], ["expense_list", "Car", "biggest"]);
+check("subscriptions overview", call("subscriptions_overview").query?.type, "subscriptions_overview");
 check("subscriptions due", call("subscriptions_due").query?.type, "subscriptions_due");
 check("commands", [call("undo_last").command, call("show_help").command, call("list_categories").command], ["undo", "help", "list_categories"]);
 check("not understood", call("not_understood").reason, NOT_UNDERSTOOD);

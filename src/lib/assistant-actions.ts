@@ -122,6 +122,18 @@ const TARGET = {
   required: ["which"],
 };
 
+const SPENDING_FILTERS = {
+  period: S(
+    "today, yesterday, this_week, last_week, this_month, last_month, this_year, last_year, last_7_days or last_30_days - use whenever the question says one of these"
+  ),
+  start_date: S("YYYY-MM-DD: a specific day, or the start of a date range"),
+  end_date: S("YYYY-MM-DD: the end of a date range"),
+  year: N("Year, when a whole year or a named month is meant"),
+  month: N("Month 1-12, when a named month is meant (e.g. August = 8)"),
+  category: S("One of the user's categories, only if it clearly fits"),
+  vendor: S("A shop, person or word to search for in the vendor and note, e.g. Shell, fuel, Daraz"),
+};
+
 export const TOOLS = [
   fn(
     "add_expense",
@@ -221,13 +233,21 @@ export const TOOLS = [
     ["people"]
   ),
   fn("who_owes_me", "Everyone who owes the user money."),
-  fn("spending_total", "How much was spent in a month or year, optionally in one category or at one vendor. Nothing said means this month.", {
-    year: N("Year"),
-    month: N("Month 1-12, when a month is meant"),
-    category: S("One of the user's categories"),
-    vendor: S("Vendor or note text"),
-  }),
-  fn("recent_expenses", "List the latest expenses."),
+  fn(
+    "spending_total",
+    "A question about HOW MUCH was spent: a total for a day, week, month, year or date range, optionally in one category or on one thing. Nothing said means this month.",
+    SPENDING_FILTERS
+  ),
+  fn(
+    "list_expenses",
+    "Show individual expenses: the latest ones, the biggest ones, or the ones in a period, category or on one thing.",
+    {
+      ...SPENDING_FILTERS,
+      sort: S("latest (default) or biggest"),
+      limit: N("How many to show, 1-20, only if a number was asked for"),
+    }
+  ),
+  fn("subscriptions_overview", "List all subscriptions with their amounts, whether each is paid this month, and the monthly total."),
   fn(
     "add_subscription",
     "Add a recurring monthly subscription.",
@@ -282,12 +302,21 @@ export function buildSystemPrompt(o: {
   hasAudio: boolean;
 }): string {
   const list = (items: string[]) => (items.length ? items.join(", ") : "(none yet)");
+  const weekday = new Date(o.today + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
   return [
     "You are the assistant inside Khata, a personal finance app used in Pakistan. Read the user's latest message and call exactly one function that does what they want.",
-    `Today is ${o.today} (Asia/Karachi). Resolve relative dates like "yesterday", "kal" or "last month" against it.`,
-    "Amounts are Pakistani rupees unless another currency is clearly stated. Expand shorthand: 1.2k = 1200, 2 lac or lakh = 200000.",
+    `Today is ${weekday}, ${o.today} (Asia/Karachi). Resolve relative dates like "yesterday", "kal", "parson", "last Friday" or "last month" against it.`,
+    "Amounts are Pakistani rupees unless another currency is clearly stated. Expand shorthand: 1.2k = 1200, 2 lac or lakh = 200000, 1.5 crore = 15000000.",
+    "Messages may be English, Urdu or Roman Urdu: kharcha/kharch = spent, udhar diya/de diye = lent, wapas kiye/lota diye = paid back, kitna/kitne = how much, aaj = today, kal = yesterday (or tomorrow for a future due date).",
+    "How to choose:",
+    "- A question (how much, what, which, who, show, list, kitna) is never a new entry.",
+    "- 'What did I spend', 'how much did I spend', 'spending', 'kitna kharcha' ask for a total: spending_total. Only 'show', 'list', 'which expenses', 'biggest', 'latest' or 'last N' ask to see the expenses themselves: list_expenses.",
+    "- For a period such as today, this week or last month, set the period argument instead of year and month.",
+    "- Money given or lent to someone in the Udhar Khata list is lend_money, not an expense. Money they returned is record_repayment.",
+    "- Paying a shop, bill, company or service is add_expense. Paying a subscription the user already has is mark_subscription_paid.",
+    "- 'it', 'that', 'the last one' after something was added refers to that entry.",
     'Use the earlier messages in this conversation to resolve references like "it", "him" or "change that to 2500".',
-    "Always use names exactly as they appear in these lists, matching misspellings to the closest one:",
+    "Always use names exactly as they appear in these lists, matching misspellings and nicknames to the closest one:",
     `Udhar Khata people: ${list(o.people)}.`,
     `Expense categories: ${list(o.categories)}.`,
     `Subscriptions: ${list(o.subscriptions)}.`,
@@ -452,11 +481,26 @@ export function interpretCall(call: FunctionCall | null, ctx: ActionContext): Ac
     case "who_owes_me":
       return v({ intent: "query", query_type: "udhar_summary" });
     case "spending_total":
-      return v({ intent: "query", query_type: "spending", year: a.year, month: a.month, category_hint: a.category, vendor: a.vendor });
+    case "list_expenses":
+      return v({
+        intent: "query",
+        query_type: call.name === "spending_total" ? "spending" : "expense_list",
+        period: a.period,
+        start_date: a.start_date,
+        end_date: a.end_date,
+        year: a.year,
+        month: a.month,
+        category_hint: a.category,
+        vendor: a.vendor,
+        sort: a.sort,
+        limit: a.limit,
+      });
     case "recent_expenses":
       return v({ intent: "query", query_type: "recent_expenses" });
     case "subscriptions_due":
       return v({ intent: "query", query_type: "subscriptions_due" });
+    case "subscriptions_overview":
+      return v({ intent: "query", query_type: "subscriptions_overview" });
 
     case "edit_expense":
       return validateExpenseEdit(a, ctx);

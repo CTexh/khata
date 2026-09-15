@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { splitBold } from "@/lib/chat-format";
 import { encodeWav } from "@/lib/wav";
+import { ASSISTANT_DRAFT_KEY } from "@/lib/assistant-draft";
+import { CameraIcon, MicIcon } from "@/components/icons";
 
 type ChatMessage = {
   id: string;
@@ -26,7 +28,7 @@ const MAX_VOICE_SECONDS = 60;
 // How long to keep checking for a reply. The server's own work is bounded
 // well inside this.
 const REPLY_WAIT_MS = 90_000;
-const POLL_EVERY_MS = 1_500;
+const POLL_EVERY_MS = 1_000;
 const EXAMPLES = [
   "fuel 3000 shell",
   "who owes me?",
@@ -196,14 +198,6 @@ function Reply({ text }: { text: string }) {
   );
 }
 
-function MicIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-    </svg>
-  );
-}
 
 export default function AssistantPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -393,17 +387,37 @@ export default function AssistantPage() {
     setRecordingSince(started);
   };
 
+  // Arriving from Home: send what was typed there, or open straight into a
+  // voice note or the photo picker. Runs once, after history has loaded.
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (!loaded || startedRef.current) return;
+    startedRef.current = true;
+    let draft = "";
+    try {
+      draft = sessionStorage.getItem(ASSISTANT_DRAFT_KEY) ?? "";
+      sessionStorage.removeItem(ASSISTANT_DRAFT_KEY);
+    } catch {}
+    const start = new URLSearchParams(window.location.search).get("start");
+    if (start) window.history.replaceState(null, "", "/assistant");
+    if (draft) send(draft);
+    else if (start === "voice") startRecording();
+    else if (start === "photo") {
+      fileRef.current?.click();
+      setNotice("Tap the camera button to attach a photo of the bill.");
+    }
+    // send and startRecording are stable enough here: this runs exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
   const recording = recordingSince !== null;
 
   return (
-    <section className="card p-5 sm:p-6 rise flex flex-col w-full">
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold">Assistant</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
-            Tell Khata what happened, or ask about your money.
-          </p>
-        </div>
+    <section className="card p-4 sm:p-5 rise flex flex-col w-full">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <p className="text-[13px] min-w-0" style={{ color: "var(--muted)" }}>
+          Tell Khata what happened, or ask about your money.
+        </p>
         {messages.length > 0 && (
           <button
             type="button"
@@ -418,7 +432,7 @@ export default function AssistantPage() {
 
       <div
         className="overflow-y-auto flex flex-col gap-3 pr-1"
-        style={{ height: "calc(100dvh - 380px)", minHeight: 260 }}
+        style={{ height: "calc(100dvh - 400px - env(safe-area-inset-bottom))", minHeight: 240 }}
         aria-live="polite"
         aria-label="Conversation"
       >
@@ -460,7 +474,7 @@ export default function AssistantPage() {
               ) : null}
               {m.voiceSeconds !== undefined && (
                 <p className="flex items-center gap-1.5">
-                  <MicIcon />
+                  <MicIcon size={20} />
                   <span>Voice note · {clock(m.voiceSeconds)}</span>
                 </p>
               )}
@@ -539,9 +553,7 @@ export default function AssistantPage() {
             onClick={() => fileRef.current?.click()}
             disabled={busy}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M21 12.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 0 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5" />
-            </svg>
+            <CameraIcon size={20} />
           </button>
           <textarea
             ref={inputRef}
@@ -549,7 +561,7 @@ export default function AssistantPage() {
             rows={1}
             value={text}
             maxLength={1000}
-            placeholder="fuel 3000 shell, or: who owes me?"
+            placeholder="Message Khata…"
             aria-label="Message to Khata"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -573,7 +585,7 @@ export default function AssistantPage() {
               onClick={startRecording}
               disabled={busy}
             >
-              <MicIcon />
+              <MicIcon size={20} />
             </button>
           )}
         </form>

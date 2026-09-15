@@ -118,7 +118,9 @@ export const HELP_REPLY = join([
   "",
   "*Questions*",
   "who owes me?",
-  "what did I spend this month?",
+  "what did I spend today?",
+  "how much on fuel this month?",
+  "show my biggest expenses this week",
   "which subscriptions are due?",
   "",
   "Reply *UNDO* to reverse the last change.",
@@ -180,6 +182,57 @@ export function udharSummaryReply(owing: { name: string; balance: number }[]): s
   ]);
 }
 
+// "in August 2026", but "today" or "this week" - so headings read naturally.
+export function whenPhrase(label: string): string {
+  return /^(today|yesterday|this |last )/i.test(label) ? label.toLowerCase() : `in ${label}`;
+}
+
+export function rangeLabel(from: string, to: string): string {
+  if (from === to) return fmtDateLabel(from);
+  const sameYear = from.slice(0, 4) === to.slice(0, 4);
+  return `${sameYear ? fmtDateLabel(from).replace(/ \d{4}$/, "") : fmtDateLabel(from)} – ${fmtDateLabel(to)}`;
+}
+
+export function expenseListReply(o: {
+  title: string;
+  items: { date: string; amount: number; vendor: string | null; category: string | null; note: string }[];
+  matched: number;
+  total: number;
+}): string {
+  const out = [`*${o.title}*`, ""];
+  if (!o.items.length) {
+    out.push("Nothing recorded.");
+    return join(out);
+  }
+  for (const e of o.items) {
+    const what = e.vendor || e.note.replace(/^(WhatsApp|Assistant):\s*/, "") || "Expense";
+    out.push(`${fmtDateLabel(e.date)} · ${fmtRs(e.amount)} · ${what}${e.category ? ` (${e.category})` : ""}`);
+  }
+  out.push("", o.matched > o.items.length ? `Showing ${o.items.length} of ${o.matched} · Total ${fmtRs(o.total)}` : `Total: ${fmtRs(o.total)}`);
+  return join(out);
+}
+
+export function subscriptionsOverviewReply(
+  items: { name: string; amount: number; active: boolean; paid: boolean; dueDate: string }[],
+  today: string
+): string {
+  const out = ["*Your subscriptions*", ""];
+  if (!items.length) {
+    out.push("You don't have any subscriptions yet.");
+    return join(out);
+  }
+  const active = items.filter((s) => s.active);
+  for (const s of [...active].sort((a, b) => a.dueDate.localeCompare(b.dueDate))) {
+    const state = s.paid ? "paid" : `due ${fmtDateLabel(s.dueDate)}${s.dueDate < today ? " (overdue)" : ""}`;
+    out.push(`${s.name}: ${fmtRs(s.amount)} · ${state}`);
+  }
+  for (const s of items.filter((x) => !x.active)) out.push(`${s.name}: ${fmtRs(s.amount)} · paused`);
+  const unpaid = active.filter((s) => !s.paid).reduce((sum, s) => sum + s.amount, 0);
+  out.push("", `Monthly total: ${fmtRs(active.reduce((sum, s) => sum + s.amount, 0))}`);
+  if (unpaid > 0) out.push(`Still to pay: ${fmtRs(unpaid)}`);
+  return join(out);
+}
+
 export function spendingReply(o: {
   label: string;
   filter: string | null;
@@ -187,7 +240,7 @@ export function spendingReply(o: {
   count: number;
   byCategory: { category: string; total: number }[];
 }): string {
-  const out = [o.filter ? `*${o.filter} in ${o.label}*` : `*Spent in ${o.label}*`, ""];
+  const out = [o.filter ? `*${o.filter} ${whenPhrase(o.label)}*` : `*Spent ${whenPhrase(o.label)}*`, ""];
   if (!o.count) {
     out.push("Nothing recorded.");
     return join(out);

@@ -27,14 +27,23 @@ export type QueryType =
   | "udhar_summary"
   | "spending"
   | "recent_expenses"
-  | "subscriptions_due";
+  | "expense_list"
+  | "subscriptions_due"
+  | "subscriptions_overview";
 export type ParsedQuery = {
   type: QueryType;
   people: string[]; // exact Udhar Khata names, for udhar_person
-  year: number | null; // spending: always set
+  year: number | null; // spending: set unless a date range is
   month: number | null; // spending: null means the whole year
   category: string | null; // spending: one of the user's categories
-  vendor: string | null; // spending: matched against vendor and note
+  vendor: string | null; // spending: matched against vendor, note and category
+  // A day range, inclusive, for "today", "this week" or explicit dates. When
+  // set it replaces year and month.
+  from?: string | null;
+  to?: string | null;
+  label?: string | null; // "Today", "This week" - null for a custom range
+  sort?: "latest" | "biggest"; // expense_list
+  limit?: number; // expense_list
 };
 // When someone will pay back. date null means remove the due date.
 export type ParsedDueDate = { person: string; date: string | null };
@@ -144,8 +153,123 @@ const QUERY_TYPES = new Set<string>([
   "udhar_summary",
   "spending",
   "recent_expenses",
+  "expense_list",
   "subscriptions_due",
+  "subscriptions_overview",
 ]);
+
+export const addDays = (ymd: string, days: number) =>
+  new Date(Date.parse(ymd + "T00:00:00Z") + days * 86_400_000).toISOString().slice(0, 10);
+
+// Named periods the model can pass instead of working out dates itself, which
+// is where it slipped most ("this week" answered with the month's total).
+// Weeks start on Monday.
+export const PERIODS = [
+  "today",
+  "yesterday",
+  "this_week",
+  "last_week",
+  "this_month",
+  "last_month",
+  "this_year",
+  "last_year",
+  "last_7_days",
+  "last_30_days",
+] as const;
+
+export function periodRange(period: string, today: string): { from: string; to: string; label: string } | null {
+  const [y, m] = today.split("-").map(Number);
+  const weekday = (new Date(today + "T00:00:00Z").getUTCDay() + 6) % 7; // Monday = 0
+  const monthStart = (year: number, month: number) => `${year}-${String(month).padStart(2, "0")}-01`;
+  const monthEnd = (year: number, month: number) =>
+    `${year}-${String(month).padStart(2, "0")}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, "0")}`;
+  switch (period) {
+    case "today":
+      return { from: today, to: today, label: "Today" };
+    case "yesterday":
+      return { from: addDays(today, -1), to: addDays(today, -1), label: "Yesterday" };
+    case "this_week":
+      return { from: addDays(today, -weekday), to: today, label: "This week" };
+    case "last_week":
+      return { from: addDays(today, -weekday - 7), to: addDays(today, -weekday - 1), label: "Last week" };
+    case "this_month":
+      return { from: monthStart(y, m), to: today, label: "This month" };
+    case "last_month": {
+      const [py, pm] = m === 1 ? [y - 1, 12] : [y, m - 1];
+      return { from: monthStart(py, pm), to: monthEnd(py, pm), label: "Last month" };
+    }
+    case "this_year":
+      return { from: `${y}-01-01`, to: today, label: "This year" };
+    case "last_year":
+      return { from: `${y - 1}-01-01`, to: `${y - 1}-12-31`, label: "Last year" };
+    case "last_7_days":
+      return { from: addDays(today, -6), to: today, label: "Last 7 days" };
+    case "last_30_days":
+      return { from: addDays(today, -29), to: today, label: "Last 30 days" };
+  }
+  return null;
+}
+
+// A category named loosely ("food" for "Food & Dining") still counts, as long
+// as only one of the user's categories fits.
+export function matchCategory(hint: string | null, categories: string[]): string | null {
+  if (!hint) return null;
+  const all = [...categories, UNCATEGORISED_LABEL];
+  const lower = hint.toLowerCase();
+  const exact = all.find((c) => c.toLowerCase() === lower);
+  if (exact) return exact;
+  if (lower === "uncategorized" || lower === "none") return UNCATEGORISED_LABEL;
+  const key = personKey(hint);
+  if (key.length < 3) return null;
+  const partial = all.filter((c) => {
+    const k = personKey(c);
+    return k.length >= 3 && (k.includes(key) || key.includes(k));
+  });
+  return partial.length === 1 ? partial[0] : null;
+}
+
+type PeriodResult =
+  | { ok: true; year: number | null; month: number | null; from: string | null; to: string | null; label: string | null }
+  | { ok: false; reason: string };
+
+// Works out which days a question covers: a named period, explicit dates, or a
+// month/year. With nothing said, `fallback` decides - this month for totals,
+// no limit for a list of expenses.
+function resolvePeriod(r: Record<string, unknown>, today: string, fallback: "this_month" | "none"): PeriodResult {
+  const [thisYear, thisMonth] = today.split("-").map(Number);
+  const none = { year: null, month: null, from: null, to: null, label: null };
+
+  const period = cleanString(r.period, 20)?.toLowerCase().replace(/[\s-]+/g, "_");
+  const named = period ? periodRange(period, today) : null;
+  if (named) return { ok: true, ...none, ...named };
+
+  const start = cleanString(r.start_date, 10);
+  const end = cleanString(r.end_date, 10);
+  if (start || end) {
+    const from = start ?? end;
+    const to = end ?? start;
+    if (!validYmd(from) || !validYmd(to)) return { ok: false, reason: "I couldn't work out those dates. Try: what did I spend from 1 to 10 September?" };
+    const [a, b] = from <= to ? [from, to] : [to, from];
+    if (a > today) return { ok: false, reason: "Those dates haven't happened yet." };
+    return { ok: true, ...none, from: a, to: b > today ? today : b };
+  }
+
+  const askedYear = wholeNumber(r.year);
+  const askedMonth = wholeNumber(r.month);
+  if (askedMonth !== null && (askedMonth < 1 || askedMonth > 12)) {
+    return { ok: false, reason: "That month doesn't look right. Try: what did I spend in August?" };
+  }
+  if (askedYear === null && askedMonth === null) {
+    return fallback === "this_month" ? { ok: true, ...none, year: thisYear, month: thisMonth } : { ok: true, ...none };
+  }
+  // A month on its own means its most recent occurrence: "December", asked in
+  // September, is last December.
+  const month = askedMonth;
+  const year = askedYear ?? (askedMonth !== null && askedMonth > thisMonth ? thisYear - 1 : thisYear);
+  if (year < 2000 || year > thisYear) return { ok: false, reason: "That year doesn't look right." };
+  if (year === thisYear && month !== null && month > thisMonth) return { ok: false, reason: "That month hasn't happened yet." };
+  return { ok: true, ...none, year, month };
+}
 const UNCATEGORISED_LABEL = "Uncategorised";
 // Furthest ahead a due date can be set.
 export const MAX_DUE_DAYS = 730;
@@ -223,30 +347,32 @@ function validateQuery(
     return { ok: true, kind: "query", query: { ...base, people: matched } };
   }
 
-  if (type === "spending") {
-    const [thisYear, thisMonth] = today.split("-").map(Number);
-    const askedYear = wholeNumber(r.year);
-    const askedMonth = wholeNumber(r.month);
-    if (askedMonth !== null && (askedMonth < 1 || askedMonth > 12)) {
-      return refuse("That month doesn't look right. Try: what did I spend in August?");
-    }
-    // Nothing said means this month. A month on its own means its most recent
-    // occurrence: "December", asked in September, is last December.
-    const month = askedYear === null && askedMonth === null ? thisMonth : askedMonth;
-    const year = askedYear ?? (askedMonth !== null && askedMonth > thisMonth ? thisYear - 1 : thisYear);
-    if (year < 2000 || year > thisYear) return refuse("That year doesn't look right.");
-    if (year === thisYear && month !== null && month > thisMonth) {
-      return refuse("That month hasn't happened yet.");
-    }
-    // Only a category the user actually has; anything else is ignored rather
-    // than turned into a filter that silently matches nothing.
-    const hint = cleanString(r.category_hint, 60)?.toLowerCase();
-    const category = hint ? [...categories, UNCATEGORISED_LABEL].find((c) => c.toLowerCase() === hint) ?? null : null;
-    return {
-      ok: true,
-      kind: "query",
-      query: { ...base, year, month, category, vendor: cleanString(r.vendor, 60) },
+  if (type === "spending" || type === "expense_list") {
+    const period = resolvePeriod(r, today, type === "spending" ? "this_month" : "none");
+    if (!period.ok) return refuse(period.reason);
+    // Only a category the user actually has. A word that isn't one of them
+    // ("fuel", "daraz") is searched for in the vendor and note instead, so the
+    // answer is still about what was asked rather than everything.
+    const hint = cleanString(r.category_hint, 60);
+    const category = matchCategory(hint, categories);
+    const vendor = cleanString(r.vendor, 60) ?? (hint && !category ? hint : null);
+    const query: ParsedQuery = {
+      ...base,
+      year: period.year,
+      month: period.month,
+      from: period.from,
+      to: period.to,
+      label: period.label,
+      category,
+      vendor,
     };
+    if (type === "expense_list") {
+      const sort = cleanString(r.sort, 10)?.toLowerCase();
+      query.sort = sort === "biggest" || sort === "largest" || sort === "highest" ? "biggest" : "latest";
+      const limit = wholeNumber(r.limit);
+      query.limit = limit !== null && limit >= 1 ? Math.min(limit, 20) : query.sort === "biggest" ? 5 : 10;
+    }
+    return { ok: true, kind: "query", query };
   }
 
   return { ok: true, kind: "query", query: base };
@@ -488,6 +614,14 @@ export const MAX_ATTEMPTS = 8;
 // How long a failing model is moved to the back of the queue.
 export const BUSY_COOLDOWN_MS = 2 * 60_000;
 export const BROKEN_COOLDOWN_MS = 30 * 60_000;
+// A model the API reports as gone (404) stays out of the way for a day.
+export const RETIRED_COOLDOWN_MS = 24 * 60 * 60_000;
+// When the model asked first hasn't answered by then, the next one is asked
+// as well and whichever answers first is used. Free-tier Flash models answer
+// most messages in 1-2s but sometimes sit for 10s or more.
+export const HEDGE_TEXT_MS = 1_500;
+export const HEDGE_MEDIA_MS = 6_000;
+export const MAX_PARALLEL = 2;
 // A success this recent puts a model first in line.
 export const RECENT_OK_MS = 30 * 60_000;
 
@@ -552,6 +686,27 @@ export class GeminiBusyError extends Error {
 const API = "https://generativelanguage.googleapis.com/v1beta";
 let cachedModels: string[] | null = null;
 
+// Gemini 3 Flash models think before answering by default, which made simple
+// messages take 10s or more. Picking one function from a list needs little of
+// it, so they are asked to think less. Flash-Lite doesn't take the setting.
+const noThinking = new Set<string>();
+// Models this server instance has seen answer 404 ("no longer available").
+// The shared cooldown covers other instances; this covers runs without it.
+const retired = new Set<string>();
+
+export function usesThinking(model: string): boolean {
+  const m = /^gemini-(\d+(?:\.\d+)?)-flash$/.exec(model);
+  return m !== null && Number(m[1]) >= 3 && !noThinking.has(model);
+}
+
+function withLowThinking(request: { generationConfig?: Record<string, unknown> }, model: string): string {
+  void model;
+  return JSON.stringify({
+    ...request,
+    generationConfig: { ...request.generationConfig, thinkingConfig: { thinkingLevel: "low" } },
+  });
+}
+
 async function candidateModels(apiKey: string): Promise<string[]> {
   if (cachedModels) return cachedModels;
   // Bounded like the generate calls: on a fresh instance this runs before any
@@ -607,10 +762,17 @@ export async function callGemini(opts: {
       console.warn("[gemini] model health unavailable:", (err as Error).message);
     }
   }
-  const ordered = orderCandidates(ranked, health, Date.now());
+  const available = ranked.filter((m) => !retired.has(m));
+  const ordered = orderCandidates(available.length ? available : ranked, health, Date.now());
+  // Full Flash models read messages more accurately than Flash-Lite, so they
+  // lead even when Lite answered more recently; Lite is the fast backup.
+  const lite = (m: string) => m.includes("lite");
+  const byTier = [...ordered.filter((m) => !lite(m)), ...ordered.filter(lite)];
   // GEMINI_MODEL, when set, is tried first; everything else still backs it up.
   const pinned = process.env.GEMINI_MODEL;
-  const order = pinned ? [pinned, ...ordered.filter((m) => m !== pinned)] : ordered;
+  const order = pinned ? [pinned, ...byTier.filter((m) => m !== pinned)] : byTier;
+  const hedgeMs = opts.perAttemptMs > TEXT_ATTEMPT_MS ? HEDGE_MEDIA_MS : HEDGE_TEXT_MS;
+  const base = JSON.parse(opts.request) as { generationConfig?: Record<string, unknown> };
 
   const attempts: Attempt[] = [];
   const updates: HealthUpdate[] = [];
@@ -624,26 +786,44 @@ export async function callGemini(opts: {
   };
 
   // One call. Returns the response body, or null to move on to another model.
-  // Throws only for a failure every model would share.
-  const tryModel = async (model: string, pass: 1 | 2): Promise<string | null> => {
+  // Throws only for a failure every model would share. A call cancelled because
+  // another model already answered is not held against this one.
+  const tryModel = async (model: string, pass: 1 | 2, cancel: AbortSignal): Promise<string | null> => {
     const timeout = attemptTimeout(deadline, Date.now(), opts.perAttemptMs);
     const started = Date.now();
     const record = (result: AttemptResult, coolFor: number) => {
+      if (cancel.aborted) return;
       const ms = Date.now() - started;
       attempts.push({ model, pass, result, ms });
       updates.push({ model, ok: result === "ok", ms, busyUntil: coolFor ? Date.now() + coolFor : 0 });
     };
     const failure = (err: unknown): AttemptResult =>
       (err as Error)?.name === "TimeoutError" ? "timeout" : "network";
-
-    let res: Response;
-    try {
-      res = await fetch(`${API}/models/${model}:generateContent`, {
+    const signal = AbortSignal.any([AbortSignal.timeout(timeout), cancel]);
+    const post = (thinking: boolean) =>
+      fetch(`${API}/models/${model}:generateContent`, {
         method: "POST",
         headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-        body: opts.request,
-        signal: AbortSignal.timeout(timeout),
+        body: thinking ? withLowThinking(base, model) : opts.request,
+        signal,
       });
+
+    let res: Response;
+    let thinking = usesThinking(model);
+    try {
+      res = await post(thinking);
+      // Thinking settings differ between models; one that refuses them is
+      // asked again, straight away, without.
+      if (thinking && res.status === 400) {
+        const detail = await res.text().catch(() => "");
+        if (/thinking/i.test(detail)) {
+          noThinking.add(model);
+          thinking = false;
+          res = await post(false);
+        } else {
+          res = new Response(detail, { status: 400 });
+        }
+      }
     } catch (err) {
       record(failure(err), BUSY_COOLDOWN_MS);
       return null;
@@ -661,10 +841,13 @@ export async function callGemini(opts: {
     }
 
     const kind = classifyStatus(res.status);
-    record(`http_${res.status}`, kind === "retry" ? BUSY_COOLDOWN_MS : kind === "skip" ? BROKEN_COOLDOWN_MS : 0);
+    if (res.status === 404) retired.add(model);
+    record(
+      `http_${res.status}`,
+      kind === "retry" ? BUSY_COOLDOWN_MS : kind === "skip" ? (res.status === 404 ? RETIRED_COOLDOWN_MS : BROKEN_COOLDOWN_MS) : 0
+    );
     if (kind === "fatal") {
       const detail = (await res.text().catch(() => "")).slice(0, 300);
-      await persist();
       throw new Error(`Gemini ${model} HTTP ${res.status} ${detail}`);
     }
     if (kind === "skip") {
@@ -675,23 +858,83 @@ export async function callGemini(opts: {
     return null;
   };
 
-  const runPass = async (models: string[], pass: 1 | 2) => {
-    for (const model of models) {
-      if (attempts.length >= MAX_ATTEMPTS) return null;
-      if (attempts.length > 0) await sleep(PAUSE_BETWEEN_MS);
-      if (attemptTimeout(deadline, Date.now(), opts.perAttemptMs) < MIN_ATTEMPT_MS) return null;
-      const body = await tryModel(model, pass);
-      if (body !== null) return { model, body };
-    }
-    return null;
-  };
+  // Asks models in order. If the current one is slow, the next is asked in
+  // parallel (at most MAX_PARALLEL at once); a failure starts the next at once.
+  // The first answer wins and the rest are cancelled.
+  const runPass = (models: string[], pass: 1 | 2) =>
+    new Promise<{ model: string; body: string } | null>((resolve, reject) => {
+      let next = 0;
+      let running = 0;
+      let settled = false;
+      let hedge: ReturnType<typeof setTimeout> | undefined;
+      const controllers = new Set<AbortController>();
+      const end = () => {
+        settled = true;
+        clearTimeout(hedge);
+        for (const c of controllers) c.abort();
+      };
+      const canLaunch = () =>
+        next < models.length &&
+        attempts.length + running < MAX_ATTEMPTS &&
+        attemptTimeout(deadline, Date.now(), opts.perAttemptMs) >= MIN_ATTEMPT_MS;
+      const launch = () => {
+        if (settled) return;
+        if (!canLaunch()) {
+          if (running === 0) {
+            end();
+            resolve(null);
+          }
+          return;
+        }
+        const model = models[next++];
+        const controller = new AbortController();
+        controllers.add(controller);
+        running++;
+        clearTimeout(hedge);
+        hedge = setTimeout(() => {
+          if (!settled && running < MAX_PARALLEL && canLaunch()) launch();
+        }, hedgeMs);
+        tryModel(model, pass, controller.signal).then(
+          (body) => {
+            running--;
+            controllers.delete(controller);
+            if (settled) return;
+            if (body !== null) {
+              end();
+              resolve({ model, body });
+            } else if (running < MAX_PARALLEL) {
+              launch();
+            }
+          },
+          (err) => {
+            running--;
+            controllers.delete(controller);
+            if (settled) return;
+            end();
+            reject(err);
+          }
+        );
+      };
+      launch();
+    });
 
-  let hit = await runPass(order, 1);
+  let hit: { model: string; body: string } | null;
+  try {
+    hit = await runPass(order, 1);
+  } catch (err) {
+    await persist();
+    throw err;
+  }
   if (!hit) {
     const again = planSecondPass(attempts);
     if (again.length && deadline - Date.now() > RETRY_BACKOFF_MS + MIN_ATTEMPT_MS) {
       await sleep(RETRY_BACKOFF_MS);
-      hit = await runPass(again, 2);
+      try {
+        hit = await runPass(again, 2);
+      } catch (err) {
+        await persist();
+        throw err;
+      }
     }
   }
   await persist();

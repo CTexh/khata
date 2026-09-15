@@ -1439,6 +1439,16 @@ export async function saveModelHealth(updates: HealthUpdate[]): Promise<void> {
 
 /* ---------- reads and small writes for assistant questions ---------- */
 
+// Expenses between two days, inclusive (YYYY-MM-DD), newest first.
+export async function listExpensesInRange(userId: string, from: string, to: string): Promise<Expense[]> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT * FROM expenses WHERE user_id = ? AND expense_date >= ? AND expense_date <= ? ORDER BY expense_date DESC, created_at DESC",
+    args: [userId, from, to],
+  });
+  return rs.rows.map(rowToExpense);
+}
+
 export async function listRecentExpenses(userId: string, limit: number): Promise<Expense[]> {
   const c = await db();
   const rs = await c.execute({

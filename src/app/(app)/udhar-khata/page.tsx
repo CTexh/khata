@@ -28,32 +28,26 @@ function Dashboard({ people }: { people: Person[] }) {
   const top = owing.slice(0, 6);
 
   return (
-    <section className="card p-5 sm:p-6 rise">
-      <p className="text-[13px] font-medium" style={{ color: "var(--muted)" }}>
-        Total outstanding
-      </p>
-      <p className="hero-num text-4xl sm:text-5xl font-bold tracking-tight mt-1 tabular">
+    <>
+    <section className="hero-panel p-6 sm:p-7 rise">
+      <p className="hero-muted text-[14px] font-semibold">Total outstanding</p>
+      <p className="text-[42px] sm:text-[48px] font-extrabold tracking-tight leading-tight mt-1 tabular">
         {fmtRs(total)}
       </p>
-
-      <div className="grid grid-cols-2 gap-3 mt-5">
-        {[
-          { label: "People", value: String(owing.length) },
-          { label: "Total lent", value: fmtRs(lent) },
-        ].map((t) => (
-          <div key={t.label} className="tile px-3 py-2.5">
-            <p className="text-[11px] font-medium" style={{ color: "var(--muted)" }}>
-              {t.label}
-            </p>
-            <p className="text-sm sm:text-base font-semibold tabular truncate mt-0.5">
-              {t.value}
-            </p>
-          </div>
-        ))}
+      <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-[14px]">
+        <span>
+          <span className="font-extrabold">{owing.length}</span>{" "}
+          <span className="hero-muted">{owing.length === 1 ? "person owes" : "people owe"}</span>
+        </span>
+        <span>
+          <span className="hero-muted">Lent</span> <span className="font-extrabold tabular">{fmtRs(lent)}</span>
+        </span>
       </div>
+    </section>
 
-      {top.length > 0 && (
-        <div className="mt-6">
+    {top.length > 0 && (
+    <section className="card p-5 sm:p-6 rise">
+        <div>
           <p className="text-[13px] font-medium mb-3" style={{ color: "var(--muted)" }}>
             Who owes the most
           </p>
@@ -87,8 +81,9 @@ function Dashboard({ people }: { people: Person[] }) {
             ))}
           </div>
         </div>
-      )}
     </section>
+    )}
+    </>
   );
 }
 
