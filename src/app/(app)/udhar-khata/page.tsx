@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Person, Tx } from "@/lib/db";
-import { fmtRs, fmtWhen, fmtFull, dueDateInfo, todayLocalYMD } from "@/lib/format";
+import { fmtRs, fmtWhen, fmtFull, fmtDateLabel, dueDateInfo, todayLocalYMD } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
+import { Sheet, SheetRow } from "@/components/Sheet";
 
 /* ---------- small components ---------- */
 
@@ -18,72 +19,46 @@ function Spinner() {
   );
 }
 
-/* ---------- dashboard ---------- */
+/* ---------- summary ---------- */
 
 function Dashboard({ people }: { people: Person[] }) {
   const owing = people.filter((p) => p.balance > 0);
-  const total = people.reduce((s, p) => s + p.balance, 0);
+  const total = owing.reduce((s, p) => s + p.balance, 0);
+  const received = people.reduce((s, p) => s + p.received, 0);
   const lent = people.reduce((s, p) => s + p.lent, 0);
-  const max = Math.max(...owing.map((p) => p.balance), 1);
-  const top = owing.slice(0, 6);
+  const overdue = owing.filter((p) => dueDateInfo(p.due_date)?.status === "overdue").length;
+  const recovered = lent > 0 ? Math.round((received / lent) * 100) : 0;
 
   return (
-    <>
-    <section className="hero-panel p-6 sm:p-7 rise">
-      <p className="hero-muted text-[14px] font-semibold">Total outstanding</p>
-      <p className="text-[42px] sm:text-[48px] font-extrabold tracking-tight leading-tight mt-1 tabular">
-        {fmtRs(total)}
+    <section className="hero-panel p-6 rise">
+      <p className="hero-muted text-[14px] font-semibold">Owed to you</p>
+      <p className="mt-1 flex items-baseline gap-2 tabular">
+        <span className="hero-muted text-[20px] font-bold">Rs</span>
+        <span className="text-[42px] font-extrabold leading-none tracking-tight">
+          {fmtRs(total).replace(/^−?Rs\s/, "")}
+        </span>
       </p>
-      <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-[14px]">
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[14px]">
         <span>
           <span className="font-extrabold">{owing.length}</span>{" "}
-          <span className="hero-muted">{owing.length === 1 ? "person owes" : "people owe"}</span>
+          <span className="hero-muted">{owing.length === 1 ? "person" : "people"}</span>
         </span>
+        {overdue > 0 && (
+          <span className="font-extrabold" style={{ color: "#ffb4a8" }}>
+            {overdue} overdue
+          </span>
+        )}
         <span>
-          <span className="hero-muted">Lent</span> <span className="font-extrabold tabular">{fmtRs(lent)}</span>
+          <span className="hero-muted">Paid back</span> <span className="font-extrabold">{recovered}%</span>
         </span>
       </div>
+      <div className="mt-5 h-2.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.14)" }} aria-hidden>
+        <div className="h-full rounded-full" style={{ width: `${recovered}%`, background: "#7ee2a8" }} />
+      </div>
+      <p className="hero-muted text-[12px] mt-2">
+        {fmtRs(received)} returned of {fmtRs(lent)} lent
+      </p>
     </section>
-
-    {top.length > 0 && (
-    <section className="card p-5 sm:p-6 rise">
-        <div>
-          <p className="text-[13px] font-medium mb-3" style={{ color: "var(--muted)" }}>
-            Who owes the most
-          </p>
-          <div className="flex flex-col gap-3">
-            {top.map((p) => (
-              <div key={p.id}>
-                <div className="flex items-baseline justify-between gap-3 mb-1">
-                  <span className="text-[13px] font-medium truncate">{p.name}</span>
-                  <span
-                    className="text-[13px] tabular shrink-0"
-                    style={{ color: "var(--ink-2)" }}
-                  >
-                    {fmtRs(p.balance)}
-                  </span>
-                </div>
-                <div
-                  className="h-2 rounded-full overflow-hidden"
-                  style={{ background: "var(--surface-2)" }}
-                >
-                  <div
-                    className="h-full rounded-full transition-[width] duration-500"
-                    style={{
-                      width: `${(p.balance / max) * 100}%`,
-                      background:
-                        "linear-gradient(90deg, var(--accent), var(--accent-2))",
-                      minWidth: 8,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-    </section>
-    )}
-    </>
   );
 }
 
@@ -122,8 +97,7 @@ function AddPersonForm({
   };
 
   return (
-    <form onSubmit={submit} className="card p-5 rise flex flex-col gap-3">
-      <p className="font-semibold">New loan record</p>
+    <form onSubmit={submit} className="flex flex-col gap-3">
       <input
         className="field"
         aria-label="Person's name"
@@ -260,17 +234,56 @@ function TxForm({
   );
 }
 
-/* ---------- person card ---------- */
+/* ---------- person ---------- */
 
-function PersonCard({
+function dueStyle(status: "overdue" | "soon" | "upcoming" | undefined) {
+  return status === "overdue"
+    ? { background: "var(--bad-soft)", color: "var(--bad)" }
+    : status === "soon"
+      ? { background: "rgba(224, 122, 31, 0.14)", color: "#c2410c" }
+      : { background: "var(--accent-soft)", color: "var(--accent)" };
+}
+
+function PersonRow({ person, onOpen }: { person: Person; onOpen: () => void }) {
+  const settled = person.balance <= 0;
+  const due = settled ? null : dueDateInfo(person.due_date);
+  return (
+    <li>
+      <button type="button" className="list-row" onClick={onOpen}>
+        <Avatar id={person.id} name={person.name} size={46} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[16px] font-bold truncate">{person.name}</span>
+          <span className="flex items-center gap-2 mt-0.5 min-w-0">
+            {due ? (
+              <span className="chip" style={dueStyle(due.status)}>
+                {due.label}
+              </span>
+            ) : (
+              <span className="text-[12px] truncate" style={{ color: "var(--muted)" }}>
+                Updated {fmtWhen(person.last_activity)}
+              </span>
+            )}
+          </span>
+        </span>
+        {settled ? (
+          <span className="chip" style={{ background: "var(--good-soft)", color: "var(--good)" }}>
+            Settled
+          </span>
+        ) : (
+          <span className="text-[16px] font-extrabold tabular shrink-0">{fmtRs(person.balance)}</span>
+        )}
+      </button>
+    </li>
+  );
+}
+
+function PersonSheet({
   person,
-  expanded,
-  onToggle,
+  onClose,
   onChanged,
 }: {
   person: Person;
-  expanded: boolean;
-  onToggle: () => void;
+  onClose: () => void;
   onChanged: () => void;
 }) {
   const [txs, setTxs] = useState<Tx[] | null>(null);
@@ -278,6 +291,7 @@ function PersonCard({
   const [editingDue, setEditingDue] = useState(false);
   const [dueDraft, setDueDraft] = useState(person.due_date ?? "");
   const [dueBusy, setDueBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const loadTxs = useCallback(async () => {
     const res = await fetch(`/api/people/${person.id}`);
@@ -285,16 +299,15 @@ function PersonCard({
   }, [person.id]);
 
   useEffect(() => {
-    if (expanded) loadTxs();
-    else setForm(null);
-  }, [expanded, loadTxs]);
+    loadTxs();
+  }, [loadTxs]);
 
   const settled = person.balance <= 0;
+  const due = settled ? null : dueDateInfo(person.due_date);
 
   const remove = async () => {
-    if (!confirm(`Delete ${person.name}'s record and full history? This can't be undone.`))
-      return;
     await fetch(`/api/people/${person.id}`, { method: "DELETE" });
+    onClose();
     onChanged();
   };
 
@@ -310,110 +323,82 @@ function PersonCard({
     onChanged();
   };
 
-  const due = dueDateInfo(person.due_date);
-  const dueColor =
-    due?.status === "overdue"
-      ? "var(--bad)"
-      : due?.status === "soon"
-        ? "#e07a1f"
-        : "var(--accent)";
-  const dueSoft =
-    due?.status === "overdue"
-      ? "var(--bad-soft)"
-      : due?.status === "soon"
-        ? "rgba(224, 122, 31, 0.14)"
-        : "var(--accent-soft)";
-
   return (
-    <div className="card overflow-hidden rise">
-      <button
-        onClick={onToggle}
-        aria-expanded={expanded}
-        className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
-      >
-        <Avatar id={person.id} name={person.name} />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold truncate">{person.name}</p>
-          <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-            {person.tx_count} {person.tx_count === 1 ? "entry" : "entries"} · updated{" "}
-            {fmtWhen(person.last_activity)}
-          </p>
-          {!settled && due && (
-            <span
-              className="inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1"
-              style={{ background: dueSoft, color: dueColor }}
-            >
-              {due.label}
-            </span>
+    <Sheet title={person.name} onClose={onClose}>
+      <div className="card p-5 flex flex-col items-center text-center">
+        <Avatar id={person.id} name={person.name} size={64} />
+        <p className="text-[13px] font-semibold mt-3" style={{ color: "var(--muted)" }}>
+          {settled ? "All settled" : "Owes you"}
+        </p>
+        <p className="text-[36px] font-extrabold tabular leading-tight" style={settled ? { color: "var(--good)" } : undefined}>
+          {fmtRs(Math.max(person.balance, 0))}
+        </p>
+        {due && (
+          <span className="chip mt-1" style={dueStyle(due.status)}>
+            {due.label}
+          </span>
+        )}
+        <div className="grid grid-cols-2 gap-2 w-full mt-4">
+          <button className={`btn ${form === "lend" ? "btn-primary" : "btn-ghost"}`} onClick={() => setForm(form === "lend" ? null : "lend")}>
+            Lent more
+          </button>
+          <button className={`btn ${form === "repay" ? "btn-good" : "btn-ghost"}`} onClick={() => setForm(form === "repay" ? null : "repay")}>
+            Paid back
+          </button>
+        </div>
+        {form && (
+          <div className="w-full mt-3 text-left">
+            <TxForm
+              mode={form}
+              personId={person.id}
+              onCancel={() => setForm(null)}
+              onDone={() => {
+                setForm(null);
+                loadTxs();
+                onChanged();
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="card px-4 py-1">
+        <SheetRow label="Lent in total">{fmtRs(person.lent)}</SheetRow>
+        <SheetRow label="Paid back">
+          <span style={{ color: "var(--good)" }}>{fmtRs(person.received)}</span>
+        </SheetRow>
+        <div className="flex items-center justify-between gap-3 py-3">
+          <span className="text-[14px]" style={{ color: "var(--muted)" }}>
+            Reach out by
+          </span>
+          {editingDue ? null : (
+            <button type="button" className="text-[15px] font-bold" style={{ color: "var(--accent)" }} onClick={() => setEditingDue(true)}>
+              {person.due_date ? fmtDateLabel(person.due_date) : "Set date"}
+            </button>
           )}
         </div>
-        <div className="text-right shrink-0">
-          {settled ? (
-            <span
-              className="text-[12px] font-semibold px-2 py-1 rounded-full"
-              style={{ background: "var(--good-soft)", color: "var(--good)" }}
-            >
-              Settled ✓
-            </span>
-          ) : (
-            <p className="font-bold tabular text-[17px]">{fmtRs(person.balance)}</p>
-          )}
-        </div>
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 16 16"
-          className={`shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`}
-          style={{ color: "var(--muted)" }}
-        >
-          <path
-            d="M4 6l4 4 4-4"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            fill="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
-
-      {expanded && (
-        <div className="px-4 pb-4 border-t" style={{ borderColor: "var(--hairline)" }}>
-          {form ? (
-            <div className="pt-4">
-              <TxForm
-                mode={form}
-                personId={person.id}
-                onCancel={() => setForm(null)}
-                onDone={() => {
-                  setForm(null);
-                  loadTxs();
-                  onChanged();
-                }}
-              />
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 pt-4">
-              <button className="btn btn-primary flex-1" onClick={() => setForm("lend")}>
-                <span>💸</span> I lent more
-              </button>
-              <button className="btn btn-good flex-1" onClick={() => setForm("repay")}>
-                <span>💰</span> They paid back
-              </button>
-            </div>
-          )}
-
-          {editingDue ? (
-            <div className="grid min-w-0 grid-cols-2 gap-2 pt-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
-              <input
-                className="field col-span-2 sm:col-span-1"
-                aria-label="Reach-out date"
-                type="date"
-                value={dueDraft}
-                onChange={(e) => setDueDraft(e.target.value)}
-              />
+        {editingDue && (
+          <div className="flex flex-col gap-2 pb-3">
+            <input
+              className="field"
+              aria-label="Reach-out date"
+              type="date"
+              value={dueDraft}
+              onChange={(e) => setDueDraft(e.target.value)}
+            />
+            <div className="form-actions">
+              {person.due_date && (
+                <button
+                  type="button"
+                  className="btn btn-ghost !min-h-11 !py-2 mr-auto"
+                  onClick={() => setDueDraft("")}
+                >
+                  Clear
+                </button>
+              )}
               <button
-                className="btn btn-ghost !py-2 text-[12px] shrink-0"
+                type="button"
+                className="btn btn-ghost !min-h-11 !py-2"
                 onClick={() => {
                   setDueDraft(person.due_date ?? "");
                   setEditingDue(false);
@@ -421,100 +406,106 @@ function PersonCard({
               >
                 Cancel
               </button>
-              <button
-                className="btn btn-primary !py-2 text-[12px] shrink-0"
-                disabled={dueBusy}
-                onClick={saveDueDate}
-              >
+              <button type="button" className="btn btn-primary !min-h-11 !py-2" disabled={dueBusy} onClick={saveDueDate}>
                 {dueBusy ? "Saving…" : "Save"}
               </button>
             </div>
-          ) : (
-            <div className="flex items-center justify-between pt-4">
-              <p className="text-[13px]" style={{ color: "var(--muted)" }}>
-                {due ? (
-                  <>
-                    Reach out by{" "}
-                    <span className="font-medium" style={{ color: "var(--ink-2)" }}>
-                      {due.label.replace(/^(Due|Overdue · )/, "")}
-                    </span>
-                  </>
-                ) : (
-                  "No reach-out date set"
-                )}
-              </p>
-              <button
-                className="btn btn-ghost !py-2 text-[12px] shrink-0"
-                onClick={() => setEditingDue(true)}
-              >
-                {due ? "Change" : "Set date"}
-              </button>
-            </div>
-          )}
-
-          <div className="mt-4">
-            {txs === null ? (
-              <p className="text-[13px] py-2" style={{ color: "var(--muted)" }} role="status">
-                Loading history…
-              </p>
-            ) : (
-              <ul className="flex flex-col">
-                {txs.map((t) => (
-                  <li
-                    key={t.id}
-                    className="flex items-center gap-3 py-2.5 border-b last:border-b-0"
-                    style={{ borderColor: "var(--hairline)" }}
-                  >
-                    <span
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0"
-                      style={
-                        t.amount > 0
-                          ? { background: "var(--accent-soft)", color: "var(--accent)" }
-                          : { background: "var(--good-soft)", color: "var(--good)" }
-                      }
-                    >
-                      {t.amount > 0 ? "↑" : "↓"}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] truncate">
-                        {t.note || (t.amount > 0 ? "Lent" : "Payment received")}
-                      </p>
-                      <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-                        {fmtFull(t.created_at)}
-                      </p>
-                    </div>
-                    <span
-                      className="tabular text-[14px] font-semibold shrink-0"
-                      style={{ color: t.amount > 0 ? "var(--ink)" : "var(--good)" }}
-                    >
-                      {t.amount > 0 ? "+" : "−"}
-                      {fmtRs(Math.abs(t.amount))}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
+        )}
+      </div>
 
-          <button
-            onClick={remove}
-            className="btn btn-danger mt-4 !py-2 !px-4 text-[12px]"
-          >
-            <span>🗑</span> Delete record
-          </button>
+      <div className="flex flex-col gap-2">
+        <h3 className="text-[13px] font-bold uppercase tracking-wide px-1" style={{ color: "var(--muted)" }}>
+          History
+        </h3>
+        <div className="card px-3 py-1">
+          {txs === null ? (
+            <p className="text-[13px] py-3" style={{ color: "var(--muted)" }} role="status">
+              Loading…
+            </p>
+          ) : txs.length === 0 ? (
+            <p className="text-[13px] py-3" style={{ color: "var(--muted)" }}>
+              No entries yet.
+            </p>
+          ) : (
+            <ul>
+              {txs.map((t) => (
+                <li
+                  key={t.id}
+                  className="flex items-center gap-3 py-3 border-b last:border-b-0"
+                  style={{ borderColor: "var(--hairline)" }}
+                >
+                  <span
+                    className="icon-tile !w-10 !h-10 !rounded-xl !text-[15px] font-bold"
+                    style={
+                      t.amount > 0
+                        ? { background: "var(--accent-soft)", color: "var(--accent)" }
+                        : { background: "var(--good-soft)", color: "var(--good)" }
+                    }
+                    aria-hidden
+                  >
+                    {t.amount > 0 ? "↑" : "↓"}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] font-semibold truncate">
+                      {t.note || (t.amount > 0 ? "Lent" : "Paid back")}
+                    </span>
+                    <span className="block text-[12px]" style={{ color: "var(--muted)" }}>
+                      {fmtFull(t.created_at)}
+                    </span>
+                  </span>
+                  <span
+                    className="tabular text-[15px] font-extrabold shrink-0"
+                    style={{ color: t.amount > 0 ? "var(--ink)" : "var(--good)" }}
+                  >
+                    {t.amount > 0 ? "+" : "−"}
+                    {fmtRs(Math.abs(t.amount))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
+      </div>
+
+      {confirmDelete ? (
+        <div className="card p-4 flex flex-col gap-3">
+          <p className="text-[14px] font-semibold text-center" style={{ color: "var(--bad)" }}>
+            Delete {person.name} and their full history? This can&apos;t be undone.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-danger" onClick={remove}>
+              Delete
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="min-h-12 text-[14px] font-bold"
+          style={{ color: "var(--bad)" }}
+          onClick={() => setConfirmDelete(true)}
+        >
+          Delete {person.name}
+        </button>
       )}
-    </div>
+    </Sheet>
   );
 }
 
 /* ---------- page ---------- */
 
-export default function Home() {
+type Filter = "owing" | "settled" | "all";
+
+export default function UdharKhata() {
   const [people, setPeople] = useState<Person[] | null>(null);
   const [adding, setAdding] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("owing");
 
   const load = useCallback(async () => {
     const res = await fetch("/api/people");
@@ -525,74 +516,103 @@ export default function Home() {
     load();
   }, [load]);
 
+  const counts = useMemo(() => {
+    const list = people ?? [];
+    return {
+      owing: list.filter((p) => p.balance > 0).length,
+      settled: list.filter((p) => p.balance <= 0).length,
+      all: list.length,
+    };
+  }, [people]);
+
   const filtered = useMemo(() => {
     if (!people) return null;
     const q = query.trim().toLowerCase();
-    return q ? people.filter((p) => p.name.toLowerCase().includes(q)) : people;
-  }, [people, query]);
+    return people
+      .filter((p) => (filter === "owing" ? p.balance > 0 : filter === "settled" ? p.balance <= 0 : true))
+      .filter((p) => !q || p.name.toLowerCase().includes(q));
+  }, [people, query, filter]);
+
+  const open = people?.find((p) => p.id === openId) ?? null;
+  const closeSheet = useCallback(() => setOpenId(null), []);
+  const closeAdd = useCallback(() => setAdding(false), []);
+
+  if (people === null) return <Spinner />;
 
   return (
     <>
-      <div className="flex items-center justify-end -mt-2">
-        {!adding && people !== null && (
-          <button className="btn btn-primary" onClick={() => setAdding(true)}>
-            Add borrower
-          </button>
-        )}
+      <Dashboard people={people} />
+
+      <div className="flex items-center gap-2">
+        <div className="segmented flex-1" role="group" aria-label="Show">
+          {(
+            [
+              ["owing", "Owes you"],
+              ["settled", "Settled"],
+              ["all", "All"],
+            ] as const
+          ).map(([id, label]) => (
+            <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)}>
+              {label}
+              <span className="ml-1 opacity-70 tabular">{counts[id]}</span>
+            </button>
+          ))}
+        </div>
+        <button type="button" className="tab-fab !w-14 !h-14 !m-0 !shadow-none" aria-label="Add borrower" onClick={() => setAdding(true)}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
       </div>
 
-      {people === null ? (
-        <Spinner />
+      {people.length > 5 && (
+        <input
+          className="field !rounded-full"
+          aria-label="Search people"
+          placeholder="Search people…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      )}
+
+      {people.length === 0 ? (
+        <div className="card p-8 text-center rise">
+          <p className="text-3xl mb-2" aria-hidden>🪙</p>
+          <p className="font-bold">No one here yet</p>
+          <p className="text-[14px] mt-1" style={{ color: "var(--muted)" }}>
+            Add the first person who owes you, or tell the assistant &ldquo;lent Ali 2000&rdquo;.
+          </p>
+          <button type="button" className="btn btn-primary mt-4" onClick={() => setAdding(true)}>
+            Add borrower
+          </button>
+        </div>
+      ) : filtered && filtered.length === 0 ? (
+        <div className="card p-6 text-center text-[14px]" style={{ color: "var(--muted)" }}>
+          {query ? "No one matches that name." : filter === "owing" ? "Nobody owes you anything right now." : "No settled records."}
+        </div>
       ) : (
-        <>
-          {adding && (
+        <ul className="list-card rise">
+          {filtered?.map((p) => (
+            <PersonRow key={p.id} person={p} onOpen={() => setOpenId(p.id)} />
+          ))}
+        </ul>
+      )}
+
+      {open && <PersonSheet person={open} onClose={closeSheet} onChanged={load} />}
+
+      {adding && (
+        <Sheet title="New borrower" onClose={closeAdd}>
+          <div className="card p-4">
             <AddPersonForm
-              onCancel={() => setAdding(false)}
+              onCancel={closeAdd}
               onDone={() => {
                 setAdding(false);
                 load();
               }}
             />
-          )}
-
-          <Dashboard people={people} />
-
-          {people.length > 3 && (
-            <input
-              className="field"
-              aria-label="Search people"
-              placeholder="Search people…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          )}
-
-          <section className="flex flex-col gap-3">
-            {people.length === 0 && !adding && (
-              <div className="card p-8 text-center rise">
-                <p className="text-3xl mb-2">🪙</p>
-                <p className="font-semibold">No records yet</p>
-                <p className="text-[14px] mt-1" style={{ color: "var(--muted)" }}>
-                  Tap “Add borrower” to add the first person who owes you.
-                </p>
-              </div>
-            )}
-            {filtered?.map((p) => (
-              <PersonCard
-                key={p.id}
-                person={p}
-                expanded={expanded === p.id}
-                onToggle={() => setExpanded(expanded === p.id ? null : p.id)}
-                onChanged={load}
-              />
-            ))}
-          </section>
-        </>
+          </div>
+        </Sheet>
       )}
-
-      <footer className="text-center text-[12px] py-4" style={{ color: "var(--muted)" }}>
-        Khata · synced across your devices
-      </footer>
     </>
   );
 }

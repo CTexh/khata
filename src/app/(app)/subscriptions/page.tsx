@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { fmtRs, hueFor, initials } from "@/lib/format";
+import { Sheet, SheetRow } from "@/components/Sheet";
 
 function Spinner() {
   return (
@@ -157,12 +158,32 @@ function fmtLongDate(ymd: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "long", day: "numeric" });
 }
 
-/* ---------- subscription detail (hero-style tile) ---------- */
+/* ---------- subscription detail ---------- */
+
+const STATUS_CHIP: Record<Subscription["status"], { label: string; style: React.CSSProperties }> = {
+  paid: { label: "Paid", style: { background: "var(--good-soft)", color: "var(--good)" } },
+  "due-today": { label: "Due today", style: { background: "var(--bad-soft)", color: "var(--bad)" } },
+  "due-soon": { label: "Due soon", style: { background: "rgba(224, 122, 31, 0.14)", color: "#c2410c" } },
+  upcoming: { label: "Upcoming", style: { background: "var(--accent-soft)", color: "var(--accent)" } },
+  inactive: { label: "Paused", style: { background: "var(--surface-2)", color: "var(--muted)" } },
+};
+
+// The server calls anything unpaid on or past its due date "due-today"; a date
+// that has already gone by reads better as overdue.
+function chipFor(sub: Subscription) {
+  if (!sub.active) return STATUS_CHIP.inactive;
+  if (sub.status === "due-today" && sub.current_due_date < todayLocalYMD()) {
+    return { label: "Overdue", style: STATUS_CHIP["due-today"].style };
+  }
+  return STATUS_CHIP[sub.status];
+}
 
 function SubscriptionDetail({
   sub,
   confirmDelete,
   actionLoading,
+  justPaid,
+  onClose,
   onMarkPaid,
   onAskDelete,
   onCancelDelete,
@@ -172,177 +193,165 @@ function SubscriptionDetail({
   sub: Subscription;
   confirmDelete: boolean;
   actionLoading: boolean;
+  justPaid: boolean;
+  onClose: () => void;
   onMarkPaid: () => void;
   onAskDelete: () => void;
   onCancelDelete: () => void;
   onDelete: () => void;
   onToggleActive: () => void;
 }) {
-  const statusText = !sub.active
-    ? "Inactive"
-    : sub.paid_this_period
-      ? "Active"
-      : sub.status === "due-today"
-        ? "Due today"
-        : sub.status === "due-soon"
-          ? "Due soon"
-          : "Upcoming";
-  const statusColor = !sub.active
-    ? "var(--muted)"
-    : sub.status === "due-today"
-      ? "var(--bad)"
-      : sub.status === "due-soon"
-        ? "#e07a1f"
-        : "var(--good)";
-
+  const chip = chipFor(sub);
   const nextPaymentDate = sub.paid_this_period
     ? nextDueDate(sub.current_period, sub.due_day)
     : sub.current_due_date;
 
-  const timelineNodes = [...sub.history].slice(0, 5).reverse();
+  const timelineNodes = [...sub.history].slice(0, 6).reverse();
   const paidCount = sub.history.filter((h) => h.paid_at).length;
   const totalSpent = paidCount * sub.amount;
   const earliestPeriod = sub.history[sub.history.length - 1]?.period ?? sub.current_period;
   const span = fmtSpan(monthsBetween(earliestPeriod, sub.current_period));
 
   return (
-    <div className="card p-6 mt-2 flex flex-col gap-6 rise">
-      <div className="flex flex-col items-center text-center gap-2">
+    <Sheet title={sub.name} onClose={onClose}>
+      <div className="card p-5 flex flex-col items-center text-center">
         <Avatar id={sub.id} name={sub.name} logoUrl={sub.logo_url} size="lg" />
-        <p
-          className="text-[11px] font-bold uppercase tracking-wide mt-1"
-          style={{ color: statusColor }}
-        >
-          Status: {statusText}
-        </p>
-        <h3 className="text-2xl font-extrabold">{sub.name}</h3>
-        <p className="text-[13px]" style={{ color: "var(--muted)" }}>
-          {sub.active ? "Subscription" : "Was"} on the {ordinal(sub.due_day)} of every month
-        </p>
-        <span className="tile inline-flex items-center gap-1.5 px-3 py-1 text-[12px] font-semibold mt-1">
-          🔁 Monthly
+        <span className="chip mt-3" style={chip.style}>
+          {justPaid ? "✓ Paid" : chip.label}
         </span>
+        <p className="mt-2 flex items-baseline gap-1 tabular">
+          <span className="text-[36px] font-extrabold leading-tight">{fmtRs(sub.amount)}</span>
+          <span className="text-[14px] font-semibold" style={{ color: "var(--muted)" }}>
+            / month
+          </span>
+        </p>
+        {sub.active && (
+          <p className="text-[14px] mt-1" style={{ color: "var(--muted)" }}>
+            {sub.paid_this_period ? "Paid for this month" : "Not paid yet this month"}
+          </p>
+        )}
+
+        {confirmDelete ? (
+          <div className="w-full mt-4 flex flex-col gap-3">
+            <p className="text-[14px] font-semibold" style={{ color: "var(--bad)" }}>
+              Delete {sub.name} and its payment history? This can&apos;t be undone.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={onCancelDelete} className="btn btn-ghost">
+                Cancel
+              </button>
+              <button type="button" onClick={onDelete} disabled={actionLoading} className="btn btn-danger">
+                {actionLoading ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        ) : sub.active ? (
+          <div className="grid grid-cols-2 gap-2 w-full mt-4">
+            <button
+              type="button"
+              onClick={onMarkPaid}
+              disabled={actionLoading || sub.paid_this_period}
+              className="btn btn-good"
+            >
+              {sub.paid_this_period ? "✓ Paid" : actionLoading ? "Saving…" : "Mark paid"}
+            </button>
+            <button type="button" onClick={onToggleActive} disabled={actionLoading} className="btn btn-ghost">
+              Pause
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={onToggleActive} disabled={actionLoading} className="btn btn-good w-full mt-4">
+            {actionLoading ? "Saving…" : "Resume"}
+          </button>
+        )}
       </div>
 
-      {sub.active ? (
-        <div className="flex flex-col items-center text-center gap-1">
-          <p
-            className="text-[11px] font-semibold uppercase tracking-wide"
-            style={{ color: "var(--muted)" }}
-          >
-            Next Payment
-          </p>
-          <p className="hero-num text-4xl font-black tabular">−{fmtRs(sub.amount)}</p>
-          <p className="text-[13px]" style={{ color: "var(--muted)" }}>
-            Expected around{" "}
-            <span className="font-semibold" style={{ color: "var(--accent)" }}>
-              {fmtLongDate(nextPaymentDate)}
-            </span>
-          </p>
-        </div>
-      ) : (
-        <p className="text-[13px] text-center" style={{ color: "var(--muted)" }}>
-          This subscription is deactivated — no charges are being tracked.
-        </p>
-      )}
+      <div className="card px-4 py-1">
+        {sub.active && <SheetRow label="Next payment">{fmtLongDate(nextPaymentDate)}</SheetRow>}
+        <SheetRow label="Due">{ordinal(sub.due_day)} of every month</SheetRow>
+        <SheetRow label="Paid so far">
+          {fmtRs(totalSpent)}
+          <span className="block text-[12px] font-semibold" style={{ color: "var(--muted)" }}>
+            {paidCount} {paidCount === 1 ? "payment" : "payments"} · {span}
+          </span>
+        </SheetRow>
+      </div>
 
       {timelineNodes.length > 1 && (
-        <div className="sub-timeline">
-          {timelineNodes.map((h, i) => (
-            <div key={h.id} className="sub-timeline-seg">
-              <div className="sub-timeline-node">
-                <div className={`sub-timeline-dot ${h.paid_at ? "paid" : "pending"}`} />
-                <span className="sub-timeline-label">{fmtShortMonth(h.period)}</span>
+        <div className="card px-5 pt-5 pb-4">
+          <div className="sub-timeline">
+            {timelineNodes.map((h, i) => (
+              <div key={h.id} className="sub-timeline-seg">
+                <div className="sub-timeline-node">
+                  <div className={`sub-timeline-dot ${h.paid_at ? "paid" : "pending"}`} />
+                  <span className="sub-timeline-label">{fmtShortMonth(h.period)}</span>
+                </div>
+                {i < timelineNodes.length - 1 && (
+                  <div className={`sub-timeline-connector ${timelineNodes[i + 1].paid_at ? "paid" : "pending"}`} />
+                )}
               </div>
-              {i < timelineNodes.length - 1 && (
-                <div
-                  className={`sub-timeline-connector ${timelineNodes[i + 1].paid_at ? "paid" : "pending"}`}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {paidCount > 0 && (
-        <p className="text-[13px] text-center" style={{ color: "var(--muted)" }}>
-          💡 You&apos;ve spent <span className="font-semibold tabular" style={{ color: "var(--ink)" }}>{fmtRs(totalSpent)}</span> over {span} on this vendor.
-        </p>
-      )}
-
-      {confirmDelete ? (
-        <div className="flex flex-col gap-3">
-          <p className="text-sm font-semibold text-center" style={{ color: "var(--bad)" }}>
-            Permanently delete {sub.name}? This erases its full history and cannot be undone.
-          </p>
-          <div className="flex gap-3">
-            <button onClick={onDelete} disabled={actionLoading} className="btn btn-danger flex-1">
-              {actionLoading ? "Deleting..." : "Yes, delete"}
-            </button>
-            <button type="button" onClick={onCancelDelete} className="btn btn-ghost flex-1">
-              Cancel
-            </button>
+            ))}
           </div>
         </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-3">
-            {sub.active ? (
-              <>
-                <button
-                  onClick={onMarkPaid}
-                  disabled={actionLoading || sub.paid_this_period}
-                  className="btn btn-good flex-1"
+      )}
+
+      {sub.history.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-[13px] font-bold uppercase tracking-wide px-1" style={{ color: "var(--muted)" }}>
+            History
+          </h3>
+          <div className="card px-3 py-1">
+            <ul>
+              {sub.history.map((h) => (
+                <li
+                  key={h.id}
+                  className="flex items-center gap-3 py-3 border-b last:border-b-0"
+                  style={{ borderColor: "var(--hairline)" }}
                 >
-                  {actionLoading ? "Marking..." : "Paid"}
-                </button>
-                <button onClick={onToggleActive} disabled={actionLoading} className="btn btn-ghost flex-1">
-                  {actionLoading ? "Deactivating..." : "Deactivate"}
-                </button>
-              </>
-            ) : (
-              <button onClick={onToggleActive} disabled={actionLoading} className="btn btn-good flex-1">
-                {actionLoading ? "Reactivating..." : "Reactivate"}
-              </button>
-            )}
+                  <span
+                    className="icon-tile !w-10 !h-10 !rounded-xl !text-[15px] font-bold"
+                    style={
+                      h.paid_at
+                        ? { background: "var(--good-soft)", color: "var(--good)" }
+                        : { background: "var(--surface-2)", color: "var(--muted)" }
+                    }
+                    aria-hidden
+                  >
+                    {h.paid_at ? "✓" : "…"}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] font-semibold">{fmtPeriod(h.period)}</span>
+                    <span className="block text-[12px]" style={{ color: "var(--muted)" }}>
+                      {h.paid_at
+                        ? `Paid ${new Date(h.paid_at).toLocaleDateString("en-PK", { day: "numeric", month: "short" })}`
+                        : `Due ${fmtLongDate(h.due_date)}`}
+                    </span>
+                  </span>
+                  <span
+                    className="tabular text-[15px] font-extrabold shrink-0"
+                    style={{ color: h.paid_at ? "var(--ink)" : "var(--muted)" }}
+                  >
+                    {fmtRs(sub.amount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
-          <button
-            onClick={onAskDelete}
-            disabled={actionLoading}
-            className="text-[12px] font-semibold text-center"
-            style={{ color: "var(--bad)" }}
-          >
-            Delete permanently
-          </button>
         </div>
       )}
 
-      <div className="flex flex-col gap-2 pt-2" style={{ borderTop: "1px solid var(--hairline)" }}>
-        <p className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
-          Recent Transactions ({sub.history.length})
-        </p>
-        <div className="flex flex-col gap-1.5">
-          {sub.history.map((h) => (
-            <div key={h.id} className="flex items-center gap-3 text-sm py-1">
-              <span
-                className="w-2 h-2 rounded-full shrink-0"
-                style={{ background: h.paid_at ? "var(--good)" : "var(--muted)" }}
-              />
-              <span className="flex-1">{fmtPeriod(h.period)}</span>
-              {h.paid_at ? (
-                <span className="tabular" style={{ color: "var(--good)" }}>
-                  Paid {new Date(h.paid_at).toLocaleDateString()}
-                </span>
-              ) : (
-                <span className="tabular" style={{ color: "var(--muted)" }}>
-                  Due {new Date(h.due_date).toLocaleDateString()}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+      {!confirmDelete && (
+        <button
+          type="button"
+          onClick={onAskDelete}
+          disabled={actionLoading}
+          className="min-h-12 text-[14px] font-bold"
+          style={{ color: "var(--bad)" }}
+        >
+          Delete {sub.name}
+        </button>
+      )}
+    </Sheet>
   );
 }
 
@@ -538,205 +547,192 @@ export default function Subscriptions() {
 
   if (loading) return <Spinner />;
 
+  const open = subscriptions.find((sub) => sub.id === expanded) ?? null;
+  const unpaid = activeSubscriptions.filter((sub) => !sub.paid_this_period);
+  const unpaidTotal = unpaid.reduce((sum, sub) => sum + sub.amount, 0);
+
+  const row = (sub: Subscription) => {
+    const chip = chipFor(sub);
+    return (
+      <li key={sub.id}>
+        <button
+          type="button"
+          className="list-row"
+          onClick={() => {
+            setConfirmDeleteId(null);
+            setExpanded(sub.id);
+          }}
+        >
+          <Avatar id={sub.id} name={sub.name} logoUrl={sub.logo_url} size="sm" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[16px] font-bold truncate">{sub.name}</span>
+            <span className="block text-[12px] truncate" style={{ color: "var(--muted)" }}>
+              {!sub.active
+                ? "Paused"
+                : sub.paid_this_period
+                  ? `Next ${fmtLongDate(nextDueDate(sub.current_period, sub.due_day))}`
+                  : `Due ${fmtLongDate(sub.current_due_date)}`}
+            </span>
+          </span>
+          <span className="flex flex-col items-end gap-1 shrink-0">
+            <span className="text-[15px] font-extrabold tabular">{fmtRs(sub.amount)}</span>
+            <span className="chip" style={chip.style}>
+              {justPaidId === sub.id ? "✓ Paid" : chip.label}
+            </span>
+          </span>
+        </button>
+      </li>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-5">
-      <div className="hero-panel p-6 flex items-center justify-between gap-4 rise">
-        <div className="min-w-0">
-          <p className="hero-muted text-[14px] font-semibold">Monthly total</p>
-          <p className="text-[34px] font-extrabold tabular leading-tight mt-1 truncate">{fmtRs(monthlyTotal)}</p>
-          <p className="hero-muted text-[13px] mt-1">
-            {activeSubscriptions.length} active · {activeSubscriptions.filter((s) => !s.paid_this_period).length} unpaid
-          </p>
+      <section className="hero-panel p-6 rise">
+        <p className="hero-muted text-[14px] font-semibold">Every month</p>
+        <p className="mt-1 flex items-baseline gap-2 tabular">
+          <span className="hero-muted text-[20px] font-bold">Rs</span>
+          <span className="text-[42px] font-extrabold leading-none tracking-tight">
+            {fmtRs(monthlyTotal).replace(/^−?Rs\s/, "")}
+          </span>
+        </p>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[14px]">
+          <span>
+            <span className="font-extrabold">{activeSubscriptions.length}</span> <span className="hero-muted">active</span>
+          </span>
+          {unpaid.length > 0 ? (
+            <span>
+              <span className="font-extrabold" style={{ color: "#ffb4a8" }}>{fmtRs(unpaidTotal)}</span>{" "}
+              <span className="hero-muted">still to pay</span>
+            </span>
+          ) : activeSubscriptions.length > 0 ? (
+            <span className="font-extrabold" style={{ color: "#7ee2a8" }}>All paid this month</span>
+          ) : null}
         </div>
-        <button
-          onClick={() => (showForm ? closeForm() : setShowForm(true))}
-          className="btn btn-primary"
-        >
-          Add
+      </section>
+
+      <div className="section-head">
+        <h2 className="section-title">Your subscriptions</h2>
+        <button type="button" className="tab-fab !w-12 !h-12 !m-0 !shadow-none" aria-label="Add subscription" onClick={() => setShowForm(true)}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
         </button>
       </div>
 
       {error && (
-        <div className="card p-4" style={{ borderLeftWidth: "4px", borderLeftColor: "var(--bad)" }}>
-          <p className="text-sm font-semibold" style={{ color: "var(--bad)" }}>
-            {error}
-          </p>
+        <div className="card p-4 text-[14px] font-semibold" style={{ color: "var(--bad)" }} role="alert">
+          {error}
         </div>
       )}
 
-      {showForm && (
-        <form onSubmit={handleAddSubscription} className="card p-6 flex flex-col gap-4">
-          <div className="flex gap-4 items-end">
-            {form.logo_url && (
-              <Avatar id={form.name || "new"} name={form.name || "?"} logoUrl={form.logo_url} size="sm" />
-            )}
-            <div className="flex-1 flex flex-col gap-1.5">
-              <label className="text-[13px]" style={{ color: "var(--muted)" }}>
-                Name
-              </label>
-              <input
-                type="text"
-                aria-label="Subscription name"
-                placeholder="e.g., Netflix"
-                className="field w-full"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                onBlur={(e) => {
-                  if (e.target.value && !form.logo_url) {
-                    handleLogoFetch(e.target.value);
-                  }
-                }}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[13px]" style={{ color: "var(--muted)" }}>
-                Rs
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
-                aria-label="Amount in Rs"
-                placeholder="0"
-                className="field tabular"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                required
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[13px]" style={{ color: "var(--muted)" }}>
-                Date
-              </label>
-              <input
-                type="date"
-                aria-label="Due date"
-                className="field"
-                value={form.date}
-                onChange={(e) => setForm({ ...form, date: e.target.value })}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <button type="submit" className="btn btn-primary flex-1">
-              {form.logoLoading ? "Fetching logo..." : "Add Subscription"}
-            </button>
-            <button
-              type="button"
-              onClick={closeForm}
-              className="btn btn-ghost flex-1"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+      {subscriptions.length === 0 ? (
+        <div className="card p-8 text-center">
+          <p className="text-3xl mb-2" aria-hidden>🔁</p>
+          <p className="font-bold">No subscriptions yet</p>
+          <p className="text-[14px] mt-1" style={{ color: "var(--muted)" }}>
+            Add Netflix, Spotify, your gym - anything you pay every month.
+          </p>
+          <button type="button" className="btn btn-primary mt-4" onClick={() => setShowForm(true)}>
+            Add subscription
+          </button>
+        </div>
+      ) : (
+        <>
+          {activeSubscriptions.length > 0 && <ul className="list-card rise">{activeSubscriptions.map(row)}</ul>}
+          {inactiveSubscriptions.length > 0 && (
+            <>
+              <h3 className="text-[13px] font-bold uppercase tracking-wide px-1" style={{ color: "var(--muted)" }}>
+                Paused
+              </h3>
+              <ul className="list-card" style={{ opacity: 0.75 }}>
+                {inactiveSubscriptions.map(row)}
+              </ul>
+            </>
+          )}
+        </>
       )}
 
-      <div className="flex flex-col gap-3">
-        {subscriptions.length === 0 ? (
-          <div className="card p-8 text-center">
-            <p style={{ color: "var(--muted)" }}>No subscriptions yet. Add one to get started!</p>
-          </div>
-        ) : (
-          <>
-            {activeSubscriptions.map((sub) => (
-              <div key={sub.id}>
-                <div
-                  className="card p-4 cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => setExpanded(expanded === sub.id ? null : sub.id)}
-                >
-                  <div className="flex items-center gap-4">
-                    <Avatar id={sub.id} name={sub.name} logoUrl={sub.logo_url} size="sm" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold truncate">{sub.name}</p>
-                      <p className="text-sm" style={{ color: "var(--muted)" }}>
-                        {sub.paid_this_period
-                          ? `Paid for ${fmtPeriod(sub.current_period)}`
-                          : `Due ${new Date(sub.current_due_date).toLocaleDateString()}`}
-                      </p>
-                    </div>
-                    {justPaidId === sub.id ? (
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors.paid}`}>
-                        ✓ PAID
-                      </span>
-                    ) : (
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors[sub.status]}`}>
-                        {statusLabels[sub.status]}
-                      </span>
-                    )}
-                  </div>
-                </div>
+      {open && (
+        <SubscriptionDetail
+          sub={open}
+          confirmDelete={confirmDeleteId === open.id}
+          actionLoading={actionLoading === open.id}
+          justPaid={justPaidId === open.id}
+          onClose={() => {
+            setExpanded(null);
+            setConfirmDeleteId(null);
+          }}
+          onMarkPaid={() => handleMarkPaid(open.id)}
+          onAskDelete={() => setConfirmDeleteId(open.id)}
+          onCancelDelete={() => setConfirmDeleteId(null)}
+          onDelete={() => handleDelete(open.id)}
+          onToggleActive={() => handleToggleActive(open.id, !open.active)}
+        />
+      )}
 
-                {expanded === sub.id && (
-                  <SubscriptionDetail
-                    sub={sub}
-                    confirmDelete={confirmDeleteId === sub.id}
-                    actionLoading={actionLoading === sub.id}
-                    onMarkPaid={() => handleMarkPaid(sub.id)}
-                    onAskDelete={() => setConfirmDeleteId(sub.id)}
-                    onCancelDelete={() => setConfirmDeleteId(null)}
-                    onDelete={() => handleDelete(sub.id)}
-                    onToggleActive={() => handleToggleActive(sub.id, !sub.active)}
-                  />
-                )}
-              </div>
-            ))}
-
-            {inactiveSubscriptions.length > 0 && (
-              <>
-                <p
-                  className="text-[12px] font-semibold uppercase tracking-wide mt-2"
-                  style={{ color: "var(--muted)" }}
-                >
-                  Deactivated
-                </p>
-                {inactiveSubscriptions.map((sub) => (
-                  <div key={sub.id}>
-                    <div
-                      className="card p-4 cursor-pointer hover:opacity-80 transition-opacity"
-                      style={{ opacity: 0.6 }}
-                      onClick={() => setExpanded(expanded === sub.id ? null : sub.id)}
-                    >
-                      <div className="flex items-center gap-4">
-                        <Avatar id={sub.id} name={sub.name} logoUrl={sub.logo_url} size="sm" />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold truncate">{sub.name}</p>
-                          <p className="text-sm" style={{ color: "var(--muted)" }}>
-                            {fmtRs(sub.amount)} / month
-                          </p>
-                        </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors.inactive}`}>
-                          {statusLabels.inactive}
-                        </span>
-                      </div>
-                    </div>
-
-                    {expanded === sub.id && (
-                      <SubscriptionDetail
-                        sub={sub}
-                        confirmDelete={confirmDeleteId === sub.id}
-                        actionLoading={actionLoading === sub.id}
-                        onMarkPaid={() => handleMarkPaid(sub.id)}
-                        onAskDelete={() => setConfirmDeleteId(sub.id)}
-                        onCancelDelete={() => setConfirmDeleteId(null)}
-                        onDelete={() => handleDelete(sub.id)}
-                        onToggleActive={() => handleToggleActive(sub.id, !sub.active)}
-                      />
-                    )}
-                  </div>
-                ))}
-              </>
-            )}
-          </>
-        )}
-      </div>
+      {showForm && (
+        <Sheet title="New subscription" onClose={closeForm}>
+          <form onSubmit={handleAddSubscription} className="card p-4 flex flex-col gap-3">
+            <div className="flex gap-3 items-end">
+              {form.logo_url && <Avatar id={form.name || "new"} name={form.name || "?"} logoUrl={form.logo_url} size="sm" />}
+              <label className="flex-1 flex flex-col gap-1.5">
+                <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+                  Name
+                </span>
+                <input
+                  type="text"
+                  placeholder="e.g. Netflix"
+                  className="field w-full"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  onBlur={(e) => {
+                    if (e.target.value && !form.logo_url) handleLogoFetch(e.target.value);
+                  }}
+                  required
+                />
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+                  Amount (Rs)
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  placeholder="0"
+                  className="field tabular"
+                  value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  required
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+                  First due date
+                </span>
+                <input
+                  type="date"
+                  className="field"
+                  value={form.date}
+                  onChange={(e) => setForm({ ...form, date: e.target.value })}
+                  required
+                />
+              </label>
+            </div>
+            <div className="form-actions mt-1">
+              <button type="button" onClick={closeForm} className="btn btn-ghost">
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary">
+                {form.logoLoading ? "Fetching logo…" : "Add subscription"}
+              </button>
+            </div>
+          </form>
+        </Sheet>
+      )}
     </div>
   );
 }
