@@ -6,8 +6,14 @@ import {
   verifySignature,
 } from "../src/lib/whatsapp-webhook.ts";
 import {
+  ATTEMPT_TIMEOUT_MS,
+  BUSY_COOLDOWN_MS,
+  GEMINI_BUDGET_MS,
   MAX_AMOUNT,
   MAX_MODEL_ATTEMPTS,
+  MIN_ATTEMPT_MS,
+  attemptTimeout,
+  orderByCooldown,
   buildPrompt,
   isRetryableStatus,
   rankFlashModels,
@@ -148,6 +154,27 @@ check("attempt cap is small", MAX_MODEL_ATTEMPTS >= 2 && MAX_MODEL_ATTEMPTS <= 3
 /* which failures move on to another model */
 for (const s of [429, 500, 502, 503, 504]) check(`retryable ${s}`, isRetryableStatus(s), true);
 for (const s of [400, 401, 403, 404, 413, 505]) check(`not retryable ${s}`, isRetryableStatus(s), false);
+
+/* time limits: a stalled model must never run the function past Vercel's 60s */
+check("attempt timeout capped per attempt", attemptTimeout(100_000, 0), ATTEMPT_TIMEOUT_MS);
+check("attempt timeout shrinks near deadline", attemptTimeout(10_000, 5_000), 5_000);
+check("attempt timeout never negative", attemptTimeout(1_000, 5_000), 0);
+check("budget leaves 15s+ for download, save and reply", GEMINI_BUDGET_MS + 15_000 <= 60_000, true);
+check("per-attempt limit fits the budget", ATTEMPT_TIMEOUT_MS <= GEMINI_BUDGET_MS, true);
+check("min attempt below per-attempt limit", MIN_ATTEMPT_MS < ATTEMPT_TIMEOUT_MS, true);
+check("cooldown is minutes, not hours", BUSY_COOLDOWN_MS >= 60_000 && BUSY_COOLDOWN_MS <= 10 * 60_000, true);
+
+/* busy models go to the back of the queue, then return after cooling down */
+const ranked = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+const busyMap = new Map([["gemini-3.8-flash", 120_000]]);
+check("cooling model moved last", orderByCooldown(ranked, busyMap, 1_000), ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.8-flash"]);
+check("cooled model back in place", orderByCooldown(ranked, busyMap, 130_000), ranked);
+check("no busy models keeps order", orderByCooldown(ranked, new Map(), 0), ranked);
+check(
+  "all cooling keeps relative order",
+  orderByCooldown(ranked, new Map(ranked.map((m) => [m, 999_999])), 0),
+  ranked
+);
 
 /* prompt + date */
 const prompt = buildPrompt({ today, categories: ["Car", "Groceries"], text: "fuel 3000", hasImage: true });

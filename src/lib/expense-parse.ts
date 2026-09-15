@@ -159,12 +159,47 @@ export class GeminiBusyError extends Error {
 // minute at Google can't run the webhook past its time limit.
 export const MAX_MODEL_ATTEMPTS = 3;
 
+// A model that neither answers nor errors used to hold the request open until
+// Vercel killed the whole function at 60s - before the reply could be sent.
+// Each attempt now has its own limit, and all attempts share a budget that
+// leaves time afterwards to save the expense and reply.
+export const ATTEMPT_TIMEOUT_MS = 15_000;
+export const GEMINI_BUDGET_MS = 40_000;
+// Below this, starting another attempt would only time out.
+export const MIN_ATTEMPT_MS = 3_000;
+// How long a model that was busy is put to the back of the queue.
+export const BUSY_COOLDOWN_MS = 2 * 60_000;
+
+export function attemptTimeout(deadline: number, now: number): number {
+  return Math.max(0, Math.min(ATTEMPT_TIMEOUT_MS, deadline - now));
+}
+
+// Models that were busy recently go last, so the next message starts with one
+// that has been answering rather than queueing behind the overloaded one.
+// Order within each group is kept.
+export function orderByCooldown(models: string[], busyUntil: Map<string, number>, now: number): string[] {
+  const cooling = (m: string) => (busyUntil.get(m) ?? 0) > now;
+  return [...models.filter((m) => !cooling(m)), ...models.filter(cooling)];
+}
+
 const API = "https://generativelanguage.googleapis.com/v1beta";
 let cachedModels: string[] | null = null;
+const busyUntil = new Map<string, number>();
 
 async function candidateModels(apiKey: string): Promise<string[]> {
   if (!cachedModels) {
-    const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": apiKey } });
+    // Bounded like the generate calls: on a fresh instance this runs before any
+    // model is tried, and a hang here would otherwise eat the whole time limit.
+    let res: Response;
+    try {
+      res = await fetch(`${API}/models?pageSize=200`, {
+        headers: { "x-goog-api-key": apiKey },
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      throw new GeminiBusyError(`model list: ${(err as Error).message}`);
+    }
+    if (isRetryableStatus(res.status)) throw new GeminiBusyError(`model list HTTP ${res.status}`);
     if (!res.ok) throw new Error(`Gemini model list failed: HTTP ${res.status}`);
     const list = (await res.json()) as {
       models?: { name: string; supportedGenerationMethods?: string[] }[];
@@ -205,16 +240,34 @@ export async function parseExpense(opts: {
     },
   });
 
-  const models = (await candidateModels(apiKey)).slice(0, MAX_MODEL_ATTEMPTS);
+  const deadline = Date.now() + GEMINI_BUDGET_MS;
+  const models = orderByCooldown(await candidateModels(apiKey), busyUntil, Date.now()).slice(
+    0,
+    MAX_MODEL_ATTEMPTS
+  );
   const busy: string[] = [];
   let res: Response | null = null;
   for (const [i, model] of models.entries()) {
     if (i > 0) await new Promise((r) => setTimeout(r, 800));
-    const attempt = await fetch(`${API}/models/${model}:generateContent`, {
-      method: "POST",
-      headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-      body: request,
-    });
+    const timeout = attemptTimeout(deadline, Date.now());
+    if (timeout < MIN_ATTEMPT_MS) break;
+
+    let attempt: Response;
+    try {
+      attempt = await fetch(`${API}/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+        body: request,
+        signal: AbortSignal.timeout(timeout),
+      });
+    } catch (err) {
+      // No answer in time, or the connection failed: treated like "busy".
+      const why = (err as Error).name === "TimeoutError" ? `no answer in ${timeout}ms` : (err as Error).message;
+      console.warn(`[gemini] ${model} ${why}, trying next model`);
+      busyUntil.set(model, Date.now() + BUSY_COOLDOWN_MS);
+      busy.push(`${model} ${why}`);
+      continue;
+    }
     if (attempt.ok) {
       res = attempt;
       break;
@@ -224,13 +277,17 @@ export async function parseExpense(opts: {
       throw new Error(`Gemini ${detail} ${(await attempt.text()).slice(0, 300)}`);
     }
     console.warn(`[gemini] ${detail}, trying next model`);
+    busyUntil.set(model, Date.now() + BUSY_COOLDOWN_MS);
     busy.push(detail);
   }
-  if (!res) throw new GeminiBusyError(busy.join("; "));
+  if (!res) throw new GeminiBusyError(busy.join("; ") || "out of time");
 
-  const data = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
+  let data: { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  try {
+    data = await res.json();
+  } catch (err) {
+    throw new GeminiBusyError(`response body: ${(err as Error).message}`);
+  }
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
   let raw: unknown = null;
   try {
