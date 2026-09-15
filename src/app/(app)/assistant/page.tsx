@@ -215,6 +215,7 @@ export default function AssistantPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const discardRef = useRef(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -260,6 +261,47 @@ export default function AssistantPage() {
     endRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "end" });
   }, [messages]);
 
+  // The microphone is asked for once and then kept for the rest of the visit,
+  // muted between recordings: asking again for every recording made the phone
+  // pop up its permission prompt each time. It is handed back as soon as the
+  // screen is left or the app goes to the background - and straight after a
+  // recording in browsers that report permission as permanently granted, where
+  // asking again costs nothing.
+  const micStream = async (): Promise<MediaStream> => {
+    const held = streamRef.current;
+    if (held && held.getAudioTracks().some((t) => t.readyState === "live")) {
+      held.getAudioTracks().forEach((t) => (t.enabled = true));
+      return held;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef.current = stream;
+    return stream;
+  };
+
+  const releaseMic = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  };
+
+  // Muted, so nothing is captured between recordings.
+  const muteMic = () => streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = false));
+
+  const parkMic = async () => {
+    muteMic();
+    try {
+      const permissions = navigator.permissions as
+        | { query?: (d: { name: string }) => Promise<{ state: string }> }
+        | undefined;
+      const status = await permissions?.query?.({ name: "microphone" });
+      // Permanently granted: the next recording won't prompt, so hand the
+      // microphone back now and drop the browser's recording indicator.
+      if (status?.state === "granted") releaseMic();
+    } catch {
+      // No way to ask (Safari): keep the stream, muted, so the next recording
+      // doesn't prompt again.
+    }
+  };
+
   const stopRecording = (discard: boolean) => {
     discardRef.current = discard;
     const recorder = recorderRef.current;
@@ -280,8 +322,19 @@ export default function AssistantPage() {
     return () => clearInterval(id);
   }, [recordingSince]);
 
-  // Leaving the page mid-recording releases the microphone and sends nothing.
-  useEffect(() => () => stopRecording(true), []);
+  // Leaving the page mid-recording sends nothing, and the microphone is handed
+  // back - as it is whenever the app goes to the background.
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") releaseMic();
+    };
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden);
+      stopRecording(true);
+      releaseMic();
+    };
+  }, []);
 
   const attach = async (file: File | undefined) => {
     setNotice("");
@@ -362,8 +415,9 @@ export default function AssistantPage() {
     }
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await micStream();
     } catch {
+      releaseMic();
       setNotice("Microphone access was blocked. Allow it for this site in your browser settings, then try again.");
       return;
     }
@@ -376,7 +430,7 @@ export default function AssistantPage() {
       if (e.data.size > 0) chunks.push(e.data);
     };
     recorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
+      await parkMic();
       setRecordingSince(null);
       if (discardRef.current) return;
       const seconds = (Date.now() - started) / 1000;
