@@ -479,6 +479,12 @@ export async function ensureCategoryTables(): Promise<void> {
   } catch {
     // Column already exists.
   }
+  // Values a message changed, saved beforehand so UNDO can put them back.
+  try {
+    await c.execute(`ALTER TABLE whatsapp_inbound ADD COLUMN undo_json TEXT`);
+  } catch {
+    // Column already exists.
+  }
   // Which Gemini models have been answering. Shared across server instances,
   // so a model found overloaded on one request is skipped on the next even
   // when Vercel runs it somewhere else. Times are epoch milliseconds.
@@ -1174,10 +1180,38 @@ function idList(raw: unknown): string[] {
   }
 }
 
+// How to put back something a WhatsApp message changed, rather than added.
+export type UndoStep = { op: "set_due_date"; personId: string; name: string; dueDate: string | null };
+
+function parseUndoSteps(raw: unknown): UndoStep[] {
+  try {
+    const parsed = JSON.parse((raw as string) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (s): s is UndoStep =>
+        s?.op === "set_due_date" &&
+        typeof s.personId === "string" &&
+        typeof s.name === "string" &&
+        (s.dueDate === null || typeof s.dueDate === "string")
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function attachInboundUndo(messageId: string, steps: UndoStep[]): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: "UPDATE whatsapp_inbound SET undo_json = ? WHERE message_id = ?",
+    args: [JSON.stringify(steps), messageId],
+  });
+}
+
 export type UndoResult = {
   expense: { amount: number; vendor: string | null } | null;
   transactions: { name: string; amount: number }[];
   peopleRemoved: string[];
+  dueDates: { name: string; dueDate: string | null }[];
 };
 
 // Reverses the most recent thing added over WhatsApp in the last 24 hours -
@@ -1191,11 +1225,12 @@ export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult 
   const c = await db();
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const rs = await c.execute({
-    sql: `SELECT message_id, expense_id, tx_ids, person_ids FROM whatsapp_inbound
+    sql: `SELECT message_id, expense_id, tx_ids, person_ids, undo_json FROM whatsapp_inbound
           WHERE user_id = ? AND created_at >= ?
             AND (expense_id IS NOT NULL
                  OR (tx_ids IS NOT NULL AND tx_ids != '[]')
-                 OR (person_ids IS NOT NULL AND person_ids != '[]'))
+                 OR (person_ids IS NOT NULL AND person_ids != '[]')
+                 OR (undo_json IS NOT NULL AND undo_json != '[]'))
           ORDER BY created_at DESC LIMIT 1`,
     args: [userId, since],
   });
@@ -1204,6 +1239,7 @@ export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult 
 
   const txIds = idList(row.tx_ids);
   const personIds = idList(row.person_ids);
+  const undoSteps = parseUndoSteps(row.undo_json);
   const placeholders = (n: number) => Array.from({ length: n }, () => "?").join(", ");
 
   const expenseId = (row.expense_id as string) ?? null;
@@ -1236,9 +1272,9 @@ export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult 
   const txRows = txRs?.rows ?? [];
   const removablePeople = (peopleRs?.rows ?? []).filter((p) => Number(p.others) === 0);
 
-  const statements: { sql: string; args: (string | number)[] }[] = [
+  const statements: { sql: string; args: (string | number | null)[] }[] = [
     {
-      sql: "UPDATE whatsapp_inbound SET expense_id = NULL, tx_ids = NULL, person_ids = NULL WHERE message_id = ?",
+      sql: "UPDATE whatsapp_inbound SET expense_id = NULL, tx_ids = NULL, person_ids = NULL, undo_json = NULL WHERE message_id = ?",
       args: [row.message_id as string],
     },
   ];
@@ -1257,24 +1293,48 @@ export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult 
       args: [p.id as string, userId, p.id as string],
     });
   }
+  // Values saved before a WhatsApp change, put back as they were.
+  const dueDates: { name: string; dueDate: string | null }[] = [];
+  for (const step of undoSteps) {
+    statements.push({
+      sql: "UPDATE people SET due_date = ? WHERE id = ? AND user_id = ?",
+      args: [step.dueDate, step.personId, userId],
+    });
+    dueDates.push({ name: step.name, dueDate: step.dueDate });
+  }
   await c.batch(statements, "write");
 
-  if (!expenseRow && !txRows.length && !removablePeople.length) return null;
+  if (!expenseRow && !txRows.length && !removablePeople.length && !dueDates.length) return null;
   return {
     expense: expenseRow
       ? { amount: Number(expenseRow.amount), vendor: (expenseRow.vendor as string) ?? null }
       : null,
     transactions: txRows.map((t) => ({ name: t.name as string, amount: Number(t.amount) })),
     peopleRemoved: removablePeople.map((p) => p.name as string),
+    dueDates,
   };
 }
 
 /* ---------- Udhar Khata from WhatsApp ---------- */
 
-export type LedgerPerson = { id: string; name: string; balance: number };
+export type LedgerPerson = {
+  id: string;
+  name: string;
+  balance: number;
+  lent: number;
+  received: number;
+  dueDate: string | null;
+};
 
 export async function listLedgerPeople(userId: string): Promise<LedgerPerson[]> {
-  return (await listPeople(userId)).map((p) => ({ id: p.id, name: p.name, balance: p.balance }));
+  return (await listPeople(userId)).map((p) => ({
+    id: p.id,
+    name: p.name,
+    balance: p.balance,
+    lent: p.lent,
+    received: p.received,
+    dueDate: p.due_date,
+  }));
 }
 
 export type LedgerWrite =
@@ -1373,4 +1433,37 @@ export async function saveModelHealth(updates: HealthUpdate[]): Promise<void> {
     ),
     "write"
   );
+}
+
+/* ---------- reads and small writes for WhatsApp questions ---------- */
+
+export async function listRecentExpenses(userId: string, limit: number): Promise<Expense[]> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT * FROM expenses WHERE user_id = ? ORDER BY expense_date DESC, created_at DESC LIMIT ?",
+    args: [userId, limit],
+  });
+  return rs.rows.map(rowToExpense);
+}
+
+// Sets or clears a person's due date, only if they belong to this user.
+// Returns the value it replaced, so the change can be undone - or null when
+// the person isn't theirs.
+export async function setPersonDueDate(
+  userId: string,
+  personId: string,
+  dueDate: string | null
+): Promise<{ previous: string | null } | null> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT due_date FROM people WHERE id = ? AND user_id = ?",
+    args: [personId, userId],
+  });
+  const row = rs.rows[0];
+  if (!row) return null;
+  await c.execute({
+    sql: "UPDATE people SET due_date = ? WHERE id = ? AND user_id = ?",
+    args: [dueDate, personId, userId],
+  });
+  return { previous: (row.due_date as string) ?? null };
 }

@@ -43,6 +43,13 @@ import {
   ledgerReply,
   refusalReply,
   undoReply,
+  dueDateReply,
+  periodLabel,
+  recentExpensesReply,
+  spendingReply,
+  subscriptionsDueReply,
+  udharPersonReply,
+  udharSummaryReply,
 } from "../src/lib/whatsapp-replies.ts";
 import { fmtDateLabel } from "../src/lib/format.ts";
 
@@ -360,6 +367,96 @@ check(
   "settled reply",
   ledgerReply({ direction: "repayment", lines: [{ name: "Ahmed Zahid", amount: 100, balance: 0, settled: true }] }),
   "*Payment recorded*\n\n*Ahmed Zahid* paid back everything, Rs 100\nBalance: settled\n\nReply *UNDO* to reverse this."
+);
+
+/* questions: the model names the question, the numbers come from the database */
+const cats = ["Car", "Groceries", "Food & Dining"];
+const q = (raw: Record<string, unknown>) => validateParsed({ intent: "query", ...raw }, today, people, "", cats) as any;
+check(
+  "query a person's balance",
+  q({ query_type: "udhar_person", entries: [{ person: "abdurrehman" }] }),
+  { ok: true, kind: "query", query: { type: "udhar_person", people: ["Abdur Rehman"], year: null, month: null, category: null, vendor: null } }
+);
+check("query same person twice counted once", q({ query_type: "udhar_person", entries: [{ person: "Ali" }, { person: "ali" }] }).query?.people, ["Ali"]);
+check("query unknown person refused", q({ query_type: "udhar_person", entries: [{ person: "Bilal" }] }).ok, false);
+check("query person needs a name", q({ query_type: "udhar_person", entries: [] }).ok, false);
+check("query who owes me", q({ query_type: "udhar_summary" }).query?.type, "udhar_summary");
+check("spending defaults to this month", [q({ query_type: "spending" }).query?.year, q({ query_type: "spending" }).query?.month], [2026, 9]);
+check("spending a whole year", [q({ query_type: "spending", year: 2026 }).query?.year, q({ query_type: "spending", year: 2026 }).query?.month], [2026, null]);
+check("spending month on its own looks back", [q({ query_type: "spending", month: 12 }).query?.year, q({ query_type: "spending", month: 8 }).query?.year], [2025, 2026]);
+check("spending this month by number", q({ query_type: "spending", month: 9 }).query?.year, 2026);
+check("spending future month refused", q({ query_type: "spending", year: 2026, month: 11 }).ok, false);
+check("spending bad month refused", [q({ query_type: "spending", month: 13 }).ok, q({ query_type: "spending", month: 0 }).ok], [false, false]);
+check("spending future year refused", q({ query_type: "spending", year: 2027 }).ok, false);
+check("spending string year accepted", q({ query_type: "spending", year: "2025", month: "8" }).query?.month, 8);
+check("spending category matched to the user's list", q({ query_type: "spending", category_hint: "food & dining" }).query?.category, "Food & Dining");
+check("spending uncategorised allowed", q({ query_type: "spending", category_hint: "uncategorised" }).query?.category, "Uncategorised");
+check("spending unknown category ignored", q({ query_type: "spending", category_hint: "Furniture" }).query?.category, null);
+check("spending vendor kept", q({ query_type: "spending", vendor: " Shell " }).query?.vendor, "Shell");
+check("unknown question type refused", q({ query_type: "weather" }).ok, false);
+check("missing question type refused", q({}).ok, false);
+check("recent and subscriptions questions", [q({ query_type: "recent_expenses" }).query?.type, q({ query_type: "SUBSCRIPTIONS_DUE" }).query?.type], ["recent_expenses", "subscriptions_due"]);
+
+/* due dates */
+const dd = (raw: Record<string, unknown>) => validateParsed({ intent: "due_date", ...raw }, today, people, "", cats) as any;
+check("due date set", dd({ entries: [{ person: "ali" }], due_date: "2026-10-01" }), { ok: true, kind: "due_date", due: { person: "Ali", date: "2026-10-01" } });
+check("due date today allowed", dd({ entries: [{ person: "Ali" }], due_date: today }).ok, true);
+check("due date in the past refused", dd({ entries: [{ person: "Ali" }], due_date: "2026-09-01" }).ok, false);
+check("due date too far ahead refused", dd({ entries: [{ person: "Ali" }], due_date: "2029-01-01" }).ok, false);
+check("due date impossible day refused", dd({ entries: [{ person: "Ali" }], due_date: "2027-02-30" }).ok, false);
+check("due date malformed refused", dd({ entries: [{ person: "Ali" }], due_date: "1st oct" }).ok, false);
+check("due date cleared", dd({ entries: [{ person: "Ali" }], clear_due_date: true }).due, { person: "Ali", date: null });
+check("due date one person only", dd({ entries: [{ person: "Ali" }, { person: "Abdur Rehman" }], due_date: "2026-10-01" }).ok, false);
+check("due date needs a person", dd({ entries: [], due_date: "2026-10-01" }).ok, false);
+check("due date unknown person refused", dd({ entries: [{ person: "Bilal" }], due_date: "2026-10-01" }).ok, false);
+check("offline refuses questions and dates", [off("how much is 500?").ok, off("will pay on 1st").ok, off("remind me on the 5th").ok, off("what is 300").ok], [false, false, false, false]);
+
+/* answer layouts */
+check("period label", [periodLabel(2026, 9), periodLabel(2026, null)], ["September 2026", "2026"]);
+check(
+  "person balance reply",
+  udharPersonReply([{ name: "Ali", balance: 1700, lent: 2000, received: 300, dueDate: "2026-10-01" }], today),
+  `*Udhar Khata*\n\n*Ali*\nBalance: owes you Rs 1,700\nLent Rs 2,000 · Paid back Rs 300\nDue: ${fmtDateLabel("2026-10-01")}`
+);
+check("person reply marks overdue", udharPersonReply([{ name: "Ali", balance: 5, lent: 5, received: 0, dueDate: "2026-09-01" }], today).includes("(overdue)"), true);
+check("settled person isn't overdue", udharPersonReply([{ name: "Ali", balance: 0, lent: 5, received: 5, dueDate: "2026-09-01" }], today).includes("(overdue)"), false);
+check("who owes you: nobody", udharSummaryReply([]), "*Nobody owes you anything*\n\nNo one has an unpaid balance with you right now.");
+check(
+  "who owes you: sorted with total",
+  udharSummaryReply([{ name: "Ali", balance: 700 }, { name: "Usama Irtaza", balance: 1700 }]),
+  "*Who owes you*\n\nUsama Irtaza: Rs 1,700\nAli: Rs 700\n\nTotal: Rs 2,400"
+);
+check(
+  "spending reply with breakdown",
+  spendingReply({ label: "September 2026", filter: null, total: 3387, count: 2, byCategory: [{ category: "Car", total: 3000 }, { category: "Shopping", total: 387 }] }),
+  "*Spent in September 2026*\n\nTotal: Rs 3,387\nExpenses: 2\n\n*By category*\nCar: Rs 3,000\nShopping: Rs 387"
+);
+check("spending reply filtered", spendingReply({ label: "August 2026", filter: "Car", total: 9000, count: 3, byCategory: [] }), "*Car in August 2026*\n\nTotal: Rs 9,000\nExpenses: 3");
+check("spending reply nothing", spendingReply({ label: "2025", filter: "Shell", total: 0, count: 0, byCategory: [] }), "*Shell in 2025*\n\nNothing recorded.");
+check(
+  "spending breakdown capped at five",
+  spendingReply({ label: "2026", filter: null, total: 60, count: 6, byCategory: ["a", "b", "c", "d", "e", "f"].map((category) => ({ category, total: 10 })) }).split("\n").length,
+  11
+);
+check(
+  "recent expenses reply",
+  recentExpensesReply([{ date: "2026-09-15", amount: 387, vendor: "Daraz", category: "Shopping", note: "WhatsApp: order" }, { date: "2026-09-14", amount: 50, vendor: null, category: null, note: "WhatsApp: chai" }]),
+  `*Recent expenses*\n\n${fmtDateLabel("2026-09-15")} · Rs 387 · Daraz (Shopping)\n${fmtDateLabel("2026-09-14")} · Rs 50 · chai`
+);
+check("recent expenses reply empty", recentExpensesReply([]), "*Recent expenses*\n\nNo expenses recorded yet.");
+check(
+  "subscriptions due reply sorted",
+  subscriptionsDueReply([{ name: "Spotify", amount: 1200, dueDate: "2026-09-25" }, { name: "Netflix", amount: 1500, dueDate: "2026-09-20" }], today),
+  `*Subscriptions due*\n\nNetflix: Rs 1,500 · ${fmtDateLabel("2026-09-20")}\nSpotify: Rs 1,200 · ${fmtDateLabel("2026-09-25")}`
+);
+check("subscriptions overdue marked", subscriptionsDueReply([{ name: "Netflix", amount: 1500, dueDate: "2026-09-10" }], today).includes("(overdue)"), true);
+check("subscriptions none due", subscriptionsDueReply([], today), "*Subscriptions due*\n\nEverything active is paid for this month.");
+check("due date set reply", dueDateReply({ name: "Ali", date: "2026-10-01" }), `*Due date set*\n\n*Ali*: ${fmtDateLabel("2026-10-01")}\n\nReply *UNDO* to change it back.`);
+check("due date removed reply", dueDateReply({ name: "Ali", date: null }), "*Due date removed*\n\n*Ali* no longer has a due date.\n\nReply *UNDO* to change it back.");
+check(
+  "undo restores due dates",
+  undoReply({ expense: null, transactions: [], dueDates: [{ name: "Ali", dueDate: null }, { name: "Usama", dueDate: "2026-10-01" }] }),
+  `*Removed*\n\nDue date for Ali removed\nDue date for Usama back to ${fmtDateLabel("2026-10-01")}`
 );
 
 /* replies: bold heading, blank line, one fact per line, UNDO hint set apart */

@@ -3,7 +3,7 @@
 // set apart at the end. WhatsApp renders *text* as bold.
 // Relative import with an extension so this also runs under
 // scripts/test-whatsapp.ts, where the @/ alias doesn't exist.
-import { fmtDateLabel, fmtRs } from "./format.ts";
+import { MONTH_NAMES, fmtDateLabel, fmtRs } from "./format.ts";
 
 const join = (lines: string[]) => lines.join("\n");
 
@@ -63,6 +63,7 @@ export function undoReply(
     expense: { amount: number; vendor: string | null } | null;
     transactions: { name: string; amount: number }[];
     peopleRemoved?: string[];
+    dueDates?: { name: string; dueDate: string | null }[];
   } | null
 ): string {
   if (!u) return join(["*Nothing to undo*", "", "There's nothing from the last 24 hours to remove."]);
@@ -78,6 +79,9 @@ export function undoReply(
     );
   }
   for (const name of u.peopleRemoved ?? []) out.push(`Removed ${name} from Udhar Khata`);
+  for (const d of u.dueDates ?? []) {
+    out.push(d.dueDate ? `Due date for ${d.name} back to ${fmtDateLabel(d.dueDate)}` : `Due date for ${d.name} removed`);
+  }
   return join(out);
 }
 
@@ -96,7 +100,15 @@ export const HELP_REPLY = join([
   "",
   "*Udhar Khata*",
   "add 700 each to Usama and Ali",
+  "add new borrower Habib Ullah with 500",
   "Ali paid me back 1000",
+  "Ali will pay back on the 1st",
+  "",
+  "*Questions*",
+  "how much does Ali owe?",
+  "who owes me?",
+  "what did I spend this month?",
+  "which subscriptions are due?",
   "",
   "Reply *UNDO* to remove the last thing I added.",
 ]);
@@ -125,4 +137,92 @@ export function ambiguousPersonReply(name: string): string {
     "",
     `You have more than one ${name} in Udhar Khata, so I can't tell which one you mean. Rename one of them in the app, then send it again.`,
   ]);
+}
+
+/* ---------- answers to questions ---------- */
+
+export function periodLabel(year: number, month: number | null): string {
+  return month ? `${MONTH_NAMES[month - 1]} ${year}` : String(year);
+}
+
+export function udharPersonReply(
+  people: { name: string; balance: number; lent: number; received: number; dueDate: string | null }[],
+  today: string
+): string {
+  const out = ["*Udhar Khata*"];
+  for (const p of people) {
+    out.push("", `*${p.name}*`, balanceLine(p.balance), `Lent ${fmtRs(p.lent)} · Paid back ${fmtRs(p.received)}`);
+    if (p.dueDate) {
+      const overdue = p.dueDate < today && p.balance >= 0.005;
+      out.push(`Due: ${fmtDateLabel(p.dueDate)}${overdue ? " (overdue)" : ""}`);
+    }
+  }
+  return join(out);
+}
+
+export function udharSummaryReply(owing: { name: string; balance: number }[]): string {
+  if (!owing.length) {
+    return join(["*Nobody owes you anything*", "", "No one has an unpaid balance with you right now."]);
+  }
+  const sorted = [...owing].sort((a, b) => b.balance - a.balance);
+  const total = sorted.reduce((sum, p) => sum + p.balance, 0);
+  return join([
+    "*Who owes you*",
+    "",
+    ...sorted.map((p) => `${p.name}: ${fmtRs(p.balance)}`),
+    "",
+    `Total: ${fmtRs(total)}`,
+  ]);
+}
+
+export function spendingReply(o: {
+  label: string;
+  filter: string | null;
+  total: number;
+  count: number;
+  byCategory: { category: string; total: number }[];
+}): string {
+  const out = [o.filter ? `*${o.filter} in ${o.label}*` : `*Spent in ${o.label}*`, ""];
+  if (!o.count) {
+    out.push("Nothing recorded.");
+    return join(out);
+  }
+  out.push(`Total: ${fmtRs(o.total)}`, `Expenses: ${o.count}`);
+  if (o.byCategory.length) {
+    out.push("", "*By category*", ...o.byCategory.slice(0, 5).map((c) => `${c.category}: ${fmtRs(c.total)}`));
+  }
+  return join(out);
+}
+
+export function recentExpensesReply(
+  items: { date: string; amount: number; vendor: string | null; category: string | null; note: string }[]
+): string {
+  const out = ["*Recent expenses*", ""];
+  if (!items.length) {
+    out.push("No expenses recorded yet.");
+    return join(out);
+  }
+  for (const e of items) {
+    const what = e.vendor || e.note.replace(/^WhatsApp:\s*/, "") || "Expense";
+    out.push(`${fmtDateLabel(e.date)} · ${fmtRs(e.amount)} · ${what}${e.category ? ` (${e.category})` : ""}`);
+  }
+  return join(out);
+}
+
+export function subscriptionsDueReply(items: { name: string; amount: number; dueDate: string }[], today: string): string {
+  const out = ["*Subscriptions due*", ""];
+  if (!items.length) {
+    out.push("Everything active is paid for this month.");
+    return join(out);
+  }
+  for (const sub of [...items].sort((a, b) => a.dueDate.localeCompare(b.dueDate))) {
+    out.push(`${sub.name}: ${fmtRs(sub.amount)} · ${fmtDateLabel(sub.dueDate)}${sub.dueDate < today ? " (overdue)" : ""}`);
+  }
+  return join(out);
+}
+
+export function dueDateReply(o: { name: string; date: string | null }): string {
+  return o.date
+    ? join(["*Due date set*", "", `*${o.name}*: ${fmtDateLabel(o.date)}`, "", "Reply *UNDO* to change it back."])
+    : join(["*Due date removed*", "", `*${o.name}* no longer has a due date.`, "", "Reply *UNDO* to change it back."]);
 }

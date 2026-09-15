@@ -5,6 +5,12 @@
 import {
   attachInboundExpense,
   attachInboundTransactions,
+  attachInboundUndo,
+  ensureTablesExist,
+  listExpenses,
+  listRecentExpenses,
+  listSubscriptions,
+  setPersonDueDate,
   claimInboundMessage,
   findUserIdByPhone,
   insertExpense,
@@ -28,7 +34,9 @@ import {
   type HealthStore,
   type ParseOutcome,
   type ParsedExpense,
+  type ParsedDueDate,
   type ParsedLedger,
+  type ParsedQuery,
 } from "@/lib/expense-parse";
 import { downloadWhatsAppMedia, sendWhatsAppText } from "@/lib/whatsapp";
 import { detectCommand, extractMessages, type InboundMessage } from "@/lib/whatsapp-webhook";
@@ -38,9 +46,16 @@ import {
   HELP_REPLY,
   UNSUPPORTED_REPLY,
   ambiguousPersonReply,
+  dueDateReply,
   expenseAddedReply,
   ledgerReply,
+  periodLabel,
+  recentExpensesReply,
   refusalReply,
+  spendingReply,
+  subscriptionsDueReply,
+  udharPersonReply,
+  udharSummaryReply,
   undoReply,
 } from "@/lib/whatsapp-replies";
 
@@ -54,7 +69,8 @@ type LogLine = {
   msg: string; // tail of Meta's message id
   type: string;
   outcome: string;
-  kind?: "expense" | "ledger";
+  kind?: "expense" | "ledger" | "query" | "due_date";
+  queryType?: string;
   direction?: "lend" | "repayment";
   entries?: number;
   newPeople?: number;
@@ -162,8 +178,156 @@ async function handleMessage(message: InboundMessage, log: LogLine): Promise<voi
     log.outcome = "rejected";
     return reply(message.from, refusalReply(outcome.reason));
   }
+  if (outcome.kind === "query") return answerQuery(userId, message, outcome.query, people, log);
+  if (outcome.kind === "due_date") return saveDueDate(userId, message, outcome.due, people, log);
   if (outcome.kind === "ledger") return saveLedger(userId, message, outcome.ledger, people, log);
   return saveExpense(userId, message, outcome.expense, categories, offline, log);
+}
+
+// Every figure in an answer comes from the database. The model only decided
+// which question was asked.
+async function answerQuery(
+  userId: string,
+  message: InboundMessage,
+  query: ParsedQuery,
+  people: LedgerPerson[],
+  log: LogLine
+): Promise<void> {
+  log.kind = "query";
+  log.queryType = query.type;
+  log.outcome = "answered";
+  const today = pakistanToday();
+
+  switch (query.type) {
+    case "udhar_person": {
+      const found: LedgerPerson[] = [];
+      for (const name of query.people) {
+        const matches = people.filter((p) => personKey(p.name) === personKey(name));
+        if (matches.length > 1) {
+          log.outcome = "ambiguous_person";
+          return reply(message.from, ambiguousPersonReply(name));
+        }
+        if (matches.length === 1) found.push(matches[0]);
+      }
+      return reply(
+        message.from,
+        udharPersonReply(
+          found.map((p) => ({
+            name: p.name,
+            balance: p.balance,
+            lent: p.lent,
+            received: p.received,
+            dueDate: p.dueDate,
+          })),
+          today
+        )
+      );
+    }
+
+    case "udhar_summary":
+      return reply(
+        message.from,
+        udharSummaryReply(
+          people.filter((p) => p.balance >= 0.005).map((p) => ({ name: p.name, balance: p.balance }))
+        )
+      );
+
+    case "spending": {
+      const year = query.year ?? Number(today.slice(0, 4));
+      const rows = await listExpenses(userId, {
+        year,
+        month: query.month ?? undefined,
+        category: query.category ?? undefined,
+      });
+      const needle = query.vendor?.toLowerCase();
+      const matched = needle
+        ? rows.filter((e) => `${e.vendor ?? ""} ${e.note}`.toLowerCase().includes(needle))
+        : rows;
+      // A breakdown only makes sense for an unfiltered total.
+      const byCategory = new Map<string, number>();
+      if (!query.category && !needle) {
+        for (const e of matched) {
+          const key = e.category || "Uncategorised";
+          byCategory.set(key, (byCategory.get(key) ?? 0) + e.amount);
+        }
+      }
+      return reply(
+        message.from,
+        spendingReply({
+          label: periodLabel(year, query.month),
+          filter: [query.category, query.vendor].filter(Boolean).join(" · ") || null,
+          total: matched.reduce((sum, e) => sum + e.amount, 0),
+          count: matched.length,
+          byCategory: [...byCategory]
+            .map(([category, total]) => ({ category, total }))
+            .sort((a, b) => b.total - a.total),
+        })
+      );
+    }
+
+    case "recent_expenses": {
+      const rows = await listRecentExpenses(userId, 5);
+      return reply(
+        message.from,
+        recentExpensesReply(
+          rows.map((e) => ({
+            date: e.expense_date,
+            amount: e.amount,
+            vendor: e.vendor ?? null,
+            category: e.category ?? null,
+            note: e.note,
+          }))
+        )
+      );
+    }
+
+    case "subscriptions_due": {
+      await ensureTablesExist();
+      const subs = await listSubscriptions(userId);
+      return reply(
+        message.from,
+        subscriptionsDueReply(
+          subs
+            .filter((sub) => sub.active && !sub.paid_this_period)
+            .map((sub) => ({ name: sub.name, amount: sub.amount, dueDate: sub.current_due_date })),
+          today
+        )
+      );
+    }
+  }
+}
+
+async function saveDueDate(
+  userId: string,
+  message: InboundMessage,
+  due: ParsedDueDate,
+  people: LedgerPerson[],
+  log: LogLine
+): Promise<void> {
+  const matches = people.filter((p) => personKey(p.name) === personKey(due.person));
+  if (matches.length !== 1) {
+    log.outcome = matches.length > 1 ? "ambiguous_person" : "rejected";
+    return reply(
+      message.from,
+      matches.length > 1
+        ? ambiguousPersonReply(due.person)
+        : refusalReply(`I couldn't find ${due.person} in your Udhar Khata.`)
+    );
+  }
+  const person = matches[0];
+  const result = await setPersonDueDate(userId, person.id, due.date);
+  if (!result) {
+    log.outcome = "rejected";
+    return reply(message.from, refusalReply(`I couldn't find ${person.name} in your Udhar Khata.`));
+  }
+  // The old value, so UNDO puts it back exactly - including "no due date".
+  await attachInboundUndo(message.id, [
+    { op: "set_due_date", personId: person.id, name: person.name, dueDate: result.previous },
+  ]);
+
+  log.kind = "due_date";
+  log.outcome = due.date ? "due_set" : "due_cleared";
+  return reply(message.from, dueDateReply({ name: person.name, date: due.date }));
 }
 
 async function saveExpense(
