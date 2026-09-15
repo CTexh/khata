@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Person, Tx } from "@/lib/db";
 import { fmtRs, fmtWhen, fmtFull, fmtDateLabel, dueDateInfo, todayLocalYMD } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
@@ -505,6 +505,19 @@ export default function UdharKhata() {
   const [filter, setFilter] = useState<Filter>("owing");
 
   const load = useCallback(() => invalidate("/api/people"), []);
+
+  // A reminder email links to /udhar-khata?open=<id>: open that person.
+  useEffect(() => {
+    if (!peopleData) return;
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (!id) return;
+    const person = peopleData.find((p) => p.id === id);
+    if (person) {
+      setFilter(person.balance > 0 ? "owing" : "all");
+      setOpenId(id);
+    }
+    window.history.replaceState(null, "", "/udhar-khata");
+  }, [peopleData]);
 
   const counts = useMemo(() => {
     const list = people ?? [];

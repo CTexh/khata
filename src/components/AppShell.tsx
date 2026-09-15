@@ -70,7 +70,11 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
     const res = await fetch("/api/profile/test-email", { method: "POST" });
     const j = await res.json().catch(() => ({}));
     setTesting(false);
-    setMsg(res.ok ? { text: `Test email sent to ${j.to}. Check your inbox (and spam).` } : { text: j.error ?? "Couldn't send it.", bad: true });
+    setMsg(
+      res.ok
+        ? { text: `${j.sent} sample emails sent to ${j.to} - one of each reminder. Check your inbox (and spam).` }
+        : { text: j.error ?? "Couldn't send it.", bad: true }
+    );
   };
 
   return (
@@ -89,7 +93,7 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
           <div>
             <p className="text-[15px] font-bold">Email reminders</p>
             <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
-              Subscriptions due, Udhar reach-out dates and a monthly summary, around 9am.
+              Subscriptions due (a day before and on the day), Udhar follow-up dates and a monthly summary, at 6pm.
             </p>
           </div>
           <input
@@ -120,7 +124,7 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
           )}
           {available && email.trim() && (
             <button type="button" className="btn btn-ghost" onClick={sendTest} disabled={testing || !loaded}>
-              {testing ? "Sending…" : "Send a test email"}
+              {testing ? "Sending…" : "Send test emails"}
             </button>
           )}
         </div>

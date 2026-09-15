@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { fmtRs, hueFor, initials } from "@/lib/format";
 import { Sheet, SheetRow } from "@/components/Sheet";
 import { invalidate, useCached } from "@/lib/swr";
@@ -380,6 +380,15 @@ export default function Subscriptions() {
     invalidate("/api/subscriptions");
     await refreshSubs();
   }, [refreshSubs]);
+
+  // A reminder email links to /subscriptions?open=<id>: open that record.
+  useEffect(() => {
+    if (!subsData) return;
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (!id) return;
+    if (subsData.some((s) => s.id === id)) setExpanded(id);
+    window.history.replaceState(null, "", "/subscriptions");
+  }, [subsData]);
 
   const handleLogoFetch = useCallback(async (name: string) => {
     if (!name.trim()) return;

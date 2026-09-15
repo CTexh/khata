@@ -7,15 +7,33 @@ import { categoryEmoji, categoryVars } from "@/lib/category-style";
 import { Sheet, SheetRow } from "@/components/Sheet";
 import { fetchKey, invalidate, peek, useCached } from "@/lib/swr";
 
-function toLocalDateTime(iso: string): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  return date.toISOString().slice(0, 16);
+// Expense times are stored as Pakistan wall-clock time with a Z suffix - the
+// assistant saves them the same way - so they are read and written as they
+// are, with no time-zone conversion. The form used to start from the UTC time,
+// five hours behind Pakistan, and a late-night expense could land on the
+// previous day.
+function pakistanNowLocal(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Karachi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+}
+
+function toLocalDateTime(stored: string): string {
+  if (!stored) return "";
+  return stored.length === 10 ? `${stored}T00:00` : stored.slice(0, 16);
 }
 
 function fromLocalDateTime(local: string): string {
   if (!local) return "";
-  return new Date(local + ":00Z").toISOString();
+  return `${local}:00Z`;
 }
 
 /* ---------- categories ---------- */
@@ -524,7 +542,7 @@ function ExpenseForm({
   const [amount, setAmount] = useState(editing ? String(editing.amount) : "");
   const [note, setNote] = useState(editing?.note ?? "");
   const [datetime, setDateTime] = useState(
-    editing ? toLocalDateTime(editing.expense_datetime || editing.expense_date) : toLocalDateTime(new Date().toISOString())
+    editing ? toLocalDateTime(editing.expense_datetime || editing.expense_date) : pakistanNowLocal()
   );
   const [vendor, setVendor] = useState(editing?.vendor ?? "");
   const [category, setCategory] = useState(editing?.category ?? "");
