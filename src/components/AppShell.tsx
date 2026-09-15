@@ -239,9 +239,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main id="main-content" className="contents">{children}</main>
       </div>
 
-      <nav className="tabbar" aria-label="Primary navigation">
+      <nav className={`tabbar${user?.isAdmin ? "" : " no-fab"}`} aria-label="Primary navigation">
         {TABS.map((tab) =>
           tab === null ? (
+            // The assistant is only for admin accounts.
+            !user?.isAdmin ? null : 
             <Link
               key="assistant"
               href="/assistant"

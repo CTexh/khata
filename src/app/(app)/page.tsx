@@ -67,6 +67,9 @@ export default function Home() {
   const lastMonth = useCached<Expense[]>(`/api/expenses?year=${prevDate.getFullYear()}&month=${prevDate.getMonth() + 1}`);
   const peopleQ = useCached<{ balance: number }[]>("/api/people");
   const subsQ = useCached<{ amount: number; active: number | boolean; paid_this_period: boolean }[]>("/api/subscriptions");
+  // The assistant is only offered to admin accounts.
+  const me = useCached<{ user: { isAdmin: boolean } | null }>("/api/auth/me");
+  const isAdmin = Boolean(me.data?.user?.isAdmin);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -175,6 +178,8 @@ export default function Home() {
         </div>
       </section>
 
+      {isAdmin && (
+        <>
       {/* The assistant, right on Home: type and go, or jump straight to voice or a bill photo. */}
       <section className="card p-4 rise" aria-labelledby="ask-title">
         <div className="flex items-center gap-2 mb-3">
@@ -247,6 +252,9 @@ export default function Home() {
           ))}
         </div>
       </section>
+
+        </>
+      )}
 
       <section className="grid grid-cols-2 gap-3">
         <Link href="/udhar-khata" className="card p-4 rise flex flex-col gap-3">

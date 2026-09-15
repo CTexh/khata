@@ -29,9 +29,15 @@ function status(requestId: string, reply: string | null) {
 // response: a slow model used to keep the phone's request open long enough
 // for the connection to drop, so the page showed an error even though the
 // expense had been saved. The page now fetches the reply with GET.
+// The AI assistant is for admin accounts only; everyone else uses the app
+// without it. Checked here, not just hidden in the page, so it can't be
+// reached by calling the API directly.
+const NOT_AVAILABLE = { error: "The assistant isn't available on this account." };
+
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Please log in again." }, { status: 401 });
+  if (!session.isAdmin) return NextResponse.json(NOT_AVAILABLE, { status: 403 });
 
   let form: FormData;
   try {
@@ -121,6 +127,7 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Please log in again." }, { status: 401 });
+  if (!session.isAdmin) return NextResponse.json(NOT_AVAILABLE, { status: 403 });
 
   const requestId = new URL(req.url).searchParams.get("id") ?? "";
   if (!REQUEST_ID.test(requestId)) {

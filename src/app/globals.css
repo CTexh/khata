@@ -960,3 +960,8 @@ body {
   font-weight: 700;
   white-space: nowrap;
 }
+
+/* accounts without the assistant: four even tabs, no centre button */
+.tabbar.no-fab {
+  grid-template-columns: repeat(4, 1fr);
+}

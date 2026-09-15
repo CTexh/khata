@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { splitBold } from "@/lib/chat-format";
 import { encodeWav } from "@/lib/wav";
 import { ASSISTANT_DRAFT_KEY } from "@/lib/assistant-draft";
-import { invalidate } from "@/lib/swr";
+import { invalidate, useCached } from "@/lib/swr";
 import Link from "next/link";
 import { ArrowUpIcon, CameraIcon, MicIcon, SparkleIcon } from "@/components/icons";
 
@@ -218,6 +218,8 @@ export default function AssistantPage() {
   const discardRef = useRef(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Only admin accounts can use the assistant; the API enforces the same.
+  const me = useCached<{ user: { isAdmin: boolean } | null }>("/api/auth/me");
 
   const finish = (bubbleId: string, result: Delivery) =>
     setMessages((all) =>
@@ -443,6 +445,20 @@ export default function AssistantPage() {
       {label}
     </button>
   );
+
+  if (me.data && !me.data.user?.isAdmin) {
+    return (
+      <div className="chat-screen items-center justify-center px-6 text-center gap-4">
+        <div className="chat-glow-card">
+          <p className="chat-glow-title">The assistant isn&apos;t available on this account</p>
+          <p className="chat-glow-hint">You can still add and manage everything from the other tabs.</p>
+        </div>
+        <Link href="/" className="btn btn-primary">
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="chat-screen">
