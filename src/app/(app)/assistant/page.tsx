@@ -218,8 +218,8 @@ export default function AssistantPage() {
   const discardRef = useRef(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Only admin accounts can use the assistant; the API enforces the same.
-  const me = useCached<{ user: { isAdmin: boolean } | null }>("/api/auth/me");
+  // Only accounts with assistant access can use it; the API enforces the same.
+  const me = useCached<{ user: { aiAccess?: boolean } | null }>("/api/auth/me");
 
   const finish = (bubbleId: string, result: Delivery) =>
     setMessages((all) =>
@@ -446,7 +446,7 @@ export default function AssistantPage() {
     </button>
   );
 
-  if (me.data && !me.data.user?.isAdmin) {
+  if (me.data && !me.data.user?.aiAccess) {
     return (
       <div className="chat-screen items-center justify-center px-6 text-center gap-4">
         <div className="chat-glow-card">

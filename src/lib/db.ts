@@ -311,19 +311,53 @@ export async function listUserIds(): Promise<string[]> {
   return rs.rows.map((r) => r.id as string);
 }
 
+/* ---------- assistant access ---------- */
+
+// Who may use the AI assistant. Admins always may; everyone else only when an
+// admin has switched it on for them in Admin.
+let aiAccessColumnEnsured = false;
+async function ensureAiAccessColumn(): Promise<void> {
+  if (aiAccessColumnEnsured) return;
+  if (await schemaCurrent("user_ai_access", "1")) {
+    aiAccessColumnEnsured = true;
+    return;
+  }
+  try {
+    await db().execute(`ALTER TABLE users ADD COLUMN ai_access INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists.
+  }
+  await markSchema("user_ai_access", "1");
+  aiAccessColumnEnsured = true;
+}
+
+export async function userHasAi(userId: string): Promise<boolean> {
+  await ensureAiAccessColumn();
+  const rs = await db().execute({ sql: "SELECT is_admin, ai_access FROM users WHERE id = ?", args: [userId] });
+  const r = rs.rows[0];
+  return Boolean(r) && (Number(r.is_admin) === 1 || Number(r.ai_access) === 1);
+}
+
+export async function setUserAiAccess(userId: string, on: boolean): Promise<void> {
+  await ensureAiAccessColumn();
+  await db().execute({ sql: "UPDATE users SET ai_access = ? WHERE id = ?", args: [on ? 1 : 0, userId] });
+}
+
 export type UserSummary = {
   id: string;
   username: string;
   is_admin: boolean;
+  ai_access: boolean;
   created_at: string;
   people_count: number;
   expense_count: number;
 };
 
 export async function listUsers(): Promise<UserSummary[]> {
+  await ensureAiAccessColumn();
   const c = await db();
   const rs = await c.execute(`
-    SELECT u.id, u.username, u.is_admin, u.created_at,
+    SELECT u.id, u.username, u.is_admin, u.ai_access, u.created_at,
            (SELECT COUNT(*) FROM people p WHERE p.user_id = u.id) AS people_count,
            (SELECT COUNT(*) FROM expenses e WHERE e.user_id = u.id) AS expense_count
     FROM users u
@@ -333,6 +367,7 @@ export async function listUsers(): Promise<UserSummary[]> {
     id: r.id as string,
     username: r.username as string,
     is_admin: Number(r.is_admin) === 1,
+    ai_access: Number(r.is_admin) === 1 || Number(r.ai_access) === 1,
     created_at: r.created_at as string,
     people_count: Number(r.people_count),
     expense_count: Number(r.expense_count),

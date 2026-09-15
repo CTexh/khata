@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db, deleteUser, findUserById } from "@/lib/db";
+import { db, deleteUser, findUserById, setUserAiAccess } from "@/lib/db";
 import { getSession, hashPassword } from "@/lib/auth";
 
 type Params = { params: Promise<{ id: string }> };
@@ -53,4 +53,24 @@ export async function DELETE(_req: Request, { params }: Params) {
 
   await deleteUser(id);
   return NextResponse.json({ ok: true });
+}
+
+// Turns the AI assistant on or off for one account.
+export async function PATCH(req: Request, { params }: Params) {
+  const session = await getSession();
+  if (!session?.isAdmin) {
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  }
+  const { id } = await params;
+  const target = await findUserById(id);
+  if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  if (target.is_admin) {
+    return NextResponse.json({ error: "Admins always have assistant access" }, { status: 400 });
+  }
+  const body = await req.json().catch(() => ({}));
+  if (typeof body.aiAccess !== "boolean") {
+    return NextResponse.json({ error: "aiAccess must be true or false" }, { status: 400 });
+  }
+  await setUserAiAccess(id, body.aiAccess);
+  return NextResponse.json({ ok: true, aiAccess: body.aiAccess });
 }

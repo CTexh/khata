@@ -242,6 +242,18 @@ check("undo refuses to restore another user's row", steps.length, 0);
 await act({ ok: true, kind: "expense_delete", target: target({ vendor: "shell", amount: 999 }) });
 check("other user's expense untouched", await count("SELECT COUNT(*) AS n FROM expenses WHERE user_id = ?", [otherUser]), 1);
 
+/* ---------- assistant access ---------- */
+
+check("assistant access is off by default", await dbm.userHasAi(userId), false);
+await dbm.setUserAiAccess(userId, true);
+check("admin can switch assistant access on", [await dbm.userHasAi(userId), (await dbm.listUsers()).find((u) => u.id === userId)?.ai_access], [true, true]);
+await dbm.setUserAiAccess(userId, false);
+check("and off again", await dbm.userHasAi(userId), false);
+const adminId = randomUUID();
+await c.execute({ sql: "INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES (?, 'an-admin', 'unused', 1, ?)", args: [adminId, now] });
+check("admins always have assistant access", [await dbm.userHasAi(adminId), (await dbm.listUsers()).find((u) => u.id === adminId)?.ai_access], [true, true]);
+check("unknown account has no access", await dbm.userHasAi(randomUUID()), false);
+
 /* ---------- deleting an account removes everything it owns ---------- */
 
 const doomed = randomUUID();

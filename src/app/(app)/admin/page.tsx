@@ -98,6 +98,25 @@ function UserSheet({ user, onClose, onChanged }: { user: UserSummary; onClose: (
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; bad?: boolean } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [aiOn, setAiOn] = useState(user.ai_access);
+
+  const toggleAi = async (next: boolean) => {
+    setAiOn(next);
+    setMessage(null);
+    const res = await fetch(`/api/admin/users/${user.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ aiAccess: next }),
+    });
+    if (!res.ok) {
+      setAiOn(!next);
+      const j = await res.json().catch(() => ({}));
+      setMessage({ text: j.error ?? "Couldn't change assistant access", bad: true });
+      return;
+    }
+    setMessage({ text: next ? `${user.username} can now use the assistant.` : `${user.username} no longer has the assistant.` });
+    onChanged();
+  };
 
   const savePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,6 +161,22 @@ function UserSheet({ user, onClose, onChanged }: { user: UserSummary; onClose: (
           {user.expense_count} {user.expense_count === 1 ? "expense" : "expenses"}
         </p>
       </div>
+
+      <label className="card p-4 flex items-center justify-between gap-3 cursor-pointer">
+        <span className="min-w-0">
+          <span className="block text-[15px] font-bold">Assistant access</span>
+          <span className="block text-[13px]" style={{ color: "var(--muted)" }}>
+            Let {user.username} use the AI assistant: the middle button, Ask Khata on Home and voice or photo entries.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          className="h-6 w-6 shrink-0 cursor-pointer accent-[var(--accent)]"
+          checked={aiOn}
+          onChange={(e) => toggleAi(e.target.checked)}
+          aria-label={`Assistant access for ${user.username}`}
+        />
+      </label>
 
       <form onSubmit={savePassword} className="card p-4 flex flex-col gap-3">
         <p className="text-[14px] font-bold">Reset password</p>
@@ -318,6 +353,11 @@ export default function AdminPage() {
                     {u.is_admin && (
                       <span className="chip" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
                         Admin
+                      </span>
+                    )}
+                    {!u.is_admin && u.ai_access && (
+                      <span className="chip" style={{ background: "var(--good-soft)", color: "var(--good)" }}>
+                        AI
                       </span>
                     )}
                   </span>

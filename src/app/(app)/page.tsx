@@ -67,9 +67,9 @@ export default function Home() {
   const lastMonth = useCached<Expense[]>(`/api/expenses?year=${prevDate.getFullYear()}&month=${prevDate.getMonth() + 1}`);
   const peopleQ = useCached<{ balance: number }[]>("/api/people");
   const subsQ = useCached<{ amount: number; active: number | boolean; paid_this_period: boolean }[]>("/api/subscriptions");
-  // The assistant is only offered to admin accounts.
-  const me = useCached<{ user: { isAdmin: boolean } | null }>("/api/auth/me");
-  const isAdmin = Boolean(me.data?.user?.isAdmin);
+  // The assistant is only offered to accounts with assistant access.
+  const me = useCached<{ user: { aiAccess?: boolean } | null }>("/api/auth/me");
+  const hasAi = Boolean(me.data?.user?.aiAccess);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -178,7 +178,7 @@ export default function Home() {
         </div>
       </section>
 
-      {isAdmin && (
+      {hasAi && (
         <>
       {/* The assistant, right on Home: type and go, or jump straight to voice or a bill photo. */}
       <section className="card p-4 rise" aria-labelledby="ask-title">

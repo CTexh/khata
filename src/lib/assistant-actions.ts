@@ -984,9 +984,9 @@ export async function understandMessage(opts: {
 // step with the app: anything not described here, it says isn't available.
 export const APP_GUIDE = `Khata is a personal finance app for Pakistan. Amounts are in rupees (Rs) and dates follow Pakistan time.
 
-Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Admin accounts also have the assistant button in the middle. The profile picture (top right) opens: Edit profile, Welcome tour, Admin (admins only), Log out. The moon/sun button switches dark and light mode.
+Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The profile picture (top right) opens: Edit profile, Welcome tour, Admin (admins only), Log out. The moon/sun button switches dark and light mode.
 
-Home: switch Today / This Week / This Month to see the total spent, the change against the previous period and that period's expenses. Cards show money owed to you and subscriptions still to pay. Admins also get the Ask Khata box (type, camera for a bill photo, microphone for a voice note).
+Home: switch Today / This Week / This Month to see the total spent, the change against the previous period and that period's expenses. Cards show money owed to you and subscriptions still to pay. Accounts with assistant access also get the Ask Khata box (type, camera for a bill photo, microphone for a voice note).
 
 Mera Khata: tap the round + button to log an expense (amount, paid to, category, note, date and time). Categories fill in automatically from the payee. Month / Year switch with arrows to move between periods. "Where it went" shows the top categories (Show all for the rest). Tap a category chip to filter the list; the search button searches amount, note, vendor or category. Tap any expense to see it, edit it or delete it. Expenses without a category show a prompt to sort them. The ... menu has Manage categories (add, rename, delete, keywords that auto-match), Re-categorise (preview and apply category fixes) and Download Excel.
 
@@ -996,9 +996,9 @@ Subscriptions: tap + to add one (name, monthly amount, first due date; a logo is
 
 Email reminders: in Edit profile, add an email address and keep "Send me reminders" on. Emails come from the app's Gmail. At 6pm: a subscription the day before it is due and on the due day if still unpaid, and a person on their follow-up date. At 4:30am: a recap of the previous day (expenses, Udhar Khata changes, subscriptions due or paid, and a nudge to add anything missed). On the 1st: last month's summary. Each email links to the exact record. Turning the switch off stops them.
 
-Assistant (admin accounts): add expenses by typing, voice note or bill photo; lend money or record paybacks; set follow-up dates; edit or delete expenses; manage subscriptions and categories; answer questions about spending, balances and subscriptions; compare periods; show a person's history; turn email reminders on or off; take suggestions. The + menu has Camera, Photos, Undo last change and What can I say?. UNDO reverses the assistant's last change from the past 24 hours.
+Assistant (admins, and accounts an admin has given assistant access in Admin): add expenses by typing, voice note or bill photo; lend money or record paybacks; set follow-up dates; edit or delete expenses; manage subscriptions and categories; answer questions about spending, balances and subscriptions; compare periods; show a person's history; turn email reminders on or off; take suggestions. The + menu has Camera, Photos, Undo last change and What can I say?. UNDO reverses the assistant's last change from the past 24 hours.
 
-Accounts and security: sign up with a username and password, or an admin creates the account. After 10 wrong passwords an account is locked for 15 minutes. Admins can create users, reset passwords, delete users and read assistant feedback. Data shown in the app is kept on the device for speed and cleared on logout. New accounts see a short welcome tour, which can be replayed from the profile menu.
+Accounts and security: sign up with a username and password, or an admin creates the account. After 10 wrong passwords an account is locked for 15 minutes. Admins can create users, reset passwords, turn assistant access on or off for each account, delete users and read assistant feedback. Data shown in the app is kept on the device for speed and cleared on logout. New accounts see a short welcome tour, which can be replayed from the profile menu.
 
 Not available: budgets, multiple currencies, bank syncing inside the app, shared/family accounts, exporting Udhar Khata, recurring expenses other than subscriptions.`;
 

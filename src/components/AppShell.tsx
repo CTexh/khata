@@ -10,7 +10,14 @@ import { WelcomeTour } from "@/components/WelcomeTour";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
 
-type CurrentUser = { id: string; username: string; name?: string | null; isAdmin: boolean; createdAt?: string | null };
+type CurrentUser = {
+  id: string;
+  username: string;
+  name?: string | null;
+  isAdmin: boolean;
+  aiAccess?: boolean;
+  createdAt?: string | null;
+};
 
 function EditProfileModal({ initialName, onClose, onSaved }: { initialName: string; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initialName);
@@ -338,11 +345,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main id="main-content" className="contents">{children}</main>
       </div>
 
-      <nav className={`tabbar${user?.isAdmin ? "" : " no-fab"}`} aria-label="Primary navigation">
+      <nav className={`tabbar${user?.aiAccess ? "" : " no-fab"}`} aria-label="Primary navigation">
         {TABS.map((tab) =>
           tab === null ? (
-            // The assistant is only for admin accounts.
-            !user?.isAdmin ? null : 
+            // Only for accounts with assistant access (admins, or switched on in Admin).
+            !user?.aiAccess ? null : 
             <Link
               key="assistant"
               href="/assistant"
@@ -366,7 +373,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       </nav>
 
-      {tourOpen && user && <WelcomeTour withAssistant={user.isAdmin} onClose={closeTour} />}
+      {tourOpen && user && <WelcomeTour withAssistant={Boolean(user.aiAccess)} onClose={closeTour} />}
 
       {profileOpen && (
         <EditProfileModal initialName={user?.name ?? ""} onClose={closeProfile} onSaved={() => refreshMe()} />

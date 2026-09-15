@@ -8,6 +8,7 @@ import {
   listPeople,
   listSubscriptions,
   listUserCategories,
+  userHasAi,
 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -31,8 +32,9 @@ export async function GET(req: Request) {
   const userId = session.userId;
 
   await ensureTablesExist();
-  const [user, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories] = await Promise.all([
+  const [user, aiAccess, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories] = await Promise.all([
     findUserById(userId),
+    userHasAi(userId),
     listPeople(userId),
     listSubscriptions(userId),
     listExpenses(userId, { year: y, month: m }),
@@ -58,6 +60,7 @@ export async function GET(req: Request) {
             username: session.username,
             name: user?.name ?? null,
             isAdmin: session.isAdmin,
+            aiAccess,
             createdAt: user?.created_at ?? null,
           },
         },
