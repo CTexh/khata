@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { fmtRs, hueFor, initials } from "@/lib/format";
 import { Sheet, SheetRow } from "@/components/Sheet";
+import { invalidate, useCached } from "@/lib/swr";
 
 function Spinner() {
   return (
@@ -356,8 +357,9 @@ function SubscriptionDetail({
 }
 
 export default function Subscriptions() {
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: subsData, failedStatus, refresh: refreshSubs } = useCached<Subscription[]>("/api/subscriptions");
+  const subscriptions = subsData ?? [];
+  const loading = subsData === undefined && failedStatus === undefined;
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -372,27 +374,12 @@ export default function Subscriptions() {
     logoLoading: false,
   });
 
-  // Full-page spinner only on the very first load - re-running this after a
-  // mutation (mark paid, delete, toggle active) shouldn't blank out the
-  // already-visible list, that's a jarring flash on every action.
-  const loadSubscriptions = useCallback(async (isInitial = false) => {
-    try {
-      if (isInitial) setLoading(true);
-      const res = await fetch("/api/subscriptions");
-      if (!res.ok) throw new Error("Failed to load subscriptions");
-      const data = await res.json();
-      setSubscriptions(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      if (isInitial) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadSubscriptions(true);
-  }, [loadSubscriptions]);
+  // Served from the shared cache, so the list shows at once; after a change the
+  // list and Home's figures are refreshed together.
+  const loadSubscriptions = useCallback(async () => {
+    invalidate("/api/subscriptions");
+    await refreshSubs();
+  }, [refreshSubs]);
 
   const handleLogoFetch = useCallback(async (name: string) => {
     if (!name.trim()) return;
@@ -530,20 +517,6 @@ export default function Subscriptions() {
     );
   const inactiveSubscriptions = subscriptions.filter((s) => !s.active);
   const monthlyTotal = activeSubscriptions.reduce((sum, sub) => sum + sub.amount, 0);
-  const statusColors = {
-    paid: "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400",
-    "due-today": "bg-red-500/20 text-red-600 dark:text-red-400",
-    "due-soon": "bg-orange-500/20 text-orange-600 dark:text-orange-400",
-    upcoming: "bg-gray-500/20 text-gray-600 dark:text-gray-400",
-    inactive: "bg-gray-500/20 text-gray-500 dark:text-gray-400",
-  };
-  const statusLabels = {
-    paid: "PAID",
-    "due-today": "DUE TODAY",
-    "due-soon": "DUE SOON",
-    upcoming: "UPCOMING",
-    inactive: "INACTIVE",
-  };
 
   if (loading) return <Spinner />;
 
@@ -619,9 +592,9 @@ export default function Subscriptions() {
         </button>
       </div>
 
-      {error && (
+      {(error || (failedStatus !== undefined && !subsData)) && (
         <div className="card p-4 text-[14px] font-semibold" style={{ color: "var(--bad)" }} role="alert">
-          {error}
+          {error ?? "Couldn't load your subscriptions. Check your connection and try again."}
         </div>
       )}
 

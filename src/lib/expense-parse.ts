@@ -608,7 +608,6 @@ export const GEMINI_BUDGET_MS = 40_000;
 export const TEXT_ATTEMPT_MS = 8_000;
 export const IMAGE_ATTEMPT_MS = 15_000;
 export const MIN_ATTEMPT_MS = 3_000;
-export const PAUSE_BETWEEN_MS = 300;
 export const RETRY_BACKOFF_MS = 1_500;
 export const MAX_ATTEMPTS = 8;
 // How long a failing model is moved to the back of the queue.

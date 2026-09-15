@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Person, Tx } from "@/lib/db";
 import { fmtRs, fmtWhen, fmtFull, fmtDateLabel, dueDateInfo, todayLocalYMD } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
 import { Sheet, SheetRow } from "@/components/Sheet";
+import { invalidate, useCached } from "@/lib/swr";
 
 /* ---------- small components ---------- */
 
@@ -286,21 +287,16 @@ function PersonSheet({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const [txs, setTxs] = useState<Tx[] | null>(null);
+  const { data: txData } = useCached<Tx[]>(`/api/people/${person.id}`);
+  const txs = txData ?? null;
   const [form, setForm] = useState<"lend" | "repay" | null>(null);
   const [editingDue, setEditingDue] = useState(false);
   const [dueDraft, setDueDraft] = useState(person.due_date ?? "");
   const [dueBusy, setDueBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const loadTxs = useCallback(async () => {
-    const res = await fetch(`/api/people/${person.id}`);
-    setTxs(await res.json());
-  }, [person.id]);
-
-  useEffect(() => {
-    loadTxs();
-  }, [loadTxs]);
+  // A change here refreshes this history and every balance that shows it.
+  const loadTxs = () => invalidate("/api/people");
 
   const settled = person.balance <= 0;
   const due = settled ? null : dueDateInfo(person.due_date);
@@ -501,20 +497,14 @@ function PersonSheet({
 type Filter = "owing" | "settled" | "all";
 
 export default function UdharKhata() {
-  const [people, setPeople] = useState<Person[] | null>(null);
+  const { data: peopleData } = useCached<Person[]>("/api/people");
+  const people = peopleData ?? null;
   const [adding, setAdding] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("owing");
 
-  const load = useCallback(async () => {
-    const res = await fetch("/api/people");
-    setPeople(await res.json());
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const load = useCallback(() => invalidate("/api/people"), []);
 
   const counts = useMemo(() => {
     const list = people ?? [];

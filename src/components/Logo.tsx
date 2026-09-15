@@ -4,7 +4,7 @@ export function Logo({ size = 44 }: { size?: number }) {
       width={size}
       height={size}
       viewBox="0 0 64 64"
-      className="logo-float shrink-0"
+      className="shrink-0"
       aria-label="Khata logo"
     >
       <defs>

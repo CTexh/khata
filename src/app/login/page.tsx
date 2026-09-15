@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
+import { clearCache } from "@/lib/swr";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -27,6 +28,8 @@ export default function LoginPage() {
       setError(j.error ?? "Something went wrong");
       return;
     }
+    // A different account may have used this browser: drop its cached data.
+    clearCache();
     router.push("/");
     router.refresh();
   };
@@ -66,7 +69,7 @@ export default function LoginPage() {
           </p>
         )}
         <button className="btn btn-primary mt-1" disabled={busy}>
-          {busy ? "Logging in…" : "🔓 Log in"}
+          {busy ? "Logging in…" : "Log in"}
         </button>
         <p className="text-[13px] text-center mt-1" style={{ color: "var(--muted)" }}>
           New here?{" "}

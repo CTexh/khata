@@ -8,17 +8,6 @@ const base = {
   strokeLinejoin: "round" as const,
 };
 
-export function WalletIcon({ size = 24, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>
-      <path {...base} d="M7 7V6a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1" />
-      <rect {...base} x="3" y="7" width="18" height="13" rx="3.2" />
-      <path {...base} d="M3 11.5h18" />
-      <circle cx="16.2" cy="14.6" r="1.4" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
 export function HomeIcon({ size = 24, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>

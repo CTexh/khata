@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { fmtRs, fmtDateLabel } from "@/lib/format";
 import { categoryEmoji, categoryVars } from "@/lib/category-style";
 import { ASSISTANT_DRAFT_KEY } from "@/lib/assistant-draft";
+import { useCached } from "@/lib/swr";
 import { ArrowUpIcon, CameraIcon, HandshakeIcon, MicIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
 
 type Expense = {
@@ -25,7 +26,6 @@ const PERIODS: { id: Period; label: string; heading: string; compare: string }[]
   { id: "week", label: "This Week", heading: "This week's expense", compare: "last week" },
   { id: "month", label: "This Month", heading: "This month's expense", compare: "last month" },
 ];
-
 
 const SUGGESTIONS = ["fuel 3000 shell", "what did I spend this week?", "who owes me?", "mark Netflix paid"];
 
@@ -59,50 +59,40 @@ function sum(list: Expense[], from: string, to: string) {
 export default function Home() {
   const router = useRouter();
   const [period, setPeriod] = useState<Period>("today");
-  const [expenses, setExpenses] = useState<Expense[] | null>(null);
-  const [owed, setOwed] = useState<{ total: number; people: number } | null>(null);
-  const [subs, setSubs] = useState<{ due: number; count: number } | null>(null);
+  // Everything here comes from the shared cache: a return visit renders at
+  // once from the last answer while fresh figures load in the background.
+  const now = new Date();
+  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const thisMonth = useCached<Expense[]>(`/api/expenses?year=${now.getFullYear()}&month=${now.getMonth() + 1}`);
+  const lastMonth = useCached<Expense[]>(`/api/expenses?year=${prevDate.getFullYear()}&month=${prevDate.getMonth() + 1}`);
+  const peopleQ = useCached<{ balance: number }[]>("/api/people");
+  const subsQ = useCached<{ amount: number; active: number | boolean; paid_this_period: boolean }[]>("/api/subscriptions");
   const [draft, setDraft] = useState("");
-  const [loadError, setLoadError] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const loadError = thisMonth.failedStatus !== undefined && !thisMonth.data;
+  // This month and last month cover every range shown, including a week
+  // that started last month and the "vs last month" comparison.
+  const expenses = useMemo(
+    () => (thisMonth.data ? [...thisMonth.data, ...(lastMonth.data ?? [])] : loadError ? [] : null),
+    [thisMonth.data, lastMonth.data, loadError]
+  );
+  const owed = useMemo(() => {
+    if (!peopleQ.data) return null;
+    const owing = peopleQ.data.filter((p) => p.balance > 0.005);
+    return { total: owing.reduce((s, p) => s + p.balance, 0), people: owing.length };
+  }, [peopleQ.data]);
+  const subs = useMemo(() => {
+    if (!subsQ.data) return null;
+    const unpaid = subsQ.data.filter((s) => s.active && !s.paid_this_period);
+    return { due: unpaid.reduce((s, x) => s + x.amount, 0), count: unpaid.length };
+  }, [subsQ.data]);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem("khata-home-period");
       if (saved === "today" || saved === "week" || saved === "month") setPeriod(saved);
     } catch {}
-
-    // This month and last month cover every range shown, including a week
-    // that started last month and the "vs last month" comparison.
-    const now = new Date();
-    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const month = (d: Date) =>
-      fetch(`/api/expenses?year=${d.getFullYear()}&month=${d.getMonth() + 1}`).then((r) => {
-        if (!r.ok) throw new Error(String(r.status));
-        return r.json() as Promise<Expense[]>;
-      });
-    Promise.all([month(now), month(prev)])
-      .then(([a, b]) => setExpenses([...a, ...b]))
-      .catch(() => {
-        setExpenses([]);
-        setLoadError(true);
-      });
-
-    fetch("/api/people")
-      .then((r) => r.json())
-      .then((people: { balance: number }[]) => {
-        const owing = people.filter((p) => p.balance > 0.005);
-        setOwed({ total: owing.reduce((s, p) => s + p.balance, 0), people: owing.length });
-      })
-      .catch(() => setOwed({ total: 0, people: 0 }));
-
-    fetch("/api/subscriptions")
-      .then((r) => r.json())
-      .then((list: { amount: number; active: number | boolean; paid_this_period: boolean }[]) => {
-        const unpaid = list.filter((s) => s.active && !s.paid_this_period);
-        setSubs({ due: unpaid.reduce((s, x) => s + x.amount, 0), count: unpaid.length });
-      })
-      .catch(() => setSubs({ due: 0, count: 0 }));
   }, []);
 
   const choose = (p: Period) => {
@@ -315,7 +305,7 @@ export default function Home() {
           ))
         ) : loadError ? (
           <div className="card p-6 text-center text-[14px]" style={{ color: "var(--bad)" }} role="alert">
-            Couldn&apos;t load your expenses. Pull to refresh or try again shortly.
+            Couldn&apos;t load your expenses. Check your connection and try again.
           </div>
         ) : view.items.length === 0 ? (
           <div className="card p-6 text-center">

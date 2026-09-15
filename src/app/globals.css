@@ -287,17 +287,6 @@ body {
   max-inline-size: 100%;
 }
 
-.modal-backdrop {
-  padding-top: max(1rem, env(safe-area-inset-top));
-  padding-right: max(1rem, env(safe-area-inset-right));
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
-  padding-left: max(1rem, env(safe-area-inset-left));
-}
-
-.modal-panel {
-  max-height: calc(100dvh - 2rem);
-}
-
 .form-actions {
   display: flex;
   flex-wrap: wrap;
@@ -389,13 +378,6 @@ body {
   box-shadow: 0 4px 14px rgba(109, 40, 217, 0.3);
 }
 
-/* round icon button — nav arrows etc */
-.btn-nav {
-  background: var(--surface-2);
-  border: 1px solid var(--hairline);
-  color: var(--ink-2);
-}
-
 /* ---- section heading row ---- */
 .section-head {
   display: flex;
@@ -485,28 +467,12 @@ body {
 
 /* ---- wordmark ---- */
 .wordmark {
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: -0.02em;
   background: linear-gradient(100deg, var(--accent) 0%, var(--accent-2) 55%, var(--good-2) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-}
-
-/* kept for pages that still reference it; the logo no longer bobs */
-.logo-float {
-  animation: none;
-}
-
-/* ---- hero number ---- */
-.hero-num {
-  color: var(--ink);
-}
-
-/* ---- avatar ---- */
-.avatar-liquid {
-  position: relative;
-  border-radius: 50%;
 }
 
 .tabular {
@@ -552,32 +518,6 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-/* ---- legacy landing pieces (still used by a few pages) ---- */
-.hero-badge {
-  width: 76px;
-  height: 76px;
-  border-radius: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2) 55%, var(--good-2));
-}
-
-.hero-card {
-  display: block;
-  text-decoration: none;
-  color: inherit;
-}
-
-.hero-card-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .nav-scroll {

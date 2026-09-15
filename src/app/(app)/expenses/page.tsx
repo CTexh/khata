@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Expense } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
 import { categoryEmoji, categoryVars } from "@/lib/category-style";
+import { Sheet, SheetRow } from "@/components/Sheet";
+import { fetchKey, invalidate, peek, useCached } from "@/lib/swr";
 
 function toLocalDateTime(iso: string): string {
   if (!iso) return "";
@@ -35,8 +37,10 @@ function publishCategories(next: UserCategory[]) {
 
 function loadCategories(): Promise<UserCategory[]> {
   if (categoryCache) return Promise.resolve(categoryCache);
-  categoryInflight ??= fetch("/api/categories")
-    .then((r) => (r.ok ? r.json() : { categories: [] }))
+  // Show the last known list straight away; the fetch below refreshes it.
+  const warm = peek<{ categories?: UserCategory[] }>("/api/categories");
+  if (warm?.categories) publishCategories(warm.categories);
+  categoryInflight ??= fetchKey<{ categories?: UserCategory[] }>("/api/categories")
     .then((d) => {
       const list: UserCategory[] = d.categories ?? [];
       publishCategories(list);
@@ -157,37 +161,9 @@ function ManageCategoriesModal({
   };
 
   return (
-    <div
-      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-hidden backdrop-blur-sm"
-      style={{ background: "rgba(0,0,0,0.75)", overscrollBehavior: "none" }}
-      onClick={onClose}
-    >
-      <div
-        className="modal-panel card rise w-full max-w-lg overflow-y-auto"
-        style={{ color: "var(--ink)", overscrollBehavior: "contain" }}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="cats-title"
-      >
-        <div
-          className="flex items-center justify-between p-5 border-b sticky top-0 z-10"
-          style={{ borderColor: "var(--hairline)", background: "var(--surface)" }}
-        >
-          <h2 id="cats-title" className="text-[16px] font-semibold">
-            Manage categories
-          </h2>
-          <button
-            onClick={onClose}
-            type="button"
-            aria-label="Close"
-            className="inline-flex h-10 w-10 items-center justify-center text-[20px] opacity-50 hover:opacity-100 transition"
-          >
-            ✕
-          </button>
-        </div>
+    <Sheet title="Manage categories" onClose={onClose}>
 
-        <form onSubmit={add} className="p-5 flex flex-col gap-2 border-b" style={{ borderColor: "var(--hairline)" }}>
+        <form onSubmit={add} className="card p-4 flex flex-col gap-2">
           <p className="text-[13px] font-semibold">New category</p>
           <input
             className="field"
@@ -215,12 +191,12 @@ function ManageCategoriesModal({
         </form>
 
         {error && (
-          <p className="text-[13px] px-5 pt-3" style={{ color: "var(--bad)" }} role="alert">
+          <p className="text-[13px] px-1" style={{ color: "var(--bad)" }} role="alert">
             {error}
           </p>
         )}
 
-        <div className="px-5 pt-4">
+        <div className="px-1">
           {confirmReset ? (
             <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--surface-2)" }}>
               <p className="text-[13px]">
@@ -260,9 +236,9 @@ function ManageCategoriesModal({
           )}
         </div>
 
-        <ul className="p-5 flex flex-col gap-2">
+        <ul className="flex flex-col gap-2">
           {categories.map((c) => (
-            <li key={c.name} className="rounded-xl px-3 py-2.5" style={{ background: "var(--surface-2)" }}>
+            <li key={c.name} className="card px-3 py-2.5">
               {editing === c.name ? (
                 <div className="flex flex-col gap-2">
                   <input
@@ -359,12 +335,11 @@ function ManageCategoriesModal({
             </li>
           ))}
         </ul>
-      </div>
-    </div>
+    </Sheet>
   );
 }
 
-/* ---------- detail modal ---------- */
+/* ---------- expense details ---------- */
 
 function DetailModal({
   expense,
@@ -386,60 +361,7 @@ function DetailModal({
   const [date, setDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-
-  // Lock background scroll while the modal is open
-  useEffect(() => {
-    const body = document.body;
-    const scrollY = window.scrollY;
-    const previous = {
-      overflow: body.style.overflow,
-      position: body.style.position,
-      top: body.style.top,
-      width: body.style.width,
-    };
-
-    body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.width = "100%";
-
-    return () => {
-      body.style.overflow = previous.overflow;
-      body.style.position = previous.position;
-      body.style.top = previous.top;
-      body.style.width = previous.width;
-      window.scrollTo(0, scrollY);
-    };
-  }, []);
-
-  useEffect(() => {
-    closeButtonRef.current?.focus({ preventScroll: true });
-  }, []);
-
-  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-
-    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
-    );
-    if (!focusable?.length) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const startEdit = () => {
     setAmount(String(expense.amount));
@@ -455,16 +377,13 @@ function DetailModal({
     e.preventDefault();
     setBusy(true);
     setError("");
+    // Keep the time of day when only the date is unchanged.
+    const original = expense.expense_datetime || `${expense.expense_date}T00:00:00Z`;
+    const datetime = original.slice(0, 10) === date ? original : `${date}T00:00:00Z`;
     const res = await fetch(`/api/expenses/${expense.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        amount: Number(amount),
-        note,
-        expense_datetime: `${date}T00:00:00Z`,
-        vendor,
-        category,
-      }),
+      body: JSON.stringify({ amount: Number(amount), note, expense_datetime: datetime, vendor, category }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -472,216 +391,122 @@ function DetailModal({
       setError(j.error ?? "Something went wrong");
       return;
     }
-    onSaved({
-      ...expense,
-      amount: Number(amount),
-      note,
-      vendor,
-      category,
-      expense_date: date,
-      expense_datetime: `${date}T00:00:00Z`,
-    });
+    onSaved({ ...expense, amount: Number(amount), note, vendor, category, expense_date: date, expense_datetime: datetime });
     setMode("view");
   };
 
   const handleDelete = async () => {
-    if (!confirm("Delete this expense? This can't be undone.")) return;
-    await fetch(`/api/expenses/${expense.id}`, { method: "DELETE" });
+    setBusy(true);
+    const res = await fetch(`/api/expenses/${expense.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (!res.ok) {
+      setError("Couldn't delete that expense. Please try again.");
+      setConfirmDelete(false);
+      return;
+    }
     onDelete();
   };
 
-  const dt = expense.expense_datetime ? new Date(expense.expense_datetime) : new Date(expense.expense_date);
-  const categoryColor = categoryVars(expense.category);
+  const color = categoryVars(expense.category);
+  const note_ = (expense.note ?? "").replace(/^(WhatsApp|Assistant):\s*/, "");
 
   return (
-    <div
-      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-hidden backdrop-blur-sm"
-      style={{ background: "rgba(0,0,0,0.75)", overscrollBehavior: "none" }}
-      onClick={onClose}
-    >
-      <div
-        ref={dialogRef}
-        className="modal-panel card rise w-full max-w-xl overflow-y-auto"
-        style={{ color: "var(--ink)", overscrollBehavior: "contain" }}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleDialogKeyDown}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="expense-dialog-title"
-      >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between p-5 border-b sticky top-0 z-10"
-          style={{ borderColor: "var(--hairline)", background: "var(--surface)" }}
-        >
-          <h2 id="expense-dialog-title" className="text-[16px] font-semibold" style={{ color: "var(--ink)" }}>
-            {mode === "edit" ? "Edit Expense" : "Expense Details"}
-          </h2>
-          <button
-            ref={closeButtonRef}
-            onClick={onClose}
-            type="button"
-            aria-label="Close expense dialog"
-            className="inline-flex h-12 w-12 items-center justify-center text-[20px] opacity-50 hover:opacity-100 transition"
-            style={{ color: "var(--ink-2)" }}
-          >
-            ✕
-          </button>
-        </div>
+    <Sheet title={mode === "edit" ? "Edit expense" : "Expense"} onClose={onClose}>
+      {mode === "view" ? (
+        <>
+          <div className="card p-5 flex flex-col items-center text-center">
+            <span className="icon-tile !w-16 !h-16 !text-[30px] !rounded-[22px]" style={{ background: color.bg }} aria-hidden>
+              {categoryEmoji(expense.category)}
+            </span>
+            <p className="text-[16px] font-bold mt-3 max-w-full truncate">{expense.vendor || note_ || "Expense"}</p>
+            <p className="text-[36px] font-extrabold tabular leading-tight">{fmtRs(expense.amount)}</p>
+            <span className="chip mt-1" style={{ background: color.bg, color: color.fg }}>
+              {expense.category || "Uncategorised"}
+            </span>
+          </div>
 
-        {mode === "view" ? (
-          <>
-            {/* Content */}
-            <div className="p-5 space-y-3">
-              {/* Title and Amount row */}
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[14px] font-semibold flex-1 min-w-0 truncate" style={{ color: "var(--ink)" }}>{expense.vendor || "Expense"}</p>
-                <p className="text-[18px] font-bold tabular shrink-0" style={{ color: "var(--ink)" }}>{fmtRs(expense.amount)}</p>
-              </div>
-
-              {/* Category Badge */}
-              {expense.category && (
-                <div>
-                  <div
-                    className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold"
-                    style={{
-                      background: categoryColor.bg,
-                      color: categoryColor.fg,
-                    }}
-                  >
-                    {expense.category}
-                  </div>
-                </div>
-              )}
-
-              {/* Divider */}
-              <div style={{ background: "var(--hairline)", height: "1px" }} />
-
-              {/* Details section */}
-              {(expense.note) && (
-                <div>
-                  <p className="text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
-                    Note
-                  </p>
-                  <p className="text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>{expense.note}</p>
-                </div>
-              )}
-
-              <div>
-                <p className="text-[12px] font-medium mb-1" style={{ color: "var(--muted)" }}>
-                  Date
-                </p>
-                <p className="text-[13px]" style={{ color: "var(--ink-2)" }}>
-                  {dt.toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </p>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="form-actions p-5 border-t" style={{ borderColor: "var(--hairline)" }}>
-              <button className="btn btn-ghost !text-[13px]" onClick={onClose}>
-                Close
-              </button>
-              <button className="btn btn-ghost !text-[13px]" onClick={startEdit}>
-                Edit
-              </button>
-              <button className="btn btn-danger !text-[13px]" onClick={handleDelete}>
-                Delete
-              </button>
-            </div>
-          </>
-        ) : (
-          <form onSubmit={handleSave}>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
-                  Amount
-                </label>
-                <input
-                  className="field"
-                  aria-label="Amount"
-                  type="number"
-                  inputMode="decimal"
-                  min="0.01"
-                  step="any"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
-                  Vendor/Merchant
-                </label>
-                <input
-                  className="field"
-                  aria-label="Vendor or merchant"
-                  placeholder="Where did you spend? (optional)"
-                  value={vendor}
-                  onChange={(e) => setVendor(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
-                  Category
-                </label>
-                <CategorySelect
-                  ariaLabel="Category"
-                  value={category}
-                  categories={categories}
-                  onChange={setCategory}
-                />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
+          <div className="card px-4 py-1">
+            <SheetRow label="Date">{fmtDateLabel(expense.expense_date)}</SheetRow>
+            {expense.vendor && <SheetRow label="Paid to">{expense.vendor}</SheetRow>}
+            {note_ && (
+              <div className="py-3">
+                <p className="text-[14px]" style={{ color: "var(--muted)" }}>
                   Note
-                </label>
-                <input
-                  className="field"
-                  aria-label="Note"
-                  placeholder="What was it for? (optional)"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                />
-              </div>
-              <div className="min-w-0">
-                <label className="block text-[12px] font-medium mb-1.5" style={{ color: "var(--muted)" }}>
-                  Date
-                </label>
-                <input
-                  className="field block min-w-0 max-w-full"
-                  aria-label="Date"
-                  style={{ inlineSize: "100%", minInlineSize: 0, maxInlineSize: "100%" }}
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  required
-                />
-              </div>
-              {error && (
-                <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
-                  {error}
                 </p>
-              )}
-            </div>
+                <p className="text-[15px] mt-1 break-words">{note_}</p>
+              </div>
+            )}
+          </div>
 
-            {/* Footer */}
-            <div className="form-actions p-5 border-t" style={{ borderColor: "var(--hairline)" }}>
-              <button type="button" className="btn btn-ghost !text-[13px]" onClick={() => setMode("view")}>
-                Cancel
-              </button>
-              <button className="btn btn-primary !text-[13px]" disabled={busy}>
-                {busy ? "Saving…" : "Save changes"}
-              </button>
+          {error && (
+            <p className="text-[13px] text-center" style={{ color: "var(--bad)" }} role="alert">
+              {error}
+            </p>
+          )}
+
+          {confirmDelete ? (
+            <div className="card p-4 flex flex-col gap-3">
+              <p className="text-[14px] font-semibold text-center" style={{ color: "var(--bad)" }}>
+                Delete this expense? This can&apos;t be undone.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-danger" disabled={busy} onClick={handleDelete}>
+                  {busy ? "Deleting…" : "Delete"}
+                </button>
+              </div>
             </div>
-          </form>
-        )}
-      </div>
-    </div>
+          ) : (
+            <>
+              <button type="button" className="btn btn-primary w-full" onClick={startEdit}>
+                Edit expense
+              </button>
+              <button type="button" className="min-h-12 text-[14px] font-bold" style={{ color: "var(--bad)" }} onClick={() => setConfirmDelete(true)}>
+                Delete expense
+              </button>
+            </>
+          )}
+        </>
+      ) : (
+        <form onSubmit={handleSave} className="card p-4 flex flex-col gap-4">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Amount (Rs)</span>
+            <input className="field tabular" type="number" inputMode="decimal" min="0.01" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Paid to</span>
+            <input className="field" placeholder="Shop or person (optional)" value={vendor} onChange={(e) => setVendor(e.target.value)} />
+          </label>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Category</span>
+            <CategorySelect ariaLabel="Category" value={category} categories={categories} onChange={setCategory} />
+          </div>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Note</span>
+            <input className="field" placeholder="What was it for? (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5 min-w-0">
+            <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Date</span>
+            <input className="field" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </label>
+          {error && (
+            <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
+              {error}
+            </p>
+          )}
+          <div className="form-actions">
+            <button type="button" className="btn btn-ghost" onClick={() => setMode("view")}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" disabled={busy}>
+              {busy ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </form>
+      )}
+    </Sheet>
   );
 }
 
@@ -776,8 +601,7 @@ function ExpenseForm({
   };
 
   return (
-    <form onSubmit={submit} className="card p-5 sm:p-6 rise flex flex-col gap-4">
-      <p className="font-semibold">{editing ? "Edit expense" : "New expense"}</p>
+    <form onSubmit={submit} className="card p-4 flex flex-col gap-4">
       <div className="relative">
         <span
           className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold pointer-events-none"
@@ -934,37 +758,9 @@ function RecategorizeModal({ onClose, onApplied }: { onClose: () => void; onAppl
   };
 
   return (
-    <div
-      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-hidden backdrop-blur-sm"
-      style={{ background: "rgba(0,0,0,0.75)", overscrollBehavior: "none" }}
-      onClick={onClose}
-    >
-      <div
-        className="modal-panel card rise w-full max-w-xl overflow-y-auto"
-        style={{ color: "var(--ink)", overscrollBehavior: "contain" }}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="recat-title"
-      >
-        <div
-          className="flex items-center justify-between p-5 border-b sticky top-0 z-10"
-          style={{ borderColor: "var(--hairline)", background: "var(--surface)" }}
-        >
-          <h2 id="recat-title" className="text-[16px] font-semibold">
-            Re-categorise expenses
-          </h2>
-          <button
-            onClick={onClose}
-            type="button"
-            aria-label="Close"
-            className="inline-flex h-10 w-10 items-center justify-center text-[20px] opacity-50 hover:opacity-100 transition"
-          >
-            ✕
-          </button>
-        </div>
+    <Sheet title="Re-categorise expenses" onClose={onClose}>
 
-        <div className="p-5 flex flex-col gap-3">
+        <div className="card p-4 flex flex-col gap-3">
           {loading && (
             <p className="text-[13px]" style={{ color: "var(--muted)" }} role="status">
               Working out what would change…
@@ -1043,10 +839,7 @@ function RecategorizeModal({ onClose, onApplied }: { onClose: () => void; onAppl
           )}
         </div>
 
-        <div
-          className="form-actions p-5 border-t"
-          style={{ borderColor: "var(--hairline)" }}
-        >
+        <div className="form-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
@@ -1059,8 +852,7 @@ function RecategorizeModal({ onClose, onApplied }: { onClose: () => void; onAppl
             {applying ? "Applying…" : data ? `Apply ${data.total} change${data.total === 1 ? "" : "s"}` : "Apply"}
           </button>
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }
 
@@ -1309,12 +1101,10 @@ function dayHeading(ymd: string): string {
 // The single expenses view. A compact summary, a row of category chips that
 // filter the list, a short breakdown, and the expenses grouped by day.
 function ExpensesView({
-  refreshKey,
   onViewDetail,
   onRecategorize,
   onAdd,
 }: {
-  refreshKey: number;
   onViewDetail: (e: Expense) => void;
   onRecategorize: () => void;
   onAdd: () => void;
@@ -1323,14 +1113,9 @@ function ExpensesView({
   const [scope, setScope] = useState<"month" | "year">("month");
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [data, setData] = useState<{ total: number; categories: CategoryPoint[] } | null>(null);
-  const [previousTotal, setPreviousTotal] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [search, setSearch] = useState("");
   const [searching, setSearching] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [refreshing, setRefreshing] = useState(true);
   const { categories, setCategories } = useCategories();
   const [managing, setManaging] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1339,44 +1124,25 @@ function ExpensesView({
   const periodLabel = scope === "month" ? `${MONTH_NAMES[month - 1]} ${year}` : String(year);
   const isCurrent = scope === "month" ? year === now.getFullYear() && month === now.getMonth() + 1 : year === now.getFullYear();
 
-  // Stepping quickly through months used to let an older reply overwrite a
-  // newer one, and a failed request left "Loading…" on screen for good. The
-  // previous period stays visible while the next one loads, so moving between
-  // months no longer blanks the page.
-  useEffect(() => {
-    const ac = new AbortController();
-    setSelected(null);
-    setRefreshing(true);
-    setLoadError("");
-    fetch(`/api/expenses/categories?year=${year}${monthParam}`, { signal: ac.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error("load failed");
-        return r.json();
-      })
-      .then((d) => {
-        setData(d);
-        setRefreshing(false);
-      })
-      .catch(() => {
-        if (ac.signal.aborted) return;
-        setLoadError("Could not load this period. Check your connection and try again.");
-        setRefreshing(false);
-      });
+  // Totals for this period and the one before (for "vs last month"), from the
+  // shared cache. Moving to a period not seen yet keeps the previous figures
+  // on screen, dimmed, until the new ones arrive - the page never blanks.
+  const prevParams =
+    scope === "year" ? `year=${year - 1}` : month === 1 ? `year=${year - 1}&month=12` : `year=${year}&month=${month - 1}`;
+  const totals = useCached<{ total: number; categories: CategoryPoint[] }>(`/api/expenses/categories?year=${year}${monthParam}`);
+  const previous = useCached<{ total: number }>(`/api/expenses/categories?${prevParams}`);
+  const shownTotals = useRef(totals.data);
+  if (totals.data) shownTotals.current = totals.data;
+  const data = totals.data ?? shownTotals.current ?? null;
+  const refreshing = !totals.data;
+  const loadError =
+    totals.failedStatus !== undefined && !totals.data ? "Could not load this period. Check your connection and try again." : "";
+  const previousTotal = previous.data ? Number(previous.data.total) || 0 : null;
 
-    // The period before, for the "vs last month" comparison.
-    const prev =
-      scope === "year"
-        ? `year=${year - 1}`
-        : month === 1
-          ? `year=${year - 1}&month=12`
-          : `year=${year}&month=${month - 1}`;
-    setPreviousTotal(null);
-    fetch(`/api/expenses/categories?${prev}`, { signal: ac.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setPreviousTotal(d ? Number(d.total) || 0 : null))
-      .catch(() => {});
-    return () => ac.abort();
-  }, [year, month, scope, monthParam, refreshKey]);
+  // A different period starts unfiltered.
+  useEffect(() => {
+    setSelected(null);
+  }, [year, month, scope]);
 
   // A whole year of expenses is a wall of rows nobody reads, so over a year
   // the list only appears once a category has been picked - and until then it
@@ -1396,25 +1162,12 @@ function ExpensesView({
     el.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
   }, [selected]);
 
-  useEffect(() => {
-    if (!showHistory) {
-      setExpenses(null);
-      return;
-    }
-    const ac = new AbortController();
-    const categoryParam = selected ? `&category=${encodeURIComponent(selected)}` : "";
-    fetch(`/api/expenses?year=${year}${monthParam}${categoryParam}`, { signal: ac.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error("load failed");
-        return r.json();
-      })
-      .then((rows) => setExpenses(Array.isArray(rows) ? rows : []))
-      .catch(() => {
-        if (ac.signal.aborted) return;
-        setExpenses([]);
-      });
-    return () => ac.abort();
-  }, [showHistory, selected, year, month, scope, monthParam, refreshKey]);
+  const list = useCached<Expense[]>(
+    showHistory
+      ? `/api/expenses?year=${year}${monthParam}${selected ? `&category=${encodeURIComponent(selected)}` : ""}`
+      : null
+  );
+  const expenses = list.data ?? (list.failedStatus !== undefined ? [] : null);
 
   const nav = (dir: -1 | 1) => {
     if (scope === "year") {
@@ -1636,7 +1389,10 @@ function ExpensesView({
         <ManageCategoriesModal
           categories={categories}
           onClose={() => setManaging(false)}
-          onChanged={setCategories}
+          onChanged={(next) => {
+            setCategories(next);
+            invalidate("/api/expenses");
+          }}
         />
       )}
 
@@ -1754,7 +1510,7 @@ function ExpensesView({
                       key={e.id}
                       expense={e}
                       categories={categories}
-                      onAssigned={() => setExpenses((cur) => cur?.filter((r) => r.id !== e.id) ?? null)}
+                      onAssigned={() => invalidate("/api/expenses")}
                     />
                   ) : (
                     <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} />
@@ -1794,31 +1550,32 @@ function ExpensesView({
 export default function ExpensesPage() {
   const [adding, setAdding] = useState(false);
   const [viewingDetail, setViewingDetail] = useState<Expense | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [recategorizing, setRecategorizing] = useState(false);
 
-  const refresh = () => setRefreshKey((k) => k + 1);
-  const add = () => {
-    setAdding(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
+  // Any change refreshes every cached expense figure - this page and Home.
+  const refresh = () => invalidate("/api/expenses");
+  const closeAdd = useCallback(() => setAdding(false), []);
+  const closeDetail = useCallback(() => setViewingDetail(null), []);
+  const closeRecat = useCallback(() => setRecategorizing(false), []);
 
   return (
     <>
       {adding && (
-        <ExpenseForm
-          editing={null}
-          onCancel={() => setAdding(false)}
-          onDone={() => {
-            setAdding(false);
-            refresh();
-          }}
-        />
+        <Sheet title="New expense" onClose={closeAdd}>
+          <ExpenseForm
+            editing={null}
+            onCancel={closeAdd}
+            onDone={() => {
+              setAdding(false);
+              refresh();
+            }}
+          />
+        </Sheet>
       )}
 
       {recategorizing && (
         <RecategorizeModal
-          onClose={() => setRecategorizing(false)}
+          onClose={closeRecat}
           onApplied={() => {
             setRecategorizing(false);
             refresh();
@@ -1829,7 +1586,7 @@ export default function ExpensesPage() {
       {viewingDetail && (
         <DetailModal
           expense={viewingDetail}
-          onClose={() => setViewingDetail(null)}
+          onClose={closeDetail}
           onSaved={(updated) => {
             setViewingDetail(updated);
             refresh();
@@ -1842,10 +1599,9 @@ export default function ExpensesPage() {
       )}
 
       <ExpensesView
-        refreshKey={refreshKey}
         onViewDetail={setViewingDetail}
         onRecategorize={() => setRecategorizing(true)}
-        onAdd={add}
+        onAdd={() => setAdding(true)}
       />
     </>
   );

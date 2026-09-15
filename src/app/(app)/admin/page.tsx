@@ -1,20 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { UserSummary } from "@/lib/db";
 import { Avatar } from "@/components/Avatar";
+import { Sheet } from "@/components/Sheet";
 import { fmtWhen } from "@/lib/format";
-
-function Spinner() {
-  return (
-    <div className="flex justify-center py-16" role="status" aria-label="Loading users">
-      <div
-        className="w-6 h-6 rounded-full border-2 animate-spin"
-        style={{ borderColor: "var(--hairline)", borderTopColor: "var(--accent)" }}
-      />
-    </div>
-  );
-}
+import { useCached } from "@/lib/swr";
 
 /* ---------- create user ---------- */
 
@@ -43,12 +34,12 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
   };
 
   return (
-    <form onSubmit={submit} className="card p-5 rise flex flex-col gap-3">
-      <p className="font-semibold">New user</p>
+    <form onSubmit={submit} className="card p-4 flex flex-col gap-3">
       <input
         className="field"
         aria-label="Username"
         placeholder="Username"
+        autoComplete="off"
         value={username}
         onChange={(e) => setUsername(e.target.value)}
         required
@@ -58,6 +49,7 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
         aria-label="Password"
         placeholder="Password (min 6 characters)"
         type="password"
+        autoComplete="new-password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         required
@@ -71,7 +63,7 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
-        <button className="btn btn-admin" disabled={busy}>
+        <button className="btn btn-primary" disabled={busy}>
           {busy ? "Creating…" : "Create user"}
         </button>
       </div>
@@ -79,203 +71,183 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
   );
 }
 
-/* ---------- reset password ---------- */
+/* ---------- one user ---------- */
 
-function ResetPasswordForm({
-  user,
-  onDone,
-  onCancel,
-}: {
-  user: UserSummary;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
+function UserSheet({ user, onClose, onChanged }: { user: UserSummary; onClose: () => void; onChanged: () => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [message, setMessage] = useState<{ text: string; bad?: boolean } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
+  const savePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    setError("");
+    setMessage(null);
     const res = await fetch(`/api/admin/users/${user.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     });
     setBusy(false);
+    const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+      setMessage({ text: j.error ?? "Couldn't update the password", bad: true });
       return;
     }
-    onDone();
+    setPassword("");
+    setMessage({ text: `Password updated for ${user.username}.` });
   };
 
-  return (
-    <form onSubmit={submit} className="flex flex-col gap-2 mt-3 pt-3 border-t" style={{ borderColor: "var(--hairline)" }}>
-      <input
-        className="field"
-        aria-label={`New password for ${user.username}`}
-        placeholder={`New password for ${user.username}`}
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        required
-      />
-      {error && (
-        <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
-          {error}
-        </p>
-      )}
-      <div className="form-actions">
-        <button type="button" className="btn btn-ghost !py-2 text-[12px]" onClick={onCancel}>
-          Cancel
-        </button>
-        <button className="btn btn-primary !py-2 text-[12px]" disabled={busy}>
-          {busy ? "Saving…" : "💾 Save password"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-/* ---------- user row ---------- */
-
-function UserRow({ user, onChanged }: { user: UserSummary; onChanged: () => void }) {
-  const [resetting, setResetting] = useState(false);
-
   const remove = async () => {
-    if (
-      !confirm(
-        `Delete ${user.username}'s account? This permanently removes their loans and expenses too.`
-      )
-    )
-      return;
+    setBusy(true);
     const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
+    setBusy(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j.error ?? "Couldn't delete that user");
+      setMessage({ text: j.error ?? "Couldn't delete that user", bad: true });
+      setConfirmDelete(false);
       return;
     }
+    onClose();
     onChanged();
   };
 
   return (
-    <li className="p-3 border-b last:border-b-0" style={{ borderColor: "var(--hairline)" }}>
-      <div className="flex flex-wrap items-center gap-3">
-        <Avatar id={user.id} name={user.username} size={40} />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold truncate flex items-center gap-1.5">
-            {user.username}
-            {user.is_admin && (
-              <span
-                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-              >
-                ADMIN
-              </span>
-            )}
-          </p>
-          <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-            Joined {fmtWhen(user.created_at)} · {user.people_count} loan
-            {user.people_count === 1 ? "" : "s"} · {user.expense_count} expense
-            {user.expense_count === 1 ? "" : "s"}
-          </p>
-        </div>
-        {!user.is_admin && (
-          <div className="flex w-full flex-wrap justify-end gap-1.5 sm:w-auto sm:shrink-0">
-            <button
-              onClick={() => setResetting((v) => !v)}
-              className="btn btn-ghost !py-2 !px-3 text-[12px]"
-            >
-              <span>🔑</span> Password
-            </button>
-            <button
-              onClick={remove}
-              className="btn btn-danger !py-2 !px-3 text-[12px]"
-            >
-              <span>🗑</span> Delete
-            </button>
-          </div>
-        )}
+    <Sheet title={user.username} onClose={onClose}>
+      <div className="card p-5 flex flex-col items-center text-center">
+        <Avatar id={user.id} name={user.username} size={64} />
+        <p className="text-[18px] font-extrabold mt-3">{user.username}</p>
+        <p className="text-[13px]" style={{ color: "var(--muted)" }}>
+          Joined {fmtWhen(user.created_at)} · {user.people_count} {user.people_count === 1 ? "loan" : "loans"} ·{" "}
+          {user.expense_count} {user.expense_count === 1 ? "expense" : "expenses"}
+        </p>
       </div>
 
-      {resetting && (
-        <ResetPasswordForm
-          user={user}
-          onCancel={() => setResetting(false)}
-          onDone={() => {
-            setResetting(false);
-            alert(`Password updated for ${user.username}.`);
-          }}
+      <form onSubmit={savePassword} className="card p-4 flex flex-col gap-3">
+        <p className="text-[14px] font-bold">Reset password</p>
+        <input
+          className="field"
+          aria-label={`New password for ${user.username}`}
+          placeholder="New password (min 6 characters)"
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
         />
+        <button className="btn btn-primary" disabled={busy || !password}>
+          {busy ? "Saving…" : "Save password"}
+        </button>
+      </form>
+
+      {message && (
+        <p className="text-[14px] text-center font-semibold" style={{ color: message.bad ? "var(--bad)" : "var(--good)" }} role="status">
+          {message.text}
+        </p>
       )}
-    </li>
+
+      {confirmDelete ? (
+        <div className="card p-4 flex flex-col gap-3">
+          <p className="text-[14px] font-semibold text-center" style={{ color: "var(--bad)" }}>
+            Delete {user.username}? Their loans and expenses are removed too.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-danger" disabled={busy} onClick={remove}>
+              Delete
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="min-h-12 text-[14px] font-bold" style={{ color: "var(--bad)" }} onClick={() => setConfirmDelete(true)}>
+          Delete {user.username}
+        </button>
+      )}
+    </Sheet>
   );
 }
 
 /* ---------- page ---------- */
 
 export default function AdminPage() {
-  const [users, setUsers] = useState<UserSummary[] | null>(null);
-  const [error, setError] = useState("");
+  const { data: users, failedStatus, refresh } = useCached<UserSummary[]>("/api/admin/users");
   const [creating, setCreating] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const close = useCallback(() => setOpenId(null), []);
+  const closeCreate = useCallback(() => setCreating(false), []);
+  const denied = failedStatus === 401 || failedStatus === 403;
+  const open = users?.find((u) => u.id === openId) ?? null;
 
-  const load = useCallback(async () => {
-    const res = await fetch("/api/admin/users");
-    if (!res.ok) {
-      setError("You don't have access to this page.");
-      return;
-    }
-    setUsers(await res.json());
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  if (denied) {
+    return (
+      <div className="card p-6 text-center rise" role="alert">
+        <p style={{ color: "var(--bad)" }}>You don&apos;t have access to this page.</p>
+      </div>
+    );
+  }
 
   return (
     <>
-      <div className="flex items-center justify-end -mt-2">
-        {!error && !creating && (
-          <button className="btn btn-admin" onClick={() => setCreating(true)}>
-            Create user
-          </button>
-        )}
+      <div className="section-head">
+        <h2 className="section-title">
+          {users ? `${users.length} ${users.length === 1 ? "user" : "users"}` : "Users"}
+        </h2>
+        <button type="button" className="tab-fab !w-12 !h-12 !m-0 !shadow-none" aria-label="Create user" onClick={() => setCreating(true)}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
       </div>
 
-      {error && (
-        <div className="card p-6 text-center rise" role="alert">
-          <p style={{ color: "var(--bad)" }}>{error}</p>
+      {!users ? (
+        <div className="list-card" role="status" aria-label="Loading users">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-2 py-3">
+              <span className="skeleton" style={{ width: 40, height: 40 }} />
+              <span className="skeleton" style={{ width: "50%", height: 14 }} />
+            </div>
+          ))}
         </div>
+      ) : (
+        <ul className="list-card rise">
+          {users.map((u) => (
+            <li key={u.id}>
+              <button type="button" className="list-row" onClick={() => !u.is_admin && setOpenId(u.id)} disabled={u.is_admin}>
+                <Avatar id={u.id} name={u.username} size={42} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 text-[16px] font-bold truncate">
+                    {u.username}
+                    {u.is_admin && (
+                      <span className="chip" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
+                        Admin
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-[12px] truncate" style={{ color: "var(--muted)" }}>
+                    Joined {fmtWhen(u.created_at)} · {u.people_count} loans · {u.expense_count} expenses
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {open && <UserSheet user={open} onClose={close} onChanged={refresh} />}
 
       {creating && (
-        <CreateUserForm
-          onCancel={() => setCreating(false)}
-          onDone={() => {
-            setCreating(false);
-            load();
-          }}
-        />
+        <Sheet title="New user" onClose={closeCreate}>
+          <CreateUserForm
+            onCancel={closeCreate}
+            onDone={() => {
+              setCreating(false);
+              refresh();
+            }}
+          />
+        </Sheet>
       )}
-
-      {!error && users === null && <Spinner />}
-
-      {!error && users && (
-        <div className="card p-2 rise">
-          <ul className="flex flex-col">
-            {users.map((u) => (
-              <UserRow key={u.id} user={u} onChanged={load} />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <footer className="text-center text-[12px] py-4" style={{ color: "var(--muted)" }}>
-        {users?.length ?? 0} registered user{users?.length === 1 ? "" : "s"}
-      </footer>
     </>
   );
 }

@@ -12,7 +12,7 @@ export function Avatar({
   const hue = hueFor(id);
   return (
     <div
-      className="avatar-liquid flex items-center justify-center font-bold shrink-0"
+      className="rounded-full flex items-center justify-center font-bold shrink-0"
       style={{
         width: size,
         height: size,

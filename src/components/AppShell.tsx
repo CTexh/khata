@@ -1,29 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar } from "@/components/Avatar";
+import { Sheet } from "@/components/Sheet";
+import { clearCache, prefetch, useCached } from "@/lib/swr";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
 
 type CurrentUser = { id: string; username: string; name?: string | null; isAdmin: boolean };
 
-function EditProfileModal({ onClose }: { onClose: () => void }) {
-  const [loading, setLoading] = useState(true);
-  const [name, setName] = useState("");
+function EditProfileModal({ initialName, onClose, onSaved }: { initialName: string; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(initialName);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
-
-  useEffect(() => {
-    fetch("/api/profile")
-      .then(async (r): Promise<{ name?: string }> => (r.ok ? r.json() : {}))
-      .then((d) => {
-        setName(d.name ?? "");
-      })
-      // A failed load must still clear the spinner, or the form never appears.
-      .finally(() => setLoading(false));
-  }, []);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,77 +26,38 @@ function EditProfileModal({ onClose }: { onClose: () => void }) {
       body: JSON.stringify({ name }),
     });
     setSaving(false);
-    setMsg(res.ok ? { text: "Saved." } : { text: "Couldn't save — try again.", bad: true });
+    if (!res.ok) {
+      setMsg({ text: "Couldn't save — try again.", bad: true });
+      return;
+    }
+    onSaved();
+    onClose();
   };
 
   return (
-    <div
-      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-hidden"
-      style={{ background: "rgba(0,0,0,0.6)", overscrollBehavior: "none" }}
-      onClick={onClose}
-    >
-      <div
-        className="modal-panel card rise w-full max-w-sm overflow-y-auto"
-        style={{ color: "var(--ink)", overscrollBehavior: "contain" }}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-profile-title"
-      >
-        <div
-          className="flex items-center justify-between p-5 border-b"
-          style={{ borderColor: "var(--hairline)" }}
-        >
-          <h2 id="edit-profile-title" className="text-[16px] font-bold">
-            Edit Profile
-          </h2>
-          <button
-            onClick={onClose}
-            type="button"
-            aria-label="Close"
-            className="inline-flex h-10 w-10 items-center justify-center text-[20px] opacity-50 hover:opacity-100 transition"
-          >
-            ✕
+    <Sheet title="Edit profile" onClose={onClose}>
+      <form onSubmit={save} className="card p-4 flex flex-col gap-3">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+            Name
+          </span>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" />
+        </label>
+        {msg && (
+          <p className="text-[13px]" style={{ color: msg.bad ? "var(--bad)" : "var(--good)" }} role="status">
+            {msg.text}
+          </p>
+        )}
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={saving}>
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
-
-        {loading ? (
-          <div className="p-5 text-[13px]" style={{ color: "var(--muted)" }}>
-            Loading…
-          </div>
-        ) : (
-          <form onSubmit={save} className="p-5 flex flex-col gap-3">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="profile-name" className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
-                Name
-              </label>
-              <input
-                id="profile-name"
-                className="field"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-              />
-            </div>
-
-            {msg && (
-              <p className="text-[13px]" style={{ color: msg.bad ? "var(--bad)" : "var(--good)" }} role="status">
-                {msg.text}
-              </p>
-            )}
-
-            <div className="form-actions">
-              <button type="button" className="btn btn-ghost" onClick={onClose}>
-                Close
-              </button>
-              <button className="btn btn-primary" disabled={saving}>
-                {saving ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+      </form>
+    </Sheet>
   );
 }
 
@@ -134,26 +86,40 @@ const TABS = [
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<CurrentUser | null>(null);
+  const { data: me, refresh: refreshMe } = useCached<{ user: CurrentUser | null }>("/api/auth/me");
+  const user = me?.user ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const pathname = usePathname();
 
+  // Warm the cache for every tab as soon as the app opens, so switching
+  // between Home, Khata, Udhar and Subs never waits on the database.
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : { user: null }))
-      .then((d) => setUser(d.user))
-      .catch(() => setUser(null));
-  }, []);
+    if (!user) return;
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const month = (d: Date) => `year=${d.getFullYear()}&month=${d.getMonth() + 1}`;
+    prefetch([
+      "/api/people",
+      "/api/subscriptions",
+      `/api/expenses?${month(now)}`,
+      `/api/expenses?${month(prev)}`,
+      `/api/expenses/categories?${month(now)}`,
+      `/api/expenses/categories?${month(prev)}`,
+      "/api/categories",
+    ]);
+  }, [user]);
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
+    clearCache();
     // A full page load rather than a client-side push, so nothing the previous
     // account cached in module state (the shared category list, for one) can
     // outlive the session and be shown to whoever signs in next.
     window.location.href = "/login";
   };
 
+  const closeProfile = useCallback(() => setProfileOpen(false), []);
   const home = pathname === "/";
   const displayName = user?.name || user?.username;
 
@@ -299,7 +265,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       </nav>
 
-      {profileOpen && <EditProfileModal onClose={() => setProfileOpen(false)} />}
+      {profileOpen && (
+        <EditProfileModal initialName={user?.name ?? ""} onClose={closeProfile} onSaved={() => refreshMe()} />
+      )}
     </>
   );
 }

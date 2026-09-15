@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { splitBold } from "@/lib/chat-format";
 import { encodeWav } from "@/lib/wav";
 import { ASSISTANT_DRAFT_KEY } from "@/lib/assistant-draft";
+import { invalidate } from "@/lib/swr";
 import Link from "next/link";
 import { ArrowUpIcon, CameraIcon, MicIcon, SparkleIcon } from "@/components/icons";
 
@@ -345,6 +346,8 @@ export default function AssistantPage() {
     if (voice) form.set("audio", voice.audio, "voice.wav");
 
     finish(pendingId, await deliver(form, requestId));
+    // The assistant may have added or changed anything: refresh cached figures.
+    invalidate("/api/");
     setBusy(false);
     inputRef.current?.focus();
   };

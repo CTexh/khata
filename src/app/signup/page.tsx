@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
+import { clearCache } from "@/lib/swr";
 
 export default function SignupPage() {
   const [name, setName] = useState("");
@@ -33,6 +34,8 @@ export default function SignupPage() {
       setError(j.error ?? "Something went wrong");
       return;
     }
+    // A different account may have used this browser: drop its cached data.
+    clearCache();
     router.push("/");
     router.refresh();
   };
@@ -89,7 +92,7 @@ export default function SignupPage() {
           </p>
         )}
         <button className="btn btn-primary mt-1" disabled={busy}>
-          {busy ? "Creating…" : "✨ Create account"}
+          {busy ? "Creating…" : "Create account"}
         </button>
         <p className="text-[13px] text-center mt-1" style={{ color: "var(--muted)" }}>
           Already have an account?{" "}
