@@ -1069,9 +1069,11 @@ function RecategorizeModal({ onClose, onApplied }: { onClose: () => void; onAppl
 function ExpenseRow({
   expense,
   onView,
+  hideDate = false,
 }: {
   expense: Expense;
   onView: () => void;
+  hideDate?: boolean;
 }) {
   const categoryColor = categoryVars(expense.category);
 
@@ -1100,8 +1102,7 @@ function ExpenseRow({
             ) : (
               "Uncategorised"
             )}
-            {" · "}
-            {fmtDateLabel(expense.expense_date)}
+            {hideDate ? (note && expense.vendor ? ` · ${note}` : "") : ` · ${fmtDateLabel(expense.expense_date)}`}
           </span>
         </span>
         <span className="tabular text-[15px] font-extrabold text-right shrink-0" style={{ color: "var(--ink)" }}>
@@ -1194,10 +1195,24 @@ function ReviewRow({
   );
 }
 
-// Horizontal bars: category names are long ("Bills & Utilities") and this is
-// read on a phone, so vertical columns would clip the labels. Each bar is a
-// button that drills into the expenses behind it.
-function CategoryChart({
+// Where the money went, at a glance: one bar split by category, then only
+// the biggest few with their amounts. The full list is one tap away instead of
+// every category being thrown at the reader up front.
+const BREAKDOWN_TOP = 4;
+
+function ShareBar({ points }: { points: CategoryPoint[] }) {
+  const grand = points.reduce((s, p) => s + p.total, 0);
+  if (grand <= 0) return null;
+  return (
+    <div className="mt-5 flex h-2.5 w-full overflow-hidden rounded-full gap-[2px]" style={{ background: "rgba(255,255,255,0.12)" }} aria-hidden>
+      {points.map((p) => (
+        <span key={p.category} style={{ width: `${(p.total / grand) * 100}%`, background: categoryVars(p.category).fg, minWidth: 3 }} />
+      ))}
+    </div>
+  );
+}
+
+function CategoryBreakdown({
   points,
   selected,
   onSelect,
@@ -1206,81 +1221,123 @@ function CategoryChart({
   selected: string | null;
   onSelect: (category: string) => void;
 }) {
-  const max = Math.max(...points.map((p) => p.total), 1);
+  const [all, setAll] = useState(false);
   const grand = points.reduce((s, p) => s + p.total, 0);
+  const shown = all ? points : points.slice(0, BREAKDOWN_TOP);
 
   return (
-    <div className="flex flex-col gap-2.5 mt-4">
-      {points.map((p) => {
-        const color = categoryVars(p.category);
-        const isSelected = selected === p.category;
-        const share = grand > 0 ? (p.total / grand) * 100 : 0;
-        return (
-          <button
-            key={p.category}
-            type="button"
-            onClick={() => onSelect(p.category)}
-            aria-pressed={isSelected}
-            className="w-full text-left rounded-xl px-3 py-2.5 transition"
-            style={{
-              background: isSelected ? "var(--surface-2)" : "transparent",
-              outline: isSelected ? "1px solid var(--ring)" : "none",
-            }}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[13px] font-semibold truncate">{p.category}</span>
-              <span className="text-[13px] font-semibold tabular shrink-0">{fmtRs(p.total)}</span>
-            </div>
-            <div
-              className="mt-1.5 h-2.5 w-full rounded-full overflow-hidden"
-              style={{ background: "var(--hairline)" }}
-            >
-              <div
-                className="h-full rounded-full transition-[width] duration-500"
-                style={{
-                  width: `${Math.max((p.total / max) * 100, 2)}%`,
-                  background: color.fg,
-                }}
-              />
-            </div>
-            <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
-              {p.count} expense{p.count === 1 ? "" : "s"} · {share.toFixed(share < 10 ? 1 : 0)}%
-            </p>
-          </button>
-        );
-      })}
-    </div>
+    <section className="card p-4 sm:p-5 rise" aria-labelledby="breakdown-title">
+      <div className="section-head mb-2 px-1">
+        <h2 id="breakdown-title" className="text-[16px] font-extrabold">
+          Where it went
+        </h2>
+        <span className="text-[12px]" style={{ color: "var(--muted)" }}>
+          {points.length} {points.length === 1 ? "category" : "categories"}
+        </span>
+      </div>
+      <ul>
+        {shown.map((p) => {
+          const color = categoryVars(p.category);
+          const share = grand > 0 ? (p.total / grand) * 100 : 0;
+          const on = selected === p.category;
+          return (
+            <li key={p.category}>
+              <button
+                type="button"
+                onClick={() => onSelect(p.category)}
+                aria-pressed={on}
+                className="w-full flex items-center gap-3 rounded-2xl px-1 py-2 text-left transition hover:bg-[var(--surface-2)]"
+                style={on ? { background: "var(--surface-2)" } : undefined}
+              >
+                <span className="icon-tile !w-11 !h-11 !text-[20px]" style={{ background: color.bg }} aria-hidden>
+                  {categoryEmoji(p.category)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline justify-between gap-3">
+                    <span className="text-[15px] font-bold truncate">{p.category}</span>
+                    <span className="text-[15px] font-extrabold tabular shrink-0">{fmtRs(p.total)}</span>
+                  </span>
+                  <span className="mt-1.5 flex items-center gap-2">
+                    <span className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ background: "var(--hairline)" }}>
+                      <span
+                        className="block h-full rounded-full transition-[width] duration-500"
+                        style={{ width: `${Math.max(share, 2)}%`, background: color.fg }}
+                      />
+                    </span>
+                    <span className="text-[11px] font-semibold tabular w-9 text-right" style={{ color: "var(--muted)" }}>
+                      {share.toFixed(share < 10 ? 1 : 0)}%
+                    </span>
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {points.length > BREAKDOWN_TOP && (
+        <button
+          type="button"
+          className="w-full min-h-11 mt-1 rounded-2xl text-[14px] font-bold"
+          style={{ color: "var(--accent)" }}
+          onClick={() => setAll((v) => !v)}
+          aria-expanded={all}
+        >
+          {all ? "Show less" : `Show all ${points.length} categories`}
+        </button>
+      )}
+    </section>
   );
 }
 
-// The single expenses view. The breakdown and the history were two pages
-// showing the same period over the same data, so the chart is now the filter
-// for the list beneath it: picking a category narrows the history in place
-// rather than navigating somewhere else.
+// "Today", "Yesterday", or the date - for the day headings in the list.
+function dayHeading(ymd: string): string {
+  const d = new Date();
+  const local = (x: Date) =>
+    `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+  if (ymd === local(d)) return "Today";
+  d.setDate(d.getDate() - 1);
+  if (ymd === local(d)) return "Yesterday";
+  const [y, m, day] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString("en-PK", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: y === new Date().getFullYear() ? undefined : "numeric",
+  });
+}
+
+// The single expenses view. A compact summary, a row of category chips that
+// filter the list, a short breakdown, and the expenses grouped by day.
 function ExpensesView({
   refreshKey,
   onViewDetail,
   onRecategorize,
+  onAdd,
 }: {
   refreshKey: number;
   onViewDetail: (e: Expense) => void;
   onRecategorize: () => void;
+  onAdd: () => void;
 }) {
   const now = new Date();
   const [scope, setScope] = useState<"month" | "year">("month");
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [data, setData] = useState<{ total: number; categories: CategoryPoint[] } | null>(null);
+  const [previousTotal, setPreviousTotal] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [search, setSearch] = useState("");
+  const [searching, setSearching] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [refreshing, setRefreshing] = useState(true);
   const { categories, setCategories } = useCategories();
   const [managing, setManaging] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const monthParam = scope === "month" ? `&month=${month}` : "";
   const periodLabel = scope === "month" ? `${MONTH_NAMES[month - 1]} ${year}` : String(year);
+  const isCurrent = scope === "month" ? year === now.getFullYear() && month === now.getMonth() + 1 : year === now.getFullYear();
 
   // Stepping quickly through months used to let an older reply overwrite a
   // newer one, and a failed request left "Loading…" on screen for good. The
@@ -1305,6 +1362,19 @@ function ExpensesView({
         setLoadError("Could not load this period. Check your connection and try again.");
         setRefreshing(false);
       });
+
+    // The period before, for the "vs last month" comparison.
+    const prev =
+      scope === "year"
+        ? `year=${year - 1}`
+        : month === 1
+          ? `year=${year - 1}&month=12`
+          : `year=${year}&month=${month - 1}`;
+    setPreviousTotal(null);
+    fetch(`/api/expenses/categories?${prev}`, { signal: ac.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setPreviousTotal(d ? Number(d.total) || 0 : null))
+      .catch(() => {});
     return () => ac.abort();
   }, [year, month, scope, monthParam, refreshKey]);
 
@@ -1314,9 +1384,8 @@ function ExpensesView({
   const showHistory = scope === "month" || Boolean(selected);
   const historyRef = useRef<HTMLElement>(null);
 
-  // Picking a bar is a request to see those expenses, and they sit below a
-  // full-height chart - so bring them to the reader rather than making them
-  // scroll past everything they just filtered out.
+  // Picking a category is a request to see those expenses, so bring them to
+  // the reader rather than making them scroll past the breakdown.
   useEffect(() => {
     if (!selected) return;
     const el = historyRef.current;
@@ -1376,10 +1445,9 @@ function ExpensesView({
         (e.category?.toLowerCase().includes(q) ?? false)
       );
     })
-    // Two different questions, two orderings. The plain month list is a
-    // ledger - what happened, most recent first. Drilling into a category
-    // asks where the money went, so the biggest amounts lead and equal
-    // amounts fall back to newest.
+    // Two different questions, two orderings. The plain list is a ledger -
+    // what happened, most recent first. Drilling into a category asks where
+    // the money went, so the biggest amounts lead.
     .sort((a, b) => {
       const byDate =
         new Date(b.expense_datetime || b.expense_date).getTime() -
@@ -1388,115 +1456,181 @@ function ExpensesView({
     });
 
   const shownTotal = filtered?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
-  const isNarrowed = Boolean(selected) || Boolean(search.trim());
+
+  // Grouped by day for the ledger view; a category drill-down stays one list
+  // ordered by amount.
+  const groups: { day: string; items: Expense[]; total: number }[] = [];
+  if (filtered && !selected) {
+    for (const e of filtered) {
+      const last = groups[groups.length - 1];
+      if (last && last.day === e.expense_date) {
+        last.items.push(e);
+        last.total += e.amount;
+      } else {
+        groups.push({ day: e.expense_date, items: [e], total: e.amount });
+      }
+    }
+  }
 
   const exportHref = `/api/expenses/export?year=${year}${monthParam}${
     selected ? `&category=${encodeURIComponent(selected)}` : ""
   }`;
 
-  const needsReview = data?.categories.find((c) => c.category === "Uncategorised");
+  const points = data?.categories ?? [];
+  const needsReview = points.find((c) => c.category === "Uncategorised");
+  const change =
+    data && previousTotal !== null && previousTotal > 0
+      ? Math.round(((data.total - previousTotal) / previousTotal) * 100)
+      : null;
+  const count = points.reduce((s, p) => s + p.count, 0);
+  const pick = (c: string | null) => setSelected((cur) => (c === null || cur === c ? null : c));
 
   return (
     <>
-      <div className="card p-5 sm:p-6 rise">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2">
+        <div className="segmented flex-1" role="group" aria-label="Period type">
           {(["month", "year"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setScope(s)}
-              className={`btn !py-1.5 !px-3.5 text-[12px] ${scope === s ? "btn-primary" : "btn-ghost"}`}
-            >
-              {s === "month" ? "By month" : "By year"}
+            <button key={s} type="button" aria-pressed={scope === s} onClick={() => setScope(s)}>
+              {s === "month" ? "Month" : "Year"}
             </button>
           ))}
         </div>
-
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => nav(-1)}
-            aria-label={scope === "year" ? "Previous year" : "Previous month"}
-            className="btn btn-nav !p-0 w-9 h-9"
-          >
-            ←
-          </button>
-          <p className="font-semibold text-[15px]">{periodLabel}</p>
-          <button
-            onClick={() => nav(1)}
-            aria-label={scope === "year" ? "Next year" : "Next month"}
-            className="btn btn-nav !p-0 w-9 h-9"
-          >
-            →
-          </button>
-        </div>
-
-        <p className="text-[13px] font-medium" style={{ color: "var(--muted)" }}>
-          Spent in {periodLabel}
-        </p>
-        <p
-          className="hero-num text-4xl font-bold tracking-tight mt-1 tabular"
-          style={{ opacity: refreshing && data ? 0.45 : 1, transition: "opacity .18s ease" }}
-        >
-          {fmtRs(data?.total ?? 0)}
-        </p>
-
-        {needsReview && (
+        <div className="relative shrink-0">
           <button
             type="button"
-            onClick={() => setSelected("Uncategorised")}
-            className="tile px-3 py-2.5 mt-4 w-full text-left cursor-pointer"
-            style={{ borderLeft: "3px solid var(--bad)" }}
+            className="chat-round !w-[56px] !h-[56px]"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
           >
-            <p className="text-[13px] font-semibold">
-              {needsReview.count} expense{needsReview.count === 1 ? "" : "s"} need a category
-            </p>
-            <p className="text-[12px] mt-0.5" style={{ color: "var(--muted)" }}>
-              {fmtRs(needsReview.total)} nothing could explain — tap to sort them out
-            </p>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <circle cx="5" cy="12" r="2" />
+              <circle cx="12" cy="12" r="2" />
+              <circle cx="19" cy="12" r="2" />
+            </svg>
           </button>
-        )}
-
-        {loadError ? (
-          <p className="text-[13px] py-6" style={{ color: "var(--bad)" }} role="alert">
-            {loadError}
-          </p>
-        ) : data === null ? (
-          <p className="text-[13px] py-6" style={{ color: "var(--muted)" }} role="status">
-            Loading…
-          </p>
-        ) : data.categories.length === 0 ? (
-          <p className="text-[13px] py-6 text-center" style={{ color: "var(--muted)" }}>
-            No expenses in {periodLabel}.
-          </p>
-        ) : (
-          <div style={{ opacity: refreshing ? 0.45 : 1, transition: "opacity .18s ease" }}>
-          <CategoryChart
-            points={data.categories}
-            selected={selected}
-            onSelect={(c) => setSelected((cur) => (cur === c ? null : c))}
-          />
-          </div>
-        )}
-
-        <div className="form-actions mt-5">
-          <button
-            type="button"
-            className="btn btn-ghost !py-2 text-[13px]"
-            onClick={() => setManaging(true)}
-          >
-            Manage categories
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost !py-2 text-[13px]"
-            onClick={onRecategorize}
-          >
-            Re-categorise
-          </button>
-          <a className="btn btn-ghost !py-2 text-[13px]" href={exportHref} download>
-            Download Excel{selected ? ` · ${selected}` : ""}
-          </a>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
+              <div className="chat-menu rise !left-auto right-0 !bottom-auto top-[64px] !w-[250px]" role="menu">
+                <button type="button" role="menuitem" className="chat-menu-item" onClick={() => { setMenuOpen(false); setManaging(true); }}>
+                  <span className="chat-menu-icon" aria-hidden>🗂️</span>
+                  Manage categories
+                </button>
+                <button type="button" role="menuitem" className="chat-menu-item" onClick={() => { setMenuOpen(false); onRecategorize(); }}>
+                  <span className="chat-menu-icon" aria-hidden>✨</span>
+                  Re-categorise
+                </button>
+                <a role="menuitem" className="chat-menu-item" href={exportHref} download onClick={() => setMenuOpen(false)}>
+                  <span className="chat-menu-icon" aria-hidden>📥</span>
+                  Download Excel
+                </a>
+              </div>
+            </>
+          )}
         </div>
       </div>
+
+      <section className="hero-panel p-6 rise" aria-live="polite">
+        <div className="flex items-center justify-between gap-2 -mx-2 -mt-2">
+          <button
+            type="button"
+            onClick={() => nav(-1)}
+            aria-label={scope === "year" ? "Previous year" : "Previous month"}
+            className="h-11 w-11 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(255,255,255,0.1)" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M15 5l-7 7 7 7" />
+            </svg>
+          </button>
+          <p className="text-[15px] font-bold">{periodLabel}</p>
+          <button
+            type="button"
+            onClick={() => nav(1)}
+            disabled={isCurrent}
+            aria-label={scope === "year" ? "Next year" : "Next month"}
+            className="h-11 w-11 rounded-full flex items-center justify-center disabled:opacity-30"
+            style={{ background: "rgba(255,255,255,0.1)" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+
+        <p className="hero-muted text-[14px] font-semibold mt-4">Total spent</p>
+        <p
+          className="mt-1 flex items-baseline gap-2 tabular"
+          style={{ opacity: refreshing && data ? 0.5 : 1, transition: "opacity .18s ease" }}
+        >
+          <span className="hero-muted text-[20px] font-bold">Rs</span>
+          <span className="text-[42px] font-extrabold leading-none tracking-tight">
+            {data ? fmtRs(data.total).replace(/^−?Rs\s/, "") : <span className="skeleton align-middle" style={{ width: 140, height: 36, opacity: 0.3 }} />}
+          </span>
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[14px]">
+          {change !== null && (
+            <span>
+              <span className="font-extrabold" style={{ color: change > 0 ? "#ffb4a8" : "#7ee2a8" }}>
+                {change > 0 ? "↑" : "↓"} {Math.abs(change)}%
+              </span>{" "}
+              <span className="hero-muted">vs last {scope}</span>
+            </span>
+          )}
+          {data && (
+            <span className="hero-muted">
+              {count} {count === 1 ? "expense" : "expenses"}
+            </span>
+          )}
+        </div>
+        <ShareBar points={points} />
+      </section>
+
+      {needsReview && selected !== "Uncategorised" && (
+        <button
+          type="button"
+          onClick={() => pick("Uncategorised")}
+          className="card p-4 w-full text-left flex items-center gap-3 rise"
+        >
+          <span className="icon-tile !w-11 !h-11" style={{ background: "var(--cat-uncategorised-bg)" }} aria-hidden>
+            ❔
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-bold">
+              {needsReview.count} {needsReview.count === 1 ? "expense needs" : "expenses need"} a category
+            </span>
+            <span className="block text-[13px]" style={{ color: "var(--muted)" }}>
+              {fmtRs(needsReview.total)} · tap to sort them out
+            </span>
+          </span>
+          <span style={{ color: "var(--muted)" }} aria-hidden>›</span>
+        </button>
+      )}
+
+      {loadError ? (
+        <div className="card p-5 text-[14px]" style={{ color: "var(--bad)" }} role="alert">
+          {loadError}
+        </div>
+      ) : data && points.length === 0 ? (
+        <div className="card p-8 text-center rise">
+          <p className="text-[32px]" aria-hidden>🌿</p>
+          <p className="font-bold mt-1">No expenses in {periodLabel}</p>
+          <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>
+            Log one, or tell the assistant what you spent.
+          </p>
+          <button type="button" className="btn btn-expense mt-4" onClick={onAdd}>
+            Log expense
+          </button>
+        </div>
+      ) : (
+        points.length > 0 && (
+          <div style={{ opacity: refreshing ? 0.5 : 1, transition: "opacity .18s ease" }}>
+            <CategoryBreakdown points={points} selected={selected} onSelect={(c) => pick(c)} />
+          </div>
+        )
+      )}
 
       {managing && (
         <ManageCategoriesModal
@@ -1506,70 +1640,148 @@ function ExpensesView({
         />
       )}
 
-      {showHistory && (
-      <section ref={historyRef} className="card p-5 sm:p-6 rise">
-        <div className="flex items-center justify-between mb-4 gap-3">
-          <div className="min-w-0">
-            <p className="font-semibold truncate">{selected ?? "History"}</p>
-            {isNarrowed && (
-              <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-                {filtered?.length ?? 0} of {expenses?.length ?? 0} · {fmtRs(shownTotal)}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            {selected && (
+      {points.length > 0 && (
+        <section ref={historyRef} className="flex flex-col gap-3 scroll-mt-4" aria-labelledby="history-title">
+          <div className="section-head">
+            <h2 id="history-title" className="section-title truncate">
+              {selected ?? "Expenses"}
+            </h2>
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => setSelected(null)}
-                className="btn btn-ghost !py-2 !px-3 text-[12px]"
+                className="chat-round !w-11 !h-11"
+                aria-label="Search expenses"
+                aria-pressed={searching}
+                onClick={() => {
+                  setSearching((v) => !v);
+                  if (searching) setSearch("");
+                }}
               >
-                Clear
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                  <circle cx="11" cy="11" r="6.5" />
+                  <path d="M20 20l-4-4" />
+                </svg>
               </button>
-            )}
-            {!isNarrowed && (
-              <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-                {filtered?.length ?? 0} {filtered?.length === 1 ? "expense" : "expenses"}
-              </p>
-            )}
+              <button type="button" className="btn btn-expense !min-h-11 !py-2 !px-4" onClick={onAdd}>
+                + Log
+              </button>
+            </div>
           </div>
-        </div>
 
-        <input
-          className="field mb-4"
-          aria-label="Search expenses"
-          placeholder="Search by amount, note, vendor, or category…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-
-        {expenses === null ? (
-          <p className="text-[13px] py-4" style={{ color: "var(--muted)" }} role="status">
-            Loading…
-          </p>
-        ) : filtered?.length === 0 ? (
-          <p className="text-[13px] py-4 text-center" style={{ color: "var(--muted)" }}>
-            {search ? "No matching expenses" : `No expenses in ${periodLabel}.`}
-          </p>
-        ) : (
-          <ul className="pb-2">
-            {filtered?.map((e) =>
-              selected === "Uncategorised" ? (
-                <ReviewRow
-                  key={e.id}
-                  expense={e}
-                  categories={categories}
-                  onAssigned={() =>
-                    setExpenses((cur) => cur?.filter((r) => r.id !== e.id) ?? null)
+          {/* One scrollable row of category chips: filter without leaving the list. */}
+          <div className="nav-scroll flex gap-2 overflow-x-auto -mx-4 px-4 pb-1" role="group" aria-label="Filter by category">
+            <button
+              type="button"
+              onClick={() => pick(null)}
+              aria-pressed={!selected}
+              className="shrink-0 min-h-10 px-4 rounded-full text-[14px] font-bold border"
+              style={
+                !selected
+                  ? { background: "var(--ink)", color: "var(--page)", borderColor: "transparent" }
+                  : { background: "var(--surface)", color: "var(--ink-2)", borderColor: "var(--ring)" }
+              }
+            >
+              All
+            </button>
+            {points.map((p) => {
+              const on = selected === p.category;
+              return (
+                <button
+                  key={p.category}
+                  type="button"
+                  onClick={() => pick(p.category)}
+                  aria-pressed={on}
+                  className="shrink-0 min-h-10 px-3.5 rounded-full text-[14px] font-bold border flex items-center gap-1.5"
+                  style={
+                    on
+                      ? { background: "var(--ink)", color: "var(--page)", borderColor: "transparent" }
+                      : { background: "var(--surface)", color: "var(--ink-2)", borderColor: "var(--ring)" }
                   }
-                />
-              ) : (
-                <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} />
-              )
-            )}
-          </ul>
-        )}
-      </section>
+                >
+                  <span aria-hidden>{categoryEmoji(p.category)}</span>
+                  {p.category}
+                </button>
+              );
+            })}
+          </div>
+
+          {searching && (
+            <input
+              className="field !rounded-full"
+              aria-label="Search expenses"
+              placeholder="Search amount, note, vendor…"
+              value={search}
+              autoFocus
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          )}
+
+          {(selected || search.trim()) && filtered && (
+            <p className="text-[13px] px-1" style={{ color: "var(--muted)" }}>
+              {filtered.length} {filtered.length === 1 ? "expense" : "expenses"} · {fmtRs(shownTotal)}
+              {selected ? " · biggest first" : ""}
+            </p>
+          )}
+
+          {!showHistory ? (
+            <div className="card p-6 text-center text-[14px]" style={{ color: "var(--muted)" }}>
+              Pick a category above to see its expenses for {periodLabel}.
+            </div>
+          ) : expenses === null ? (
+            <div className="card p-4 flex flex-col gap-3" role="status" aria-label="Loading expenses">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="icon-tile skeleton !rounded-2xl" />
+                  <span className="flex-1 flex flex-col gap-2">
+                    <span className="skeleton" style={{ width: "55%", height: 14 }} />
+                    <span className="skeleton" style={{ width: "30%", height: 12 }} />
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : filtered?.length === 0 ? (
+            <div className="card p-6 text-center text-[14px]" style={{ color: "var(--muted)" }}>
+              {search ? "No matching expenses" : `No expenses in ${periodLabel}.`}
+            </div>
+          ) : selected ? (
+            <div className="card px-3 py-1 rise">
+              <ul>
+                {filtered?.map((e) =>
+                  selected === "Uncategorised" ? (
+                    <ReviewRow
+                      key={e.id}
+                      expense={e}
+                      categories={categories}
+                      onAssigned={() => setExpenses((cur) => cur?.filter((r) => r.id !== e.id) ?? null)}
+                    />
+                  ) : (
+                    <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} />
+                  )
+                )}
+              </ul>
+            </div>
+          ) : (
+            groups.map((g) => (
+              <div key={g.day} className="flex flex-col gap-1.5">
+                <div className="flex items-baseline justify-between px-1 pt-1">
+                  <h3 className="text-[13px] font-bold uppercase tracking-wide" style={{ color: "var(--muted)" }}>
+                    {dayHeading(g.day)}
+                  </h3>
+                  <span className="text-[13px] font-bold tabular" style={{ color: "var(--muted)" }}>
+                    {fmtRs(g.total)}
+                  </span>
+                </div>
+                <div className="card px-3 py-1">
+                  <ul>
+                    {g.items.map((e) => (
+                      <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} hideDate />
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ))
+          )}
+        </section>
       )}
     </>
   );
@@ -1584,17 +1796,13 @@ export default function ExpensesPage() {
   const [recategorizing, setRecategorizing] = useState(false);
 
   const refresh = () => setRefreshKey((k) => k + 1);
+  const add = () => {
+    setAdding(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   return (
     <>
-      <div className="flex items-center justify-end -mt-2">
-        {!adding && !viewingDetail && (
-          <button className="btn btn-expense" onClick={() => setAdding(true)}>
-            Log expense
-          </button>
-        )}
-      </div>
-
       {adding && (
         <ExpenseForm
           editing={null}
@@ -1635,11 +1843,8 @@ export default function ExpensesPage() {
         refreshKey={refreshKey}
         onViewDetail={setViewingDetail}
         onRecategorize={() => setRecategorizing(true)}
+        onAdd={add}
       />
-
-      <footer className="text-center text-[12px] py-4" style={{ color: "var(--muted)" }}>
-        Mera Khata · your everyday spending, sorted
-      </footer>
     </>
   );
 }
