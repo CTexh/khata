@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifyToken, verifyRoutineSecret, SESSION_COOKIE_NAME } from "@/lib/auth";
 
-const PUBLIC_PATHS = ["/login", "/signup"];
+// Pages that open without logging in. /privacy is here because Meta checks it
+// before the WhatsApp app can be published.
+const PUBLIC_PATHS = ["/login", "/signup", "/privacy"];
+// The subset a logged-in user is sent away from - they have no use for the
+// login form, but may well want to read the privacy policy.
+const AUTH_PAGES = ["/login", "/signup"];
 
 // Only this exact path may authenticate via x-routine-secret. Scoping it here
 // (rather than a blanket bypass) means a leaked/guessed secret can never skip
@@ -29,7 +34,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (session && isPublic) {
+  if (session && AUTH_PAGES.includes(pathname)) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
