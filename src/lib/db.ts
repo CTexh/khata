@@ -82,13 +82,114 @@ export async function findUserById(id: string): Promise<User | null> {
   };
 }
 
-export async function updateUserProfile(userId: string, name: string): Promise<void> {
+// Email reminders: where to send them, whether they're on, and a log of what
+// has been sent so a retried daily job never sends the same reminder twice.
+let emailColumnsEnsured = false;
+export async function ensureUserEmailColumns(): Promise<void> {
+  if (emailColumnsEnsured) return;
   await ensureUserNameColumn();
   const c = await db();
-  await c.execute({ sql: "UPDATE users SET name = ? WHERE id = ?", args: [name || null, userId] });
+  for (const sql of [
+    `ALTER TABLE users ADD COLUMN email TEXT`,
+    `ALTER TABLE users ADD COLUMN email_reminders INTEGER NOT NULL DEFAULT 1`,
+  ]) {
+    try {
+      await c.execute(sql);
+    } catch {
+      // Column already exists.
+    }
+  }
+  await c.execute(`CREATE TABLE IF NOT EXISTS reminder_log (
+    user_id TEXT NOT NULL,
+    item TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, item)
+  )`);
+  emailColumnsEnsured = true;
 }
 
-// Everyone the month-end job runs for.
+export type ProfileSettings = { name: string; email: string | null; emailReminders: boolean };
+
+export async function getProfileSettings(userId: string): Promise<ProfileSettings | null> {
+  await ensureUserEmailColumns();
+  const c = await db();
+  const rs = await c.execute({ sql: "SELECT name, email, email_reminders FROM users WHERE id = ?", args: [userId] });
+  const r = rs.rows[0];
+  if (!r) return null;
+  return {
+    name: (r.name as string) ?? "",
+    email: (r.email as string) ?? null,
+    emailReminders: Number(r.email_reminders ?? 1) === 1,
+  };
+}
+
+export async function updateUserProfile(
+  userId: string,
+  fields: { name?: string; email?: string | null; emailReminders?: boolean }
+): Promise<void> {
+  await ensureUserEmailColumns();
+  const sets: string[] = [];
+  const args: (string | number | null)[] = [];
+  if (fields.name !== undefined) {
+    sets.push("name = ?");
+    args.push(fields.name || null);
+  }
+  if (fields.email !== undefined) {
+    sets.push("email = ?");
+    args.push(fields.email || null);
+  }
+  if (fields.emailReminders !== undefined) {
+    sets.push("email_reminders = ?");
+    args.push(fields.emailReminders ? 1 : 0);
+  }
+  if (!sets.length) return;
+  const c = await db();
+  await c.execute({ sql: `UPDATE users SET ${sets.join(", ")} WHERE id = ?`, args: [...args, userId] });
+}
+
+export type ReminderRecipient = { id: string; username: string; name: string | null; email: string };
+
+export async function listReminderRecipients(): Promise<ReminderRecipient[]> {
+  await ensureUserEmailColumns();
+  const c = await db();
+  const rs = await c.execute(
+    "SELECT id, username, name, email FROM users WHERE email IS NOT NULL AND email <> '' AND email_reminders = 1"
+  );
+  return rs.rows.map((r) => ({
+    id: r.id as string,
+    username: r.username as string,
+    name: (r.name as string) ?? null,
+    email: r.email as string,
+  }));
+}
+
+// The reminder keys from `items` that haven't been sent to this user yet.
+export async function unsentReminders(userId: string, items: string[]): Promise<Set<string>> {
+  if (!items.length) return new Set();
+  await ensureUserEmailColumns();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT item FROM reminder_log WHERE user_id = ? AND item IN (${items.map(() => "?").join(",")})`,
+    args: [userId, ...items],
+  });
+  const sent = new Set(rs.rows.map((r) => r.item as string));
+  return new Set(items.filter((i) => !sent.has(i)));
+}
+
+export async function markRemindersSent(userId: string, items: string[]): Promise<void> {
+  if (!items.length) return;
+  const c = await db();
+  const now = new Date().toISOString();
+  await c.batch(
+    items.map((item) => ({
+      sql: "INSERT OR IGNORE INTO reminder_log (user_id, item, sent_at) VALUES (?, ?, ?)",
+      args: [userId, item, now],
+    })),
+    "write"
+  );
+}
+
+// Everyone the daily job runs for.
 export async function listUserIds(): Promise<string[]> {
   const c = await db();
   const rs = await c.execute("SELECT id FROM users");

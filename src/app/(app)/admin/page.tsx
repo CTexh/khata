@@ -12,6 +12,8 @@ import { useCached } from "@/lib/swr";
 function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -22,7 +24,7 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
     const res = await fetch("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, name, email }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -43,6 +45,24 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
         value={username}
         onChange={(e) => setUsername(e.target.value)}
         required
+      />
+      <input
+        className="field"
+        aria-label="Name"
+        placeholder="Name (optional)"
+        autoComplete="off"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <input
+        className="field"
+        aria-label="Email for reminders"
+        placeholder="Email for reminders (optional)"
+        type="email"
+        inputMode="email"
+        autoComplete="off"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
       />
       <input
         className="field"

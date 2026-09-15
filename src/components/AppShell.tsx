@@ -14,38 +14,119 @@ type CurrentUser = { id: string; username: string; name?: string | null; isAdmin
 
 function EditProfileModal({ initialName, onClose, onSaved }: { initialName: string; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initialName);
+  const [email, setEmail] = useState("");
+  const [reminders, setReminders] = useState(true);
+  const [available, setAvailable] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/profile")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setName(d.name ?? "");
+        setEmail(d.email ?? "");
+        setReminders(d.emailReminders !== false);
+        setAvailable(d.emailAvailable !== false);
+      })
+      .finally(() => setLoaded(true));
+  }, []);
+
+  const persist = async (): Promise<boolean> => {
+    const res = await fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, emailReminders: reminders }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setMsg({ text: j.error ?? "Couldn't save — try again.", bad: true });
+      return false;
+    }
+    return true;
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setMsg(null);
-    const res = await fetch("/api/profile", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
+    const ok = await persist();
     setSaving(false);
-    if (!res.ok) {
-      setMsg({ text: "Couldn't save — try again.", bad: true });
-      return;
-    }
+    if (!ok) return;
     onSaved();
     onClose();
   };
 
+  const sendTest = async () => {
+    setTesting(true);
+    setMsg(null);
+    if (!(await persist())) {
+      setTesting(false);
+      return;
+    }
+    const res = await fetch("/api/profile/test-email", { method: "POST" });
+    const j = await res.json().catch(() => ({}));
+    setTesting(false);
+    setMsg(res.ok ? { text: `Test email sent to ${j.to}. Check your inbox (and spam).` } : { text: j.error ?? "Couldn't send it.", bad: true });
+  };
+
   return (
     <Sheet title="Edit profile" onClose={onClose}>
-      <form onSubmit={save} className="card p-4 flex flex-col gap-3">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
-            Name
-          </span>
-          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" />
-        </label>
+      <form onSubmit={save} className="flex flex-col gap-3">
+        <div className="card p-4 flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+              Name
+            </span>
+            <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" />
+          </label>
+        </div>
+
+        <div className="card p-4 flex flex-col gap-3">
+          <div>
+            <p className="text-[15px] font-bold">Email reminders</p>
+            <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
+              Subscriptions due, Udhar reach-out dates and a monthly summary, around 9am.
+            </p>
+          </div>
+          <input
+            className="field"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            aria-label="Email address"
+            placeholder="you@example.com"
+            value={email}
+            disabled={!loaded}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <label className="flex items-center justify-between gap-3 min-h-11 cursor-pointer">
+            <span className="text-[15px] font-semibold">Send me reminders</span>
+            <input
+              type="checkbox"
+              className="h-6 w-6 accent-[var(--accent)] cursor-pointer"
+              checked={reminders}
+              disabled={!loaded}
+              onChange={(e) => setReminders(e.target.checked)}
+            />
+          </label>
+          {!available && (
+            <p className="text-[12px]" style={{ color: "var(--muted)" }}>
+              Email sending isn&apos;t switched on yet - your address is saved for when it is.
+            </p>
+          )}
+          {available && email.trim() && (
+            <button type="button" className="btn btn-ghost" onClick={sendTest} disabled={testing || !loaded}>
+              {testing ? "Sending…" : "Send a test email"}
+            </button>
+          )}
+        </div>
+
         {msg && (
-          <p className="text-[13px]" style={{ color: msg.bad ? "var(--bad)" : "var(--good)" }} role="status">
+          <p className="text-[13px] px-1" style={{ color: msg.bad ? "var(--bad)" : "var(--good)" }} role="status">
             {msg.text}
           </p>
         )}
@@ -53,7 +134,7 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" disabled={saving}>
+          <button className="btn btn-primary" disabled={saving || !loaded}>
             {saving ? "Saving…" : "Save"}
           </button>
         </div>

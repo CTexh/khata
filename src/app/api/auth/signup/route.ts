@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db, ensureUserNameColumn, findUserByUsername } from "@/lib/db";
+import { db, ensureUserEmailColumns, findUserByUsername } from "@/lib/db";
+import { validEmail } from "@/lib/reminders";
 import { createSession, hashPassword } from "@/lib/auth";
 import { randomUUID } from "crypto";
 
@@ -8,6 +9,7 @@ export async function POST(req: Request) {
   const username = String(body.username ?? "").trim();
   const name = String(body.name ?? "").trim();
   const password = String(body.password ?? "");
+  const email = String(body.email ?? "").trim().toLowerCase();
 
   if (!name) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -25,18 +27,22 @@ export async function POST(req: Request) {
     );
   }
 
+  if (email && !validEmail(email)) {
+    return NextResponse.json({ error: "That email address doesn't look right." }, { status: 400 });
+  }
+
   const existing = await findUserByUsername(username);
   if (existing) {
     return NextResponse.json({ error: "That username is taken" }, { status: 409 });
   }
 
-  await ensureUserNameColumn();
+  await ensureUserEmailColumns();
 
   const c = await db();
   const id = randomUUID();
   await c.execute({
-    sql: "INSERT INTO users (id, username, name, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, 0, ?)",
-    args: [id, username, name, hashPassword(password), new Date().toISOString()],
+    sql: "INSERT INTO users (id, username, name, email, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
+    args: [id, username, name, email || null, hashPassword(password), new Date().toISOString()],
   });
 
   await createSession({ id, username, is_admin: false });
