@@ -24,13 +24,13 @@ const SECTIONS: { title: string; body: string[] }[] = [
       "Your WhatsApp number, if you add one in Edit Profile.",
       "What you record: expenses (amount, date, vendor, category and notes), subscriptions, people and ledger entries.",
       "Expenses imported from bank notification emails, where that has been set up for your account.",
-      "For messages sent to the Khata WhatsApp number: the message id and which expense it created, so a message is never added twice and UNDO can remove it.",
+      "For messages sent to the Khata WhatsApp number: the message id and which expense or Udhar Khata entries it created, so a message is never added twice and UNDO can remove it.",
     ],
   },
   {
     title: "WhatsApp messages and photos",
     body: [
-      "If you message the Khata WhatsApp business number from the number saved on your profile, the text - and any photo of a bill or receipt - is used to create an expense in your account, and you get a reply confirming it.",
+      "If you message the Khata WhatsApp business number from the number saved on your profile, the text - and any photo of a bill or receipt - is used to add an expense, or to record money lent to or paid back by someone already in your Udhar Khata, and you get a reply confirming it.",
       "Messages from numbers that are not on any Khata profile are ignored and not stored.",
       "Photos are read once to extract the expense and are not kept. The original message text is kept as the expense's note.",
       "To stop this, remove your number from Edit Profile; messages from it will then be ignored.",
@@ -40,7 +40,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
     title: "Services that process your data",
     body: [
       "Meta (WhatsApp Business Platform) delivers messages between you and Khata, and sends subscription reminders and monthly reports to your number.",
-      "Google (Gemini API) reads WhatsApp messages and bill photos to extract the amount, vendor, date and category. Khata uses Google's free tier, under which Google may use the content sent to it to improve its products.",
+      "Google (Gemini API) reads WhatsApp messages and bill photos to work out what they describe - an expense, or money lent or paid back. So that a message can be matched to the right person, it is also sent the names in your Udhar Khata and your category names. Khata uses Google's free tier, under which Google may use the content sent to it to improve its products.",
       "Vercel hosts the app, and Turso hosts its database.",
     ],
   },
@@ -53,7 +53,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
   {
     title: "Keeping and deleting your data",
     body: [
-      "Your data is kept until it is deleted. You can delete any expense, subscription or ledger entry in the app, and reply UNDO on WhatsApp to remove the last expense added there in the past 24 hours.",
+      "Your data is kept until it is deleted. You can delete any expense, subscription or ledger entry in the app, and reply UNDO on WhatsApp to remove the last expense or Udhar Khata entry added there in the past 24 hours.",
       "To have your whole account and everything in it deleted, ask the administrator who gave you your account.",
     ],
   },

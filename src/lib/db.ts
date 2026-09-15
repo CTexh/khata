@@ -8,6 +8,7 @@ import {
   normalizeVendor,
 } from "@/lib/categorize";
 import { normalizePhone } from "@/lib/whatsapp-webhook";
+import type { HealthUpdate, ModelHealth } from "@/lib/expense-parse";
 
 let client: Client | null = null;
 
@@ -466,6 +467,22 @@ export async function ensureCategoryTables(): Promise<void> {
   } catch {
     // Index already exists.
   }
+  // Udhar Khata transactions a message created, as a JSON array of ids.
+  try {
+    await c.execute(`ALTER TABLE whatsapp_inbound ADD COLUMN tx_ids TEXT`);
+  } catch {
+    // Column already exists.
+  }
+  // Which Gemini models have been answering. Shared across server instances,
+  // so a model found overloaded on one request is skipped on the next even
+  // when Vercel runs it somewhere else. Times are epoch milliseconds.
+  await c.execute(`CREATE TABLE IF NOT EXISTS ai_model_health (
+    model TEXT PRIMARY KEY,
+    busy_until INTEGER NOT NULL DEFAULT 0,
+    last_ok_at INTEGER NOT NULL DEFAULT 0,
+    last_ms INTEGER,
+    updated_at INTEGER NOT NULL
+  )`);
   categoryTablesEnsured = true;
 }
 
@@ -1130,30 +1147,158 @@ export async function attachInboundExpense(messageId: string, expenseId: string)
   });
 }
 
-// Removes the most recent expense added over WhatsApp in the last 24 hours.
-// Scoped to WhatsApp entries on purpose: UNDO should never reach into
-// something added in the app or imported from a bank email.
-export async function undoLastWhatsAppExpense(
-  userId: string
-): Promise<{ amount: number; vendor: string | null } | null> {
+export async function attachInboundTransactions(messageId: string, txIds: string[]): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: "UPDATE whatsapp_inbound SET tx_ids = ? WHERE message_id = ?",
+    args: [JSON.stringify(txIds), messageId],
+  });
+}
+
+export type UndoResult = {
+  expense: { amount: number; vendor: string | null } | null;
+  transactions: { name: string; amount: number }[];
+};
+
+// Reverses the most recent thing added over WhatsApp in the last 24 hours -
+// an expense or a set of Udhar Khata entries. Scoped to WhatsApp on purpose:
+// UNDO should never reach into something added in the app or imported from a
+// bank email. Anything already deleted in the app is simply skipped.
+export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult | null> {
   await ensureCategoryTables();
   const c = await db();
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const rs = await c.execute({
-    sql: `SELECT w.message_id, e.id, e.amount, e.vendor
-          FROM whatsapp_inbound w JOIN expenses e ON e.id = w.expense_id AND e.user_id = w.user_id
-          WHERE w.user_id = ? AND w.created_at >= ?
-          ORDER BY w.created_at DESC LIMIT 1`,
+    sql: `SELECT message_id, expense_id, tx_ids FROM whatsapp_inbound
+          WHERE user_id = ? AND created_at >= ?
+            AND (expense_id IS NOT NULL OR (tx_ids IS NOT NULL AND tx_ids != '[]'))
+          ORDER BY created_at DESC LIMIT 1`,
     args: [userId, since],
   });
   const row = rs.rows[0];
   if (!row) return null;
-  await c.batch(
-    [
-      { sql: "DELETE FROM expenses WHERE id = ? AND user_id = ?", args: [row.id as string, userId] },
-      { sql: "UPDATE whatsapp_inbound SET expense_id = NULL WHERE message_id = ?", args: [row.message_id as string] },
-    ],
+
+  let txIds: string[] = [];
+  try {
+    const parsed = JSON.parse((row.tx_ids as string) ?? "[]");
+    if (Array.isArray(parsed)) txIds = parsed.filter((x): x is string => typeof x === "string");
+  } catch {
+    // Unreadable - treated as no transactions.
+  }
+
+  const expenseId = (row.expense_id as string) ?? null;
+  const expenseRs = expenseId
+    ? await c.execute({
+        sql: "SELECT amount, vendor FROM expenses WHERE id = ? AND user_id = ?",
+        args: [expenseId, userId],
+      })
+    : null;
+  const txRs = txIds.length
+    ? await c.execute({
+        sql: `SELECT t.id, t.amount, p.name FROM transactions t JOIN people p ON p.id = t.person_id
+              WHERE p.user_id = ? AND t.id IN (${txIds.map(() => "?").join(", ")})`,
+        args: [userId, ...txIds],
+      })
+    : null;
+
+  const expenseRow = expenseRs?.rows[0];
+  const txRows = txRs?.rows ?? [];
+  const statements: { sql: string; args: (string | number)[] }[] = [
+    {
+      sql: "UPDATE whatsapp_inbound SET expense_id = NULL, tx_ids = NULL WHERE message_id = ?",
+      args: [row.message_id as string],
+    },
+  ];
+  if (expenseRow && expenseId) {
+    statements.push({ sql: "DELETE FROM expenses WHERE id = ? AND user_id = ?", args: [expenseId, userId] });
+  }
+  for (const t of txRows) {
+    statements.push({ sql: "DELETE FROM transactions WHERE id = ?", args: [t.id as string] });
+  }
+  await c.batch(statements, "write");
+
+  if (!expenseRow && !txRows.length) return null;
+  return {
+    expense: expenseRow
+      ? { amount: Number(expenseRow.amount), vendor: (expenseRow.vendor as string) ?? null }
+      : null,
+    transactions: txRows.map((t) => ({ name: t.name as string, amount: Number(t.amount) })),
+  };
+}
+
+/* ---------- Udhar Khata from WhatsApp ---------- */
+
+export type LedgerPerson = { id: string; name: string; balance: number };
+
+export async function listLedgerPeople(userId: string): Promise<LedgerPerson[]> {
+  return (await listPeople(userId)).map((p) => ({ id: p.id, name: p.name, balance: p.balance }));
+}
+
+// Same rows the Udhar Khata page writes: a positive amount is money lent, a
+// negative one is money paid back. Each insert only happens if the person
+// belongs to this user, checked in the same statement, and all of them are
+// written together or not at all.
+export async function addLedgerTransactions(
+  userId: string,
+  entries: { personId: string; amount: number }[],
+  note: string
+): Promise<string[]> {
+  if (!entries.length) return [];
+  const c = await db();
+  const now = new Date().toISOString();
+  const ids = entries.map(() => randomUUID());
+  const results = await c.batch(
+    entries.map((e, i) => ({
+      sql: `INSERT INTO transactions (id, person_id, amount, note, created_at)
+            SELECT ?, id, ?, ?, ? FROM people WHERE id = ? AND user_id = ?`,
+      args: [ids[i], e.amount, note, now, e.personId, userId],
+    })),
     "write"
   );
-  return { amount: Number(row.amount), vendor: (row.vendor as string) ?? null };
+  return ids.filter((_, i) => results[i]?.rowsAffected === 1);
+}
+
+/* ---------- AI model health ---------- */
+
+export async function loadModelHealth(): Promise<Map<string, ModelHealth>> {
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute("SELECT model, busy_until, last_ok_at FROM ai_model_health");
+  return new Map(
+    rs.rows.map((r) => [
+      r.model as string,
+      { busyUntil: Number(r.busy_until), lastOkAt: Number(r.last_ok_at) },
+    ])
+  );
+}
+
+// Applied in order, so when one message tried the same model twice the later
+// result is the one kept. A success clears any cooldown; a failure keeps the
+// time of the model's last success, which is what puts it first again once
+// it recovers.
+export async function saveModelHealth(updates: HealthUpdate[]): Promise<void> {
+  if (!updates.length) return;
+  await ensureCategoryTables();
+  const c = await db();
+  const now = Date.now();
+  await c.batch(
+    updates.map((u) =>
+      u.ok
+        ? {
+            sql: `INSERT INTO ai_model_health (model, busy_until, last_ok_at, last_ms, updated_at)
+                  VALUES (?, 0, ?, ?, ?)
+                  ON CONFLICT(model) DO UPDATE SET busy_until = 0, last_ok_at = excluded.last_ok_at,
+                    last_ms = excluded.last_ms, updated_at = excluded.updated_at`,
+            args: [u.model, now, u.ms, now],
+          }
+        : {
+            sql: `INSERT INTO ai_model_health (model, busy_until, last_ok_at, last_ms, updated_at)
+                  VALUES (?, ?, 0, ?, ?)
+                  ON CONFLICT(model) DO UPDATE SET busy_until = excluded.busy_until,
+                    last_ms = excluded.last_ms, updated_at = excluded.updated_at`,
+            args: [u.model, u.busyUntil, u.ms, now],
+          }
+    ),
+    "write"
+  );
 }

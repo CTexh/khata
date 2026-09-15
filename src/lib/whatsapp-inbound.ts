@@ -1,41 +1,93 @@
 // What happens to a message sent to the Khata WhatsApp number: find whose
-// number it is, understand it, save it, and reply. Runs after the webhook has
-// already answered Meta, so nothing here can make Meta retry.
+// number it is, work out what it records - an expense, or money lent or paid
+// back in Udhar Khata - save it, and reply. Runs after the webhook has already
+// answered Meta, so nothing here can make Meta retry.
 import {
+  addLedgerTransactions,
   attachInboundExpense,
+  attachInboundTransactions,
   claimInboundMessage,
   findUserIdByPhone,
   insertExpense,
+  listLedgerPeople,
   listUserCategories,
+  loadModelHealth,
   resolveExpenseCategory,
-  undoLastWhatsAppExpense,
+  saveModelHealth,
+  undoLastWhatsAppEntry,
+  type LedgerPerson,
 } from "@/lib/db";
-import { GeminiBusyError, parseExpense, pakistanToday } from "@/lib/expense-parse";
+import {
+  GeminiBusyError,
+  pakistanToday,
+  parseMessage,
+  parseOffline,
+  personKey,
+  type Attempt,
+  type HealthStore,
+  type ParseOutcome,
+  type ParsedExpense,
+  type ParsedLedger,
+} from "@/lib/expense-parse";
 import { downloadWhatsAppMedia, sendWhatsAppText } from "@/lib/whatsapp";
 import { detectCommand, extractMessages, type InboundMessage } from "@/lib/whatsapp-webhook";
-import { fmtDateLabel, fmtRs } from "@/lib/format";
+import {
+  BUSY_REPLY,
+  ERROR_REPLY,
+  HELP_REPLY,
+  UNSUPPORTED_REPLY,
+  ambiguousPersonReply,
+  expenseAddedReply,
+  ledgerReply,
+  refusalReply,
+  undoReply,
+} from "@/lib/whatsapp-replies";
 
-const HELP = [
-  "Send me an expense and I'll add it to Khata:",
-  "• fuel 3000 shell",
-  "• dinner 2.5k yesterday",
-  "• a photo of a bill or receipt",
-  "",
-  "Reply UNDO to remove the last one I added.",
-].join("\n");
+const health: HealthStore = { load: loadModelHealth, save: saveModelHealth };
+
+// One JSON line per message, so a message can be traced in Vercel's logs:
+// what it was, which models were tried and how long each took, and how it
+// ended. Deliberately no message text, amounts or names.
+type LogLine = {
+  evt: "whatsapp";
+  msg: string; // tail of Meta's message id
+  type: string;
+  outcome: string;
+  kind?: "expense" | "ledger";
+  direction?: "lend" | "repayment";
+  entries?: number;
+  category?: string | null;
+  parser?: "gemini" | "offline";
+  model?: string;
+  attempts?: Attempt[];
+  error?: string;
+  totalMs: number;
+};
 
 export async function handleInbound(payload: unknown): Promise<void> {
   for (const message of extractMessages(payload)) {
+    const started = Date.now();
+    const log: LogLine = {
+      evt: "whatsapp",
+      msg: message.id.slice(-8),
+      type: message.type,
+      outcome: "error",
+      totalMs: 0,
+    };
     try {
-      await handleMessage(message);
+      await handleMessage(message, log);
     } catch (err) {
-      console.error("[whatsapp] message failed", message.id, err);
-      await reply(
-        message.from,
-        err instanceof GeminiBusyError
-          ? "The AI that reads your messages is busy right now, so nothing was added. Please send it again in a minute."
-          : "Sorry, I couldn't add that. Please try again in a minute."
-      );
+      const busy = err instanceof GeminiBusyError;
+      log.outcome = busy ? "busy" : "error";
+      log.error = (err as Error).message.slice(0, 300);
+      if (busy) log.attempts = err.attempts;
+      await reply(message.from, busy ? BUSY_REPLY : ERROR_REPLY);
+    } finally {
+      log.totalMs = Date.now() - started;
+      const line = JSON.stringify(log);
+      if (log.outcome === "error") console.error(line);
+      else if (log.outcome === "busy") console.warn(line);
+      else console.log(line);
     }
   }
 }
@@ -45,40 +97,81 @@ async function reply(to: string, body: string): Promise<void> {
   if (!res.ok) console.error("[whatsapp] reply failed:", res.error);
 }
 
-async function handleMessage(message: InboundMessage): Promise<void> {
+async function handleMessage(message: InboundMessage, log: LogLine): Promise<void> {
   // Numbers that aren't on any profile get no reply at all: answering would
   // confirm to a stranger that the number is wired to someone's finances.
   const userId = await findUserIdByPhone(message.from);
   if (!userId) {
-    console.warn("[whatsapp] ignoring message from unregistered number");
+    log.outcome = "ignored_unregistered";
+    return;
+  }
+  if (!(await claimInboundMessage(message.id, userId))) {
+    log.outcome = "duplicate";
     return;
   }
 
-  if (!(await claimInboundMessage(message.id, userId))) return; // redelivery
-
   const command = detectCommand(message.text);
-  if (command === "help") return reply(message.from, HELP);
+  if (command === "help") {
+    log.outcome = "help";
+    return reply(message.from, HELP_REPLY);
+  }
   if (command === "undo") {
-    const undone = await undoLastWhatsAppExpense(userId);
-    return reply(
-      message.from,
-      undone
-        ? `Removed ${fmtRs(undone.amount)}${undone.vendor ? ` · ${undone.vendor}` : ""}.`
-        : "There's nothing from the last 24 hours to undo."
-    );
+    const undone = await undoLastWhatsAppEntry(userId);
+    log.outcome = undone ? "undone" : "undo_nothing";
+    return reply(message.from, undoReply(undone));
   }
 
   if (message.type !== "text" && message.type !== "image") {
-    return reply(message.from, "I can read text messages and photos of bills. Send HELP for examples.");
+    log.outcome = "unsupported";
+    return reply(message.from, UNSUPPORTED_REPLY);
   }
-  if (message.type === "text" && !message.text) return;
+  if (message.type === "text" && !message.text) {
+    log.outcome = "empty";
+    return;
+  }
 
+  const [categories, people] = await Promise.all([
+    listUserCategories(userId).then((list) => list.map((c) => c.name)),
+    listLedgerPeople(userId),
+  ]);
+  const names = people.map((p) => p.name);
   const image = message.imageId ? await downloadWhatsAppMedia(message.imageId) : null;
-  const categories = (await listUserCategories(userId)).map((c) => c.name);
-  const outcome = await parseExpense({ text: message.text, image, categories });
-  if (!outcome.ok) return reply(message.from, outcome.reason);
 
-  const { expense } = outcome;
+  let outcome: ParseOutcome;
+  let offline = false;
+  try {
+    const result = await parseMessage({ text: message.text, image, categories, people: names, health });
+    outcome = result.outcome;
+    log.parser = "gemini";
+    log.model = result.model;
+    log.attempts = result.attempts;
+  } catch (err) {
+    // Every model failed. A simple text expense can still be read without the
+    // model; photos and Udhar Khata updates can't, so those get "busy".
+    if (!(err instanceof GeminiBusyError) || image) throw err;
+    log.attempts = err.attempts;
+    log.parser = "offline";
+    outcome = parseOffline(message.text, pakistanToday(), names);
+    if (!outcome.ok) throw err;
+    offline = true;
+  }
+
+  if (!outcome.ok) {
+    log.outcome = "rejected";
+    return reply(message.from, refusalReply(outcome.reason));
+  }
+  if (outcome.kind === "ledger") return saveLedger(userId, message, outcome.ledger, people, log);
+  return saveExpense(userId, message, outcome.expense, categories, offline, log);
+}
+
+async function saveExpense(
+  userId: string,
+  message: InboundMessage,
+  expense: ParsedExpense,
+  categories: string[],
+  offline: boolean,
+  log: LogLine
+): Promise<void> {
   const resolution = await resolveExpenseCategory({
     userId,
     vendor: expense.vendor,
@@ -105,12 +198,74 @@ async function handleMessage(message: InboundMessage): Promise<void> {
   });
   await attachInboundExpense(message.id, id);
 
-  const parts = [fmtRs(expense.amount), category ?? "Uncategorised", expense.vendor].filter(Boolean);
-  const when = expense.date === pakistanToday() ? "" : ` (${fmtDateLabel(expense.date)})`;
-  const tail = category
-    ? "Reply UNDO to remove."
-    : "Pick a category in the app. Reply UNDO to remove.";
-  await reply(message.from, `Added ${parts.join(" · ")}${when}. ${tail}`);
+  log.kind = "expense";
+  log.category = category;
+  log.outcome = "added";
+  await reply(
+    message.from,
+    expenseAddedReply({
+      amount: expense.amount,
+      category,
+      vendor: expense.vendor,
+      date: expense.date,
+      today: pakistanToday(),
+      offline,
+    })
+  );
+}
+
+async function saveLedger(
+  userId: string,
+  message: InboundMessage,
+  ledger: ParsedLedger,
+  people: LedgerPerson[],
+  log: LogLine
+): Promise<void> {
+  // Validation matched each name against this same list, but two people can
+  // share a name ("Ali" and "ali"). Writing to either would be a guess.
+  const rows: { person: LedgerPerson; amount: number }[] = [];
+  for (const entry of ledger.entries) {
+    const matches = people.filter((p) => personKey(p.name) === personKey(entry.person));
+    if (matches.length !== 1) {
+      log.outcome = matches.length > 1 ? "ambiguous_person" : "rejected";
+      return reply(
+        message.from,
+        matches.length > 1
+          ? ambiguousPersonReply(entry.person)
+          : refusalReply(`I couldn't find ${entry.person} in your Udhar Khata.`)
+      );
+    }
+    rows.push({ person: matches[0], amount: entry.amount });
+  }
+
+  // Same sign convention as the Udhar Khata page: lent is positive, paid back negative.
+  const sign = ledger.direction === "lend" ? 1 : -1;
+  const txIds = await addLedgerTransactions(
+    userId,
+    rows.map((r) => ({ personId: r.person.id, amount: sign * r.amount })),
+    ledger.note ? `WhatsApp: ${ledger.note}` : "WhatsApp"
+  );
+  // Recorded before any check, so whatever was written can still be undone.
+  await attachInboundTransactions(message.id, txIds);
+  if (txIds.length !== rows.length) {
+    throw new Error(`Udhar Khata: wrote ${txIds.length} of ${rows.length} entries`);
+  }
+
+  log.kind = "ledger";
+  log.direction = ledger.direction;
+  log.entries = rows.length;
+  log.outcome = "added";
+  await reply(
+    message.from,
+    ledgerReply({
+      direction: ledger.direction,
+      lines: rows.map((r) => ({
+        name: r.person.name,
+        amount: r.amount,
+        balance: r.person.balance + sign * r.amount,
+      })),
+    })
+  );
 }
 
 // The app stores the wall-clock time the expense happened with a Z suffix
