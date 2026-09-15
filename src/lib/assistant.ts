@@ -94,7 +94,6 @@ import {
   udharPersonReply,
   udharSummaryReply,
   undoReply,
-  withTranscript,
   categoriesListReply,
   categoryCreatedReply,
   categoryDeletedReply,
@@ -161,7 +160,9 @@ export type AssistantLog = {
   totalMs: number;
 };
 
-export type AssistantResult = { reply: string | null; log: AssistantLog };
+// `heard` is what a voice note was transcribed to. The page shows it on the
+// message the user sent, rather than repeating it back inside the reply.
+export type AssistantResult = { reply: string | null; heard: string | null; log: AssistantLog };
 
 export async function runAssistant(input: AssistantInput): Promise<AssistantResult> {
   const started = Date.now();
@@ -173,8 +174,9 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantResu
     totalMs: 0,
   };
   let reply: string | null = null;
+  const spoken: { heard: string | null } = { heard: null };
   try {
-    reply = await handle(input, log);
+    reply = await handle(input, log, spoken);
   } catch (err) {
     const busy = err instanceof GeminiBusyError;
     log.outcome = busy ? "busy" : "error";
@@ -188,10 +190,14 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantResu
     else if (log.outcome === "busy") console.warn(line);
     else console.log(line);
   }
-  return { reply, log };
+  return { reply, heard: spoken.heard, log };
 }
 
-async function handle(input: AssistantInput, log: AssistantLog): Promise<string | null> {
+async function handle(
+  input: AssistantInput,
+  log: AssistantLog,
+  spoken: { heard: string | null }
+): Promise<string | null> {
   const { userId, text, image, audio } = input;
 
   const command = detectCommand(text);
@@ -233,6 +239,7 @@ async function handle(input: AssistantInput, log: AssistantLog): Promise<string 
     });
     outcome = result.action;
     heard = result.transcript;
+    spoken.heard = result.transcript;
     log.parser = "gemini";
     log.model = result.model;
     log.attempts = result.attempts;
@@ -247,10 +254,9 @@ async function handle(input: AssistantInput, log: AssistantLog): Promise<string 
     offline = true;
   }
 
-  const reply = await act(input, outcome, heard, people, categories, offline, log);
-  // For a voice note, what was heard comes first, so a mishearing is caught
-  // before the saved result is trusted.
-  return reply === null ? null : withTranscript(heard, reply);
+  // What was heard travels back separately: the page shows it as the message
+  // that was sent, so a mishearing is obvious without the reply repeating it.
+  return act(input, outcome, heard, people, categories, offline, log);
 }
 
 async function act(

@@ -984,7 +984,7 @@ export async function understandMessage(opts: {
 // step with the app: anything not described here, it says isn't available.
 export const APP_GUIDE = `Khata is a personal finance app for Pakistan. Amounts are in rupees (Rs) and dates follow Pakistan time.
 
-Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The profile picture (top right) opens: Edit profile, Welcome tour, Admin (admins only), Log out. The moon/sun button switches dark and light mode.
+Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The profile picture (top right) opens: Settings, Welcome tour, Admin (admins only), Log out. Settings holds your name, appearance (Light, Dark or System) and email notifications.
 
 Home: switch Today / This Week / This Month to see the total spent, the change against the previous period and that period's expenses. Cards show money owed to you and subscriptions still to pay. Accounts with assistant access also get the Ask Khata box (type, camera for a bill photo, microphone for a voice note).
 
@@ -994,7 +994,7 @@ Udhar Khata: money people owe you. Tap + to add a borrower (name, amount, note, 
 
 Subscriptions: tap + to add one (name, monthly amount, first due date; a logo is found automatically). Tap one to Mark paid, Pause or Resume, see the next payment, total paid, a payment timeline and history, or delete it. Past-due unpaid ones show Overdue.
 
-Email reminders: in Edit profile, add an email address and keep "Send me reminders" on. Emails come from the app's Gmail. At 6pm: a subscription the day before it is due and on the due day if still unpaid, and a person on their follow-up date. At 4:30am: a recap of the previous day (expenses, Udhar Khata changes, subscriptions due or paid, and a nudge to add anything missed). On the 1st: last month's summary. Each email links to the exact record. Turning the switch off stops them.
+Email reminders: in Settings, add an email address and keep "Send me emails" on. Each kind has its own switch there - subscriptions due, Udhar follow-ups, the daily recap and the monthly summary - so you can keep only the ones you want. Emails come from the app's Gmail. At 6pm: a subscription the day before it is due and on the due day if still unpaid, and a person on their follow-up date. At 4:30am: a recap of the previous day (expenses, Udhar Khata changes, subscriptions due or paid, and a nudge to add anything missed). On the 1st: last month's summary. Each email links to the exact record. Turning the switch off stops them.
 
 Assistant (admins, and accounts an admin has given assistant access in Admin): add expenses by typing, voice note or bill photo; lend money or record paybacks; set follow-up dates; edit or delete expenses; manage subscriptions and categories; answer questions about spending, balances and subscriptions; compare periods; show a person's history; turn email reminders on or off; take suggestions. The + menu has Camera, Photos, Undo last change and What can I say?. UNDO reverses the assistant's last change from the past 24 hours.
 

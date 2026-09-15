@@ -81,7 +81,9 @@ export async function GET(req: Request) {
         );
 
         // Built lazily, so only emails that still need sending do any work.
-        const pending: { key: string; build: () => Promise<ReminderEmail> }[] = [
+        const pending: { key: string; build: () => Promise<ReminderEmail> }[] = [];
+        // Each kind of email is opt-out in Profile settings.
+        if (user.prefs.subscriptions) pending.push(
           ...due.subsTomorrow.map((item) => ({
             key: item.key,
             build: async () => subscriptionReminderEmail({ name, item, stage: "before", appUrl: APP_URL }),
@@ -89,13 +91,15 @@ export async function GET(req: Request) {
           ...due.subsToday.map((item) => ({
             key: item.key,
             build: async () => subscriptionReminderEmail({ name, item, stage: "due", appUrl: APP_URL }),
-          })),
+          }))
+        );
+        if (user.prefs.udhar) pending.push(
           ...due.reachOut.map((item) => ({
             key: item.key,
             build: async () => udharReminderEmail({ name, item, appUrl: APP_URL }),
-          })),
-        ];
-        if (summaryFor) {
+          }))
+        );
+        if (summaryFor && user.prefs.monthlySummary) {
           pending.push({
             key: summaryFor.key,
             build: async () => {

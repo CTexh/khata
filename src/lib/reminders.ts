@@ -166,7 +166,7 @@ ${sections.map(tableFor).join("\n")}
 <p style="margin:24px 0 0;font-size:14px;line-height:1.6;color:#5a6275;">${escapeHtml(o.note)}</p>
 </td></tr>
 <tr><td style="padding:24px 32px 28px;">
-<p style="margin:0;padding-top:20px;border-top:1px solid #e6e9f2;font-size:12px;line-height:1.6;color:#8a91a3;">You are receiving this email because reminders are turned on for your Khata account. You can change this at any time in <a href="${escapeHtml(o.manageUrl)}" style="color:#5a6275;">Edit profile</a>.</p>
+<p style="margin:0;padding-top:20px;border-top:1px solid #e6e9f2;font-size:12px;line-height:1.6;color:#8a91a3;">You are receiving this email because reminders are turned on for your Khata account. You can change this at any time in <a href="${escapeHtml(o.manageUrl)}" style="color:#5a6275;">Settings</a>.</p>
 </td></tr>
 </table>
 </td></tr>

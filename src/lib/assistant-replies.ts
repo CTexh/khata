@@ -294,12 +294,6 @@ export function dueDateReply(o: { name: string; date: string | null }): string {
     : join(["*Due date removed*", "", `*${o.name}* no longer has a due date.`, "", "Reply *UNDO* to change it back."]);
 }
 
-// For a voice note, the reply opens with what was heard, so a mishearing is
-// noticed before the saved result is trusted.
-export function withTranscript(transcript: string | null, reply: string): string {
-  return transcript ? join([`*Heard:* ${transcript}`, "", reply]) : reply;
-}
-
 /* ---------- changes to existing records ---------- */
 
 export type ExpenseView = { amount: number; vendor: string | null; category: string | null; date: string; note: string };
@@ -608,7 +602,7 @@ export function remindersReply(o: { on: boolean; email: string | null }): string
     "",
     o.email
       ? `Reminders go to ${o.email}: subscriptions and follow-ups at 6pm, your daily recap at 4:30am.`
-      : "Add your email address in Edit profile so the reminders have somewhere to go.",
+      : "Add your email address in Settings so the reminders have somewhere to go.",
     "",
     "Reply *UNDO* to change it back.",
   ]);

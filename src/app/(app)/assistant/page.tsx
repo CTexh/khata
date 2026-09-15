@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { splitBold } from "@/lib/chat-format";
+import { replyBlocks, splitBold } from "@/lib/chat-format";
 import { encodeWav } from "@/lib/wav";
 import { ASSISTANT_DRAFT_KEY } from "@/lib/assistant-draft";
 import { invalidate, useCached } from "@/lib/swr";
+import { getMic, micPermissionIsPermanent, parkMic, releaseMic } from "@/lib/mic";
 import Link from "next/link";
 import { ArrowUpIcon, CameraIcon, MicIcon, SparkleIcon } from "@/components/icons";
 
@@ -20,7 +21,7 @@ type ChatMessage = {
   failed?: boolean;
 };
 
-type Delivery = { reply: string } | { error: string };
+type Delivery = { reply: string; heard?: string | null } | { error: string };
 
 // History lives only in this browser. Replies can mention amounts and names,
 // and the device is the user's own, so nothing is stored server-side for it.
@@ -92,7 +93,12 @@ async function waitForReply(requestId: string, maxMs: number): Promise<Delivery 
       if (res.status === 401) return { error: "Please log in again." };
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        if (data.status === "done") return { reply: typeof data.reply === "string" && data.reply ? data.reply : "Done." };
+        if (data.status === "done") {
+          return {
+            reply: typeof data.reply === "string" && data.reply ? data.reply : "Done.",
+            heard: typeof data.heard === "string" ? data.heard : null,
+          };
+        }
       } else if (res.status === 404 && Date.now() - started > 8_000) {
         // Still unknown after a few seconds: the message never arrived.
         return null;
@@ -113,7 +119,12 @@ async function deliver(form: FormData, requestId: string): Promise<Delivery> {
       if (!res.ok) {
         return { error: typeof data.error === "string" ? data.error : "Something went wrong. Please try again." };
       }
-      if (data.status === "done") return { reply: typeof data.reply === "string" && data.reply ? data.reply : "Done." };
+      if (data.status === "done") {
+        return {
+          reply: typeof data.reply === "string" && data.reply ? data.reply : "Done.",
+          heard: typeof data.heard === "string" ? data.heard : null,
+        };
+      }
       break;
     } catch {
       // The upload dropped. It may still have arrived, so the retry reuses the
@@ -176,26 +187,48 @@ const newId = (): string => {
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
+// A reply is plain text with *bold* marks. It is laid out here rather than
+// read as a wall of lines: the heading first, then "Label: value" lines as a
+// small table of what was recorded, and the undo hint as a footnote. Anything
+// that doesn't fit those shapes - answers to questions, lists - stays a
+// paragraph.
+function inline(line: string) {
+  return splitBold(line).map((seg, j) =>
+    seg.bold ? (
+      <strong key={j} className="font-semibold">
+        {seg.text}
+      </strong>
+    ) : (
+      <span key={j}>{seg.text}</span>
+    )
+  );
+}
+
 function Reply({ text }: { text: string }) {
   return (
     <>
-      {text.split("\n").map((line, i) =>
-        line.trim() === "" ? (
-          <div key={i} className="h-2" aria-hidden="true" />
-        ) : (
+      {replyBlocks(text).map((block, i) => {
+        if (block.kind === "gap") return <div key={i} className="h-2" aria-hidden="true" />;
+        if (block.kind === "head") return <p key={i} className="reply-head">{block.text}</p>;
+        if (block.kind === "foot") return <p key={i} className="reply-foot">{block.text}</p>;
+        if (block.kind === "facts") {
+          return (
+            <dl key={i} className="reply-facts">
+              {block.rows.map(([label, value], j) => (
+                <div key={j} className="reply-row">
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          );
+        }
+        return (
           <p key={i} className="leading-relaxed break-words">
-            {splitBold(line).map((seg, j) =>
-              seg.bold ? (
-                <strong key={j} className="font-semibold">
-                  {seg.text}
-                </strong>
-              ) : (
-                <span key={j}>{seg.text}</span>
-              )
-            )}
+            {inline(block.text)}
           </p>
-        )
-      )}
+        );
+      })}
     </>
   );
 }
@@ -215,27 +248,33 @@ export default function AssistantPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const discardRef = useRef(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   // Only accounts with assistant access can use it; the API enforces the same.
   const me = useCached<{ user: { aiAccess?: boolean } | null }>("/api/auth/me");
 
-  const finish = (bubbleId: string, result: Delivery) =>
+  // Fills in the reply, and - for a voice note - what was heard, on the
+  // message the user sent. Showing the transcript there rather than at the top
+  // of the reply keeps the reply about what was actually done.
+  const finish = (bubbleId: string, result: Delivery, spokenId?: string) => {
+    const heard = "reply" in result ? result.heard : null;
     setMessages((all) =>
-      all.map((msg) =>
-        msg.id === bubbleId
-          ? {
-              ...msg,
-              pending: false,
-              requestId: undefined,
-              text: "reply" in result ? result.reply : result.error,
-              failed: !("reply" in result),
-            }
-          : msg
-      )
+      all.map((msg) => {
+        if (msg.id === bubbleId) {
+          return {
+            ...msg,
+            pending: false,
+            requestId: undefined,
+            text: "reply" in result ? result.reply : result.error,
+            failed: !("reply" in result),
+          };
+        }
+        if (heard && spokenId && msg.id === spokenId && !msg.text) return { ...msg, text: heard };
+        return msg;
+      })
     );
+  };
 
   // Read after mount: localStorage doesn't exist while the server renders.
   // A reply still pending when the page was left is picked up again here.
@@ -261,47 +300,6 @@ export default function AssistantPage() {
     endRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "end" });
   }, [messages]);
 
-  // The microphone is asked for once and then kept for the rest of the visit,
-  // muted between recordings: asking again for every recording made the phone
-  // pop up its permission prompt each time. It is handed back as soon as the
-  // screen is left or the app goes to the background - and straight after a
-  // recording in browsers that report permission as permanently granted, where
-  // asking again costs nothing.
-  const micStream = async (): Promise<MediaStream> => {
-    const held = streamRef.current;
-    if (held && held.getAudioTracks().some((t) => t.readyState === "live")) {
-      held.getAudioTracks().forEach((t) => (t.enabled = true));
-      return held;
-    }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-    return stream;
-  };
-
-  const releaseMic = () => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-  };
-
-  // Muted, so nothing is captured between recordings.
-  const muteMic = () => streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = false));
-
-  const parkMic = async () => {
-    muteMic();
-    try {
-      const permissions = navigator.permissions as
-        | { query?: (d: { name: string }) => Promise<{ state: string }> }
-        | undefined;
-      const status = await permissions?.query?.({ name: "microphone" });
-      // Permanently granted: the next recording won't prompt, so hand the
-      // microphone back now and drop the browser's recording indicator.
-      if (status?.state === "granted") releaseMic();
-    } catch {
-      // No way to ask (Safari): keep the stream, muted, so the next recording
-      // doesn't prompt again.
-    }
-  };
-
   const stopRecording = (discard: boolean) => {
     discardRef.current = discard;
     const recorder = recorderRef.current;
@@ -322,17 +320,21 @@ export default function AssistantPage() {
     return () => clearInterval(id);
   }, [recordingSince]);
 
-  // Leaving the page mid-recording sends nothing, and the microphone is handed
-  // back - as it is whenever the app goes to the background.
+  // Leaving the screen mid-recording sends nothing. The microphone itself is
+  // kept for the visit - see lib/mic.ts - so coming back, or returning from
+  // another app, doesn't set off the permission prompt again. It is only let
+  // go where the browser guarantees the next recording won't prompt.
   useEffect(() => {
-    const onHidden = () => {
-      if (document.visibilityState === "hidden") releaseMic();
+    const onHidden = async () => {
+      if (document.visibilityState !== "hidden") return;
+      stopRecording(true);
+      if (await micPermissionIsPermanent()) releaseMic();
     };
     document.addEventListener("visibilitychange", onHidden);
     return () => {
       document.removeEventListener("visibilitychange", onHidden);
       stopRecording(true);
-      releaseMic();
+      void parkMic();
     };
   }, []);
 
@@ -369,10 +371,11 @@ export default function AssistantPage() {
     const sentPhoto = photo;
     const requestId = newId();
     const pendingId = newId();
+    const spokenId = newId();
     setMessages((m) => [
       ...m,
       {
-        id: newId(),
+        id: spokenId,
         role: "user",
         text: message,
         photo: !!sentPhoto,
@@ -400,7 +403,7 @@ export default function AssistantPage() {
     if (sentPhoto) form.set("image", sentPhoto.blob, "photo.jpg");
     if (voice) form.set("audio", voice.audio, "voice.wav");
 
-    finish(pendingId, await deliver(form, requestId));
+    finish(pendingId, await deliver(form, requestId), spokenId);
     // The assistant may have added or changed anything: refresh cached figures.
     invalidate("/api/");
     setBusy(false);
@@ -415,7 +418,7 @@ export default function AssistantPage() {
     }
     let stream: MediaStream;
     try {
-      stream = await micStream();
+      stream = await getMic();
     } catch {
       releaseMic();
       setNotice("Microphone access was blocked. Allow it for this site in your browser settings, then try again.");
@@ -575,9 +578,9 @@ export default function AssistantPage() {
                 <p className="text-[12px] opacity-80 mb-1">Photo</p>
               ) : null}
               {m.voiceSeconds !== undefined && (
-                <p className="flex items-center gap-1.5">
-                  <MicIcon size={18} />
-                  <span>Voice note · {clock(m.voiceSeconds)}</span>
+                <p className={`flex items-center gap-1.5${m.text ? " text-[12px] opacity-80 mb-1" : ""}`}>
+                  <MicIcon size={m.text ? 14 : 18} />
+                  <span>{m.text ? clock(m.voiceSeconds) : `Voice note · ${clock(m.voiceSeconds)}`}</span>
                 </p>
               )}
               {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}

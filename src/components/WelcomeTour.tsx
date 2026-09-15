@@ -28,7 +28,7 @@ const STEPS: Step[] = [
   {
     emoji: "📧",
     title: "Email reminders",
-    text: "Add your email in Edit profile. Get reminders at 6pm when a subscription or follow-up is due, a recap of your day at 4:30am, and a monthly summary.",
+    text: "Add your email in Settings, then pick which ones you want: subscriptions and follow-ups due at 6pm, a recap of your day at 4:30am, and a monthly summary. Light or dark mode lives there too.",
   },
 ];
 

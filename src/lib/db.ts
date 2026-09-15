@@ -194,7 +194,7 @@ export async function findUserById(id: string): Promise<User | null> {
 // Email reminders: where to send them, whether they're on, and a log of what
 // has been sent so a retried daily job never sends the same reminder twice.
 let emailColumnsEnsured = false;
-const EMAIL_SCHEMA = "1";
+const EMAIL_SCHEMA = "2";
 export async function ensureUserEmailColumns(): Promise<void> {
   if (emailColumnsEnsured) return;
   if (await schemaCurrent("user_email", EMAIL_SCHEMA)) {
@@ -205,7 +205,14 @@ export async function ensureUserEmailColumns(): Promise<void> {
   const c = await db();
   for (const sql of [
     `ALTER TABLE users ADD COLUMN email TEXT`,
+    // The master switch, and then one switch per kind of email, so someone can
+    // keep the ones they want. All on by default: existing accounts keep
+    // getting what they already agreed to.
     `ALTER TABLE users ADD COLUMN email_reminders INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE users ADD COLUMN remind_subs INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE users ADD COLUMN remind_udhar INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE users ADD COLUMN remind_recap INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE users ADD COLUMN remind_summary INTEGER NOT NULL DEFAULT 1`,
   ]) {
     try {
       await c.execute(sql);
@@ -223,24 +230,57 @@ export async function ensureUserEmailColumns(): Promise<void> {
   emailColumnsEnsured = true;
 }
 
-export type ProfileSettings = { name: string; email: string | null; emailReminders: boolean };
+// Which kinds of email an account wants. `emailReminders` is the master
+// switch: off means none of them are sent.
+export type EmailPrefs = {
+  subscriptions: boolean;
+  udhar: boolean;
+  dailyRecap: boolean;
+  monthlySummary: boolean;
+};
+
+export type ProfileSettings = {
+  name: string;
+  email: string | null;
+  emailReminders: boolean;
+  prefs: EmailPrefs;
+};
+
+export const EMAIL_PREF_COLUMNS = {
+  subscriptions: "remind_subs",
+  udhar: "remind_udhar",
+  dailyRecap: "remind_recap",
+  monthlySummary: "remind_summary",
+} as const;
+
+const on = (v: unknown) => Number(v ?? 1) === 1;
 
 export async function getProfileSettings(userId: string): Promise<ProfileSettings | null> {
   await ensureUserEmailColumns();
   const c = await db();
-  const rs = await c.execute({ sql: "SELECT name, email, email_reminders FROM users WHERE id = ?", args: [userId] });
+  const rs = await c.execute({
+    sql: `SELECT name, email, email_reminders, remind_subs, remind_udhar, remind_recap, remind_summary
+          FROM users WHERE id = ?`,
+    args: [userId],
+  });
   const r = rs.rows[0];
   if (!r) return null;
   return {
     name: (r.name as string) ?? "",
     email: (r.email as string) ?? null,
-    emailReminders: Number(r.email_reminders ?? 1) === 1,
+    emailReminders: on(r.email_reminders),
+    prefs: {
+      subscriptions: on(r.remind_subs),
+      udhar: on(r.remind_udhar),
+      dailyRecap: on(r.remind_recap),
+      monthlySummary: on(r.remind_summary),
+    },
   };
 }
 
 export async function updateUserProfile(
   userId: string,
-  fields: { name?: string; email?: string | null; emailReminders?: boolean }
+  fields: { name?: string; email?: string | null; emailReminders?: boolean; prefs?: Partial<EmailPrefs> }
 ): Promise<void> {
   await ensureUserEmailColumns();
   const sets: string[] = [];
@@ -257,24 +297,45 @@ export async function updateUserProfile(
     sets.push("email_reminders = ?");
     args.push(fields.emailReminders ? 1 : 0);
   }
+  for (const [key, column] of Object.entries(EMAIL_PREF_COLUMNS)) {
+    const value = fields.prefs?.[key as keyof EmailPrefs];
+    if (value === undefined) continue;
+    sets.push(`${column} = ?`);
+    args.push(value ? 1 : 0);
+  }
   if (!sets.length) return;
   const c = await db();
   await c.execute({ sql: `UPDATE users SET ${sets.join(", ")} WHERE id = ?`, args: [...args, userId] });
 }
 
-export type ReminderRecipient = { id: string; username: string; name: string | null; email: string };
+export type ReminderRecipient = {
+  id: string;
+  username: string;
+  name: string | null;
+  email: string;
+  prefs: EmailPrefs;
+};
 
+// Everyone with an address and the master switch on, with the kinds of email
+// they want, so each job only sends what was asked for.
 export async function listReminderRecipients(): Promise<ReminderRecipient[]> {
   await ensureUserEmailColumns();
   const c = await db();
   const rs = await c.execute(
-    "SELECT id, username, name, email FROM users WHERE email IS NOT NULL AND email <> '' AND email_reminders = 1"
+    `SELECT id, username, name, email, remind_subs, remind_udhar, remind_recap, remind_summary
+     FROM users WHERE email IS NOT NULL AND email <> '' AND email_reminders = 1`
   );
   return rs.rows.map((r) => ({
     id: r.id as string,
     username: r.username as string,
     name: (r.name as string) ?? null,
     email: r.email as string,
+    prefs: {
+      subscriptions: on(r.remind_subs),
+      udhar: on(r.remind_udhar),
+      dailyRecap: on(r.remind_recap),
+      monthlySummary: on(r.remind_summary),
+    },
   }));
 }
 
@@ -646,7 +707,7 @@ const MONTH_NAMES_FULL = [
 
 let categoryTablesEnsured = false;
 
-const CATEGORY_SCHEMA = "2";
+const CATEGORY_SCHEMA = "3";
 export async function ensureCategoryTables(): Promise<void> {
   if (categoryTablesEnsured) return;
   if (await schemaCurrent("category_tables", CATEGORY_SCHEMA)) {
@@ -740,6 +801,13 @@ export async function ensureCategoryTables(): Promise<void> {
   // ready rather than holding one long request open.
   try {
     await c.execute(`ALTER TABLE whatsapp_inbound ADD COLUMN reply TEXT`);
+  } catch {
+    // Column already exists.
+  }
+  // What a voice note was transcribed to. The page shows it on the message
+  // the user sent, so the reply itself stays about what was done.
+  try {
+    await c.execute(`ALTER TABLE whatsapp_inbound ADD COLUMN heard TEXT`);
   } catch {
     // Column already exists.
   }
@@ -1864,11 +1932,15 @@ export async function setPersonDueDate(
 
 /* ---------- in-app assistant replies ---------- */
 
-export async function saveInboundReply(messageId: string, reply: string): Promise<void> {
+export async function saveInboundReply(
+  messageId: string,
+  reply: string,
+  heard: string | null = null
+): Promise<void> {
   const c = await db();
   await c.execute({
-    sql: "UPDATE whatsapp_inbound SET reply = ? WHERE message_id = ?",
-    args: [reply, messageId],
+    sql: "UPDATE whatsapp_inbound SET reply = ?, heard = ? WHERE message_id = ?",
+    args: [reply, heard, messageId],
   });
 }
 
@@ -1877,15 +1949,15 @@ export async function saveInboundReply(messageId: string, reply: string): Promis
 export async function getInboundReply(
   messageId: string,
   userId: string
-): Promise<{ reply: string | null } | null> {
+): Promise<{ reply: string | null; heard: string | null } | null> {
   await ensureCategoryTables();
   const c = await db();
   const rs = await c.execute({
-    sql: "SELECT reply FROM whatsapp_inbound WHERE message_id = ? AND user_id = ?",
+    sql: "SELECT reply, heard FROM whatsapp_inbound WHERE message_id = ? AND user_id = ?",
     args: [messageId, userId],
   });
   const row = rs.rows[0];
-  return row ? { reply: (row.reply as string) ?? null } : null;
+  return row ? { reply: (row.reply as string) ?? null, heard: (row.heard as string) ?? null } : null;
 }
 
 /* ---------- undo: putting changed things back ---------- */

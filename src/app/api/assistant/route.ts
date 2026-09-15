@@ -20,8 +20,10 @@ const MAX_AUDIO_BYTES = 2.5 * 1024 * 1024;
 const INLINE_WAIT_MS = 9_000;
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function status(requestId: string, reply: string | null) {
-  return { id: requestId, status: reply === null ? "pending" : "done", reply };
+// `heard` is what a voice note was transcribed to, so the page can show it on
+// the message the user sent instead of the reply repeating it.
+function status(requestId: string, done: { reply: string; heard: string | null } | null) {
+  return { id: requestId, status: done ? "done" : "pending", reply: done?.reply ?? null, heard: done?.heard ?? null };
 }
 
 // The in-app assistant, reached with the normal login
@@ -99,15 +101,15 @@ export async function POST(req: Request) {
   if (!(await claimInboundMessage(messageId, userId))) {
     const existing = await getInboundReply(messageId, userId);
     if (!existing) return NextResponse.json({ error: "Please refresh the page and try again." }, { status: 409 });
-    return NextResponse.json(status(requestId, existing.reply));
+    return NextResponse.json(status(requestId, existing.reply === null ? null : { reply: existing.reply, heard: existing.heard }));
   }
 
-  const work = (async (): Promise<string | null> => {
+  const work = (async (): Promise<{ reply: string; heard: string | null } | null> => {
     try {
-      const { reply } = await runAssistant({ userId, messageId, text, image, audio, history });
+      const { reply, heard } = await runAssistant({ userId, messageId, text, image, audio, history });
       const final = reply || "Done.";
-      await saveInboundReply(messageId, final);
-      return final;
+      await saveInboundReply(messageId, final, heard);
+      return { reply: final, heard };
     } catch (err) {
       console.error(JSON.stringify({ evt: "assistant", msg: requestId.slice(-8), outcome: "reply_not_saved", error: (err as Error).message.slice(0, 300) }));
       return null;
@@ -135,5 +137,7 @@ export async function GET(req: Request) {
   }
   const row = await getInboundReply(`app-${requestId}`, session.userId);
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(status(requestId, row.reply), { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json(status(requestId, row.reply === null ? null : { reply: row.reply, heard: row.heard }), {
+    headers: { "Cache-Control": "no-store" },
+  });
 }

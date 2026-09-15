@@ -48,12 +48,11 @@ import {
   subscriptionsDueReply,
   udharPersonReply,
   udharSummaryReply,
-  withTranscript,
   QUESTION_REFUSAL_HEADING,
 } from "../src/lib/assistant-replies.ts";
 import { encodeWav } from "../src/lib/wav.ts";
 import { fmtDateLabel } from "../src/lib/format.ts";
-import { splitBold } from "../src/lib/chat-format.ts";
+import { replyBlocks, splitBold } from "../src/lib/chat-format.ts";
 
 let pass = 0;
 let fail = 0;
@@ -455,8 +454,6 @@ check("wav is PCM mono 16 kHz 16-bit", [wav.getUint16(20, true), wav.getUint16(2
 check("wav sizes", [wav.byteLength, wav.getUint32(40, true), wav.getUint32(4, true)], [54, 10, 46]);
 check("wav samples scaled and clipped", [0, 1, 2, 3, 4].map((i) => wav.getInt16(44 + i * 2, true)), [0, 32767, -32768, 16383, 32767]);
 check("a minute of voice fits the upload limit", 44 + 60 * 16000 * 2 <= 2.5 * 1024 * 1024, true);
-check("reply opens with what was heard", withTranscript("fuel 3000 shell", "*Expense added*"), "*Heard:* fuel 3000 shell\n\n*Expense added*");
-check("no transcript leaves reply alone", withTranscript(null, "*Expense added*"), "*Expense added*");
 
 /* in-app rendering of *bold*: split into pieces, never HTML */
 check("bold split", splitBold("*Ali*: Rs 500 lent"), [{ text: "Ali", bold: true }, { text: ": Rs 500 lent", bold: false }]);
@@ -510,6 +507,28 @@ check("help lists both sections", HELP_REPLY.includes("*Expenses*") && HELP_REPL
 for (const [label, text] of [["help", HELP_REPLY], ["busy", BUSY_REPLY]] as const) {
   check(`${label} has no doubled blank lines or trailing space`, /\n\n\n| \n| $/.test(text), false);
 }
+
+/* ---------- how the page lays a reply out ---------- */
+
+check(
+  "an added expense reads as a heading, facts and a footnote",
+  replyBlocks(expenseAddedReply({ amount: 3000, category: "Fuel", vendor: "Shell", date: "2026-09-15", today: "2026-09-15" })),
+  [
+    { kind: "head", text: "Expense added" },
+    { kind: "facts", rows: [["Amount", "Rs 3,000"], ["Category", "Fuel"], ["Vendor", "Shell"]] },
+    { kind: "foot", text: "Reply UNDO to remove it." },
+  ]
+);
+check(
+  "an answer stays a paragraph",
+  replyBlocks("You spent Rs 12,000 in September."),
+  [{ kind: "text", text: "You spent Rs 12,000 in September." }]
+);
+check(
+  "a bold line that isn't the opening stays a paragraph",
+  replyBlocks("*Removed*\n\n*Ali* paid back Rs 700"),
+  [{ kind: "head", text: "Removed" }, { kind: "gap" }, { kind: "text", text: "*Ali* paid back Rs 700" }]
+);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

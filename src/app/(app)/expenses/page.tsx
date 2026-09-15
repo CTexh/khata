@@ -1384,40 +1384,6 @@ function ExpensesView({
         </button>
       )}
 
-      {loadError ? (
-        <div className="card p-5 text-[14px]" style={{ color: "var(--bad)" }} role="alert">
-          {loadError}
-        </div>
-      ) : data && points.length === 0 ? (
-        <div className="card p-8 text-center rise">
-          <p className="text-[32px]" aria-hidden>🌿</p>
-          <p className="font-bold mt-1">No expenses in {periodLabel}</p>
-          <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>
-            Log one, or tell the assistant what you spent.
-          </p>
-          <button type="button" className="btn btn-expense mt-4" onClick={onAdd}>
-            Log expense
-          </button>
-        </div>
-      ) : (
-        points.length > 0 && (
-          <div style={{ opacity: refreshing ? 0.5 : 1, transition: "opacity .18s ease" }}>
-            <CategoryBreakdown points={points} selected={selected} onSelect={(c) => pick(c)} />
-          </div>
-        )
-      )}
-
-      {managing && (
-        <ManageCategoriesModal
-          categories={categories}
-          onClose={() => setManaging(false)}
-          onChanged={(next) => {
-            setCategories(next);
-            invalidate("/api/expenses");
-          }}
-        />
-      )}
-
       {points.length > 0 && (
         <section ref={historyRef} className="flex flex-col gap-3 scroll-mt-4" aria-labelledby="history-title">
           <div className="section-head">
@@ -1563,6 +1529,41 @@ function ExpensesView({
           )}
         </section>
       )}
+
+      {loadError ? (
+        <div className="card p-5 text-[14px]" style={{ color: "var(--bad)" }} role="alert">
+          {loadError}
+        </div>
+      ) : data && points.length === 0 ? (
+        <div className="card p-8 text-center rise">
+          <p className="text-[32px]" aria-hidden>🌿</p>
+          <p className="font-bold mt-1">No expenses in {periodLabel}</p>
+          <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>
+            Log one, or tell the assistant what you spent.
+          </p>
+          <button type="button" className="btn btn-expense mt-4" onClick={onAdd}>
+            Log expense
+          </button>
+        </div>
+      ) : (
+        points.length > 0 && (
+          <div style={{ opacity: refreshing ? 0.5 : 1, transition: "opacity .18s ease" }}>
+            <CategoryBreakdown points={points} selected={selected} onSelect={(c) => pick(c)} />
+          </div>
+        )
+      )}
+
+      {managing && (
+        <ManageCategoriesModal
+          categories={categories}
+          onClose={() => setManaging(false)}
+          onChanged={(next) => {
+            setCategories(next);
+            invalidate("/api/expenses");
+          }}
+        />
+      )}
+
     </>
   );
 }

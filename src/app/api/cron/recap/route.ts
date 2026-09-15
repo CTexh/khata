@@ -38,6 +38,7 @@ export async function GET(req: Request) {
 
   for (const user of await listReminderRecipients()) {
     try {
+      if (!user.prefs.dailyRecap) continue;
       if (!(await unsentReminders(user.id, [key])).has(key)) continue;
       const recap = await buildRecap(date, {
         expenses: (from, to) => listExpensesInRange(user.id, from, to),

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { ThemePicker } from "@/components/Theme";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
@@ -19,10 +19,66 @@ type CurrentUser = {
   createdAt?: string | null;
 };
 
-function EditProfileModal({ initialName, onClose, onSaved }: { initialName: string; onClose: () => void; onSaved: () => void }) {
+type EmailPrefs = {
+  subscriptions: boolean;
+  udhar: boolean;
+  dailyRecap: boolean;
+  monthlySummary: boolean;
+};
+
+const ALL_PREFS: EmailPrefs = { subscriptions: true, udhar: true, dailyRecap: true, monthlySummary: true };
+
+// One line per kind of email, in the order they reach you during a day.
+const EMAIL_KINDS: { key: keyof EmailPrefs; title: string; hint: string }[] = [
+  {
+    key: "subscriptions",
+    title: "Subscriptions due",
+    hint: "6pm the day before, and again on the day if it's still unpaid.",
+  },
+  { key: "udhar", title: "Udhar follow-ups", hint: "6pm on the date you set for someone who owes you." },
+  { key: "dailyRecap", title: "Daily recap", hint: "4:30am, covering the day just gone - and what you may have forgotten." },
+  { key: "monthlySummary", title: "Monthly summary", hint: "On the 1st, what last month cost you." },
+];
+
+function Switch({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-start justify-between gap-3 min-h-11 cursor-pointer">
+      <span className="min-w-0">
+        <span className="block text-[15px] font-semibold">{label}</span>
+        {hint && (
+          <span className="block text-[12.5px] mt-0.5" style={{ color: "var(--muted)" }}>
+            {hint}
+          </span>
+        )}
+      </span>
+      <input
+        type="checkbox"
+        className="h-6 w-6 mt-0.5 shrink-0 accent-[var(--accent)] cursor-pointer"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+    </label>
+  );
+}
+
+function SettingsModal({ initialName, onClose, onSaved }: { initialName: string; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initialName);
   const [email, setEmail] = useState("");
   const [reminders, setReminders] = useState(true);
+  const [prefs, setPrefs] = useState<EmailPrefs>(ALL_PREFS);
   const [available, setAvailable] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -36,6 +92,7 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
         setName(d.name ?? "");
         setEmail(d.email ?? "");
         setReminders(d.emailReminders !== false);
+        setPrefs({ ...ALL_PREFS, ...(d.prefs ?? {}) });
         setAvailable(d.emailAvailable !== false);
       })
       .finally(() => setLoaded(true));
@@ -45,7 +102,7 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
     const res = await fetch("/api/profile", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, emailReminders: reminders }),
+      body: JSON.stringify({ name, email, emailReminders: reminders, prefs }),
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
@@ -66,8 +123,12 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
     onClose();
   };
 
+  // Without an address there is nothing to send to, so the switches are shown
+  // but inert until one is typed.
+  const emailable = loaded && Boolean(email.trim());
+
   return (
-    <Sheet title="Edit profile" onClose={onClose}>
+    <Sheet title="Settings" onClose={onClose}>
       <form onSubmit={save} className="flex flex-col gap-3">
         <div className="card p-4 flex flex-col gap-3">
           <label className="flex flex-col gap-1.5">
@@ -80,9 +141,19 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
 
         <div className="card p-4 flex flex-col gap-3">
           <div>
-            <p className="text-[15px] font-bold">Email reminders</p>
+            <p className="text-[15px] font-bold">Appearance</p>
             <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
-              Subscriptions due (a day before and on the day) and Udhar follow-up dates at 6pm, a recap of your day at 4:30am, and a monthly summary.
+              System follows your phone&apos;s light or dark setting.
+            </p>
+          </div>
+          <ThemePicker />
+        </div>
+
+        <div className="card p-4 flex flex-col gap-3">
+          <div>
+            <p className="text-[15px] font-bold">Email notifications</p>
+            <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
+              Where reminders are sent. Pick the ones you want below.
             </p>
           </div>
           <input
@@ -96,16 +167,27 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
             disabled={!loaded}
             onChange={(e) => setEmail(e.target.value)}
           />
-          <label className="flex items-center justify-between gap-3 min-h-11 cursor-pointer">
-            <span className="text-[15px] font-semibold">Send me reminders</span>
-            <input
-              type="checkbox"
-              className="h-6 w-6 accent-[var(--accent)] cursor-pointer"
-              checked={reminders}
-              disabled={!loaded}
-              onChange={(e) => setReminders(e.target.checked)}
-            />
-          </label>
+          <Switch
+            label="Send me emails"
+            hint="Off means none of the below are sent."
+            checked={reminders}
+            disabled={!emailable}
+            onChange={setReminders}
+          />
+          {reminders && (
+            <div className="flex flex-col gap-3 pt-3" style={{ borderTop: "1px solid var(--ring)" }}>
+              {EMAIL_KINDS.map((kind) => (
+                <Switch
+                  key={kind.key}
+                  label={kind.title}
+                  hint={kind.hint}
+                  checked={prefs[kind.key]}
+                  disabled={!emailable}
+                  onChange={(v) => setPrefs((p) => ({ ...p, [kind.key]: v }))}
+                />
+              ))}
+            </div>
+          )}
           {!available && (
             <p className="text-[12px]" style={{ color: "var(--muted)" }}>
               Email sending isn&apos;t switched on yet - your address is saved for when it is.
@@ -267,7 +349,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <ThemeToggle />
             {user && (
               <div className="relative">
                 <button
@@ -303,7 +384,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         }}
                         className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-xl text-[14px] cursor-pointer hover:bg-[var(--surface-2)]"
                       >
-                        Edit Profile
+                        Settings
                       </button>
                       <button
                         type="button"
@@ -376,7 +457,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {tourOpen && user && <WelcomeTour withAssistant={Boolean(user.aiAccess)} onClose={closeTour} />}
 
       {profileOpen && (
-        <EditProfileModal initialName={user?.name ?? ""} onClose={closeProfile} onSaved={() => refreshMe()} />
+        <SettingsModal initialName={user?.name ?? ""} onClose={closeProfile} onSaved={() => refreshMe()} />
       )}
     </>
   );
