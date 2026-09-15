@@ -25,6 +25,59 @@ export function db(): Client {
   return getClient();
 }
 
+/* ---------- schema versions ---------- */
+
+// Each ensure*() below creates tables, columns and indexes with IF NOT EXISTS
+// or try/catch, which is safe but costs a round trip per statement - over
+// twenty on a fresh server instance before the first query could run. Once a
+// set of statements has run, its version is recorded in app_meta, and later
+// instances skip it after a single read. Bump a version when its DDL changes.
+let metaLoad: Promise<Map<string, string>> | null = null;
+
+function loadMeta(): Promise<Map<string, string>> {
+  metaLoad ??= (async () => {
+    const c = db();
+    try {
+      const rs = await c.execute("SELECT key, value FROM app_meta");
+      return new Map(rs.rows.map((r) => [r.key as string, r.value as string]));
+    } catch {
+      await c.execute("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+      return new Map<string, string>();
+    }
+  })().catch((err) => {
+    metaLoad = null;
+    throw err;
+  });
+  return metaLoad;
+}
+
+async function schemaCurrent(name: string, version: string): Promise<boolean> {
+  try {
+    return (await loadMeta()).get(name) === version;
+  } catch {
+    return false;
+  }
+}
+
+async function markSchema(name: string, version: string): Promise<void> {
+  await db().execute({
+    sql: "INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    args: [name, version],
+  });
+  (await loadMeta()).set(name, version);
+}
+
+// Date bounds for a month ("2026-09" up to "2026-10") or a year ("2026" up to
+// "2027"). Compared as strings they select the same rows as LIKE '2026-09%',
+// but let SQLite use the (user_id, expense_date) index for the whole range
+// instead of reading every expense the user has.
+function dateBounds(year: number, month?: number): [string, string] {
+  if (month === undefined) return [String(year), String(year + 1)];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const to = month === 12 ? `${year + 1}-01` : `${year}-${pad(month + 1)}`;
+  return [`${year}-${pad(month)}`, to];
+}
+
 /* ---------- users ---------- */
 
 export type User = {
@@ -40,7 +93,10 @@ export type User = {
 // mirrors the ensureTablesExist() pattern used for subscriptions below.
 // SELECT * against a DB missing this column simply omits it from the row
 // (no error), so only writers (signup) need to call this first.
+let nameColumnEnsured = false;
 export async function ensureUserNameColumn(): Promise<void> {
+  if (nameColumnEnsured) return;
+  nameColumnEnsured = true;
   const c = await db();
   try {
     await c.execute(`ALTER TABLE users ADD COLUMN name TEXT`);
@@ -59,12 +115,17 @@ let loginTableEnsured = false;
 
 async function ensureLoginAttemptsTable(): Promise<void> {
   if (loginTableEnsured) return;
+  if (await schemaCurrent("login_failures", "1")) {
+    loginTableEnsured = true;
+    return;
+  }
   const c = await db();
   await c.execute(`CREATE TABLE IF NOT EXISTS login_failures (
     username TEXT PRIMARY KEY,
     count INTEGER NOT NULL,
     first_at INTEGER NOT NULL
   )`);
+  await markSchema("login_failures", "1");
   loginTableEnsured = true;
 }
 
@@ -133,8 +194,13 @@ export async function findUserById(id: string): Promise<User | null> {
 // Email reminders: where to send them, whether they're on, and a log of what
 // has been sent so a retried daily job never sends the same reminder twice.
 let emailColumnsEnsured = false;
+const EMAIL_SCHEMA = "1";
 export async function ensureUserEmailColumns(): Promise<void> {
   if (emailColumnsEnsured) return;
+  if (await schemaCurrent("user_email", EMAIL_SCHEMA)) {
+    emailColumnsEnsured = true;
+    return;
+  }
   await ensureUserNameColumn();
   const c = await db();
   for (const sql of [
@@ -153,6 +219,7 @@ export async function ensureUserEmailColumns(): Promise<void> {
     sent_at TEXT NOT NULL,
     PRIMARY KEY (user_id, item)
   )`);
+  await markSchema("user_email", EMAIL_SCHEMA);
   emailColumnsEnsured = true;
 }
 
@@ -408,15 +475,10 @@ export async function listExpenses(
   opts: { year: number; month?: number; category?: string }
 ): Promise<Expense[]> {
   const c = await db();
-  const prefix =
-    opts.month !== undefined
-      ? `${opts.year}-${String(opts.month).padStart(2, "0")}`
-      : `${opts.year}`;
-
   const filter = opts.category ? categoryFilter(opts.category) : { sql: "", args: [] };
   const rs = await c.execute({
-    sql: `SELECT * FROM expenses WHERE user_id = ? AND expense_date LIKE ?${filter.sql} ORDER BY expense_date DESC, created_at DESC`,
-    args: [userId, `${prefix}%`, ...filter.args],
+    sql: `SELECT * FROM expenses WHERE user_id = ? AND expense_date >= ? AND expense_date < ?${filter.sql} ORDER BY expense_date DESC, created_at DESC`,
+    args: [userId, ...dateBounds(opts.year, opts.month), ...filter.args],
   });
   return rs.rows.map(rowToExpense);
 }
@@ -430,19 +492,15 @@ export async function categoryTotals(
   opts: { year: number; month?: number }
 ): Promise<CategoryPoint[]> {
   const c = await db();
-  const prefix =
-    opts.month !== undefined
-      ? `${opts.year}-${String(opts.month).padStart(2, "0")}`
-      : `${opts.year}`;
   const rs = await c.execute({
     sql: `SELECT COALESCE(NULLIF(TRIM(category), ''), ?) AS category,
                  SUM(amount) AS total,
                  COUNT(*) AS count
           FROM expenses
-          WHERE user_id = ? AND expense_date LIKE ?
+          WHERE user_id = ? AND expense_date >= ? AND expense_date < ?
           GROUP BY category
           ORDER BY total DESC`,
-    args: [UNCATEGORISED, userId, `${prefix}%`],
+    args: [UNCATEGORISED, userId, ...dateBounds(opts.year, opts.month)],
   });
   return rs.rows.map((r) => ({
     category: r.category as string,
@@ -489,8 +547,8 @@ export async function ensureMonthlySubscriptionsExpense(
   const c = await db();
   const prefix = `${year}-${String(month).padStart(2, "0")}`;
   const existing = await c.execute({
-    sql: `SELECT id FROM expenses WHERE user_id = ? AND category = 'Subscriptions' AND expense_date LIKE ?`,
-    args: [userId, `${prefix}%`],
+    sql: `SELECT id FROM expenses WHERE user_id = ? AND category = 'Subscriptions' AND expense_date >= ? AND expense_date < ?`,
+    args: [userId, ...dateBounds(year, month)],
   });
   if (existing.rows.length > 0) return false;
 
@@ -528,8 +586,13 @@ const MONTH_NAMES_FULL = [
 
 let categoryTablesEnsured = false;
 
+const CATEGORY_SCHEMA = "2";
 export async function ensureCategoryTables(): Promise<void> {
   if (categoryTablesEnsured) return;
+  if (await schemaCurrent("category_tables", CATEGORY_SCHEMA)) {
+    categoryTablesEnsured = true;
+    return;
+  }
   const c = await db();
   await c.execute(`CREATE TABLE IF NOT EXISTS expense_vendor_rules (
     user_id TEXT NOT NULL,
@@ -567,6 +630,10 @@ export async function ensureCategoryTables(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_expenses_vendor_key ON expenses (user_id, vendor_key)`,
     `CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses (user_id, expense_date)`,
     `CREATE INDEX IF NOT EXISTS idx_expenses_user_category ON expenses (user_id, category)`,
+    // Every balance sums a person's transactions; without this SQLite built a
+    // temporary index on each /api/people request.
+    `CREATE INDEX IF NOT EXISTS idx_transactions_person ON transactions (person_id, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_people_user ON people (user_id)`,
   ]) {
     try {
       await c.execute(sql);
@@ -626,6 +693,7 @@ export async function ensureCategoryTables(): Promise<void> {
     last_ms INTEGER,
     updated_at INTEGER NOT NULL
   )`);
+  await markSchema("category_tables", CATEGORY_SCHEMA);
   categoryTablesEnsured = true;
 }
 
@@ -974,44 +1042,47 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
 
   const period = currentPeriodStr();
   const today = todayYMD();
-  const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const soon = pkDate(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const ids = rs.rows.map((r) => r.id as string);
 
-  // Was N sequential ensurePeriodPayment + N sequential history SELECTs
-  // (2N+1 round trips to a remote DB). Batch the inserts into one
-  // transaction and pull every subscription's history in a single
-  // IN-list SELECT instead - 3 round trips total regardless of N.
-  const insertStmts = rs.rows
-    .filter((r) => Number(r.active ?? 1) === 1)
-    .map((r) => ({
-      sql: `INSERT OR IGNORE INTO subscription_payments (id, subscription_id, period, due_date, paid_at, created_at)
-            VALUES (?, ?, ?, ?, NULL, ?)`,
-      args: [
-        randomUUID(),
-        r.id as string,
-        period,
-        clampedDateForPeriod(period, Number(r.due_day)),
-        new Date().toISOString(),
-      ],
-    }));
-  if (insertStmts.length > 0) await c.batch(insertStmts, "write");
-
-  const histRs = await c.execute({
-    sql: `SELECT id, subscription_id, period, due_date, paid_at
-          FROM subscription_payments WHERE subscription_id IN (${ids.map(() => "?").join(",")}) ORDER BY period DESC`,
-    args: ids,
-  });
-  const historyBySub = new Map<string, PaymentRecord[]>();
-  for (const h of histRs.rows) {
-    const subId = h.subscription_id as string;
-    const list = historyBySub.get(subId) ?? [];
-    list.push({
-      id: h.id as string,
-      period: h.period as string,
-      due_date: h.due_date as string,
-      paid_at: (h.paid_at as string) ?? null,
+  // One read for every subscription's history. This month's payment row is
+  // only written when it's missing - about once a month per subscription -
+  // instead of an INSERT OR IGNORE batch on every page load.
+  const loadHistory = async () => {
+    const histRs = await c.execute({
+      sql: `SELECT id, subscription_id, period, due_date, paid_at
+            FROM subscription_payments WHERE subscription_id IN (${ids.map(() => "?").join(",")}) ORDER BY period DESC`,
+      args: ids,
     });
-    historyBySub.set(subId, list);
+    const bySub = new Map<string, PaymentRecord[]>();
+    for (const h of histRs.rows) {
+      const subId = h.subscription_id as string;
+      const list = bySub.get(subId) ?? [];
+      list.push({
+        id: h.id as string,
+        period: h.period as string,
+        due_date: h.due_date as string,
+        paid_at: (h.paid_at as string) ?? null,
+      });
+      bySub.set(subId, list);
+    }
+    return bySub;
+  };
+
+  let historyBySub = await loadHistory();
+  const missing = rs.rows.filter(
+    (r) => Number(r.active ?? 1) === 1 && !(historyBySub.get(r.id as string) ?? []).some((h) => h.period === period)
+  );
+  if (missing.length > 0) {
+    await c.batch(
+      missing.map((r) => ({
+        sql: `INSERT OR IGNORE INTO subscription_payments (id, subscription_id, period, due_date, paid_at, created_at)
+              VALUES (?, ?, ?, ?, NULL, ?)`,
+        args: [randomUUID(), r.id as string, period, clampedDateForPeriod(period, Number(r.due_day)), new Date().toISOString()],
+      })),
+      "write"
+    );
+    historyBySub = await loadHistory();
   }
 
   const result: SubscriptionWithStatus[] = [];
@@ -1130,8 +1201,13 @@ export async function deleteSubscription(subscriptionId: string, userId: string)
 // for zero effect after the first call. Cache in-process instead.
 let tablesEnsured = false;
 
+const SUBSCRIPTION_SCHEMA = "1";
 export async function ensureTablesExist(): Promise<void> {
   if (tablesEnsured) return;
+  if (await schemaCurrent("subscription_tables", SUBSCRIPTION_SCHEMA)) {
+    tablesEnsured = true;
+    return;
+  }
   const c = await db();
   await c.batch(
     [
@@ -1202,6 +1278,7 @@ export async function ensureTablesExist(): Promise<void> {
     // Index already exists.
   }
 
+  await markSchema("subscription_tables", SUBSCRIPTION_SCHEMA);
   tablesEnsured = true;
 }
 

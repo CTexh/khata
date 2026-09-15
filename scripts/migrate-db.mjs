@@ -40,6 +40,7 @@ await client.batch(
     )`,
     `CREATE INDEX IF NOT EXISTS idx_people_user ON people(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)`,
+    `CREATE INDEX IF NOT EXISTS idx_transactions_person ON transactions(person_id, created_at)`,
   ],
   "write"
 );
