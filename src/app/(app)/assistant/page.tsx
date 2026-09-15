@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { splitBold } from "@/lib/chat-format";
 import { encodeWav } from "@/lib/wav";
 import { ASSISTANT_DRAFT_KEY } from "@/lib/assistant-draft";
-import { CameraIcon, MicIcon } from "@/components/icons";
+import Link from "next/link";
+import { ArrowUpIcon, CameraIcon, MicIcon, SparkleIcon } from "@/components/icons";
 
 type ChatMessage = {
   id: string;
@@ -214,6 +215,8 @@ export default function AssistantPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const discardRef = useRef(false);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const finish = (bubbleId: string, result: Delivery) =>
     setMessages((all) =>
@@ -290,6 +293,7 @@ export default function AssistantPage() {
       setNotice("Couldn't read that photo. Try a screenshot or a JPEG.");
     } finally {
       if (fileRef.current) fileRef.current.value = "";
+      if (cameraRef.current) cameraRef.current.value = "";
     }
   };
 
@@ -403,8 +407,7 @@ export default function AssistantPage() {
     if (draft) send(draft);
     else if (start === "voice") startRecording();
     else if (start === "photo") {
-      fileRef.current?.click();
-      setNotice("Tap the camera button to attach a photo of the bill.");
+      setMenuOpen(true);
     }
     // send and startRecording are stable enough here: this runs exactly once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -412,41 +415,71 @@ export default function AssistantPage() {
 
   const recording = recordingSince !== null;
 
-  return (
-    <section className="card p-4 sm:p-5 rise flex flex-col w-full">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <p className="text-[13px] min-w-0" style={{ color: "var(--muted)" }}>
-          Tell Khata what happened, or ask about your money.
-        </p>
-        {messages.length > 0 && (
-          <button
-            type="button"
-            className="btn btn-ghost !py-2 !px-3 text-[12px] shrink-0"
-            onClick={() => setMessages([])}
-            disabled={busy || recording}
-          >
-            Clear
-          </button>
-        )}
-      </div>
+  // The message box grows with what's typed, up to a few lines.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [text]);
 
-      <div
-        className="overflow-y-auto flex flex-col gap-3 pr-1"
-        style={{ height: "calc(100dvh - 400px - env(safe-area-inset-bottom))", minHeight: 240 }}
-        aria-live="polite"
-        aria-label="Conversation"
-      >
+  const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, disabled = false) => (
+    <button
+      type="button"
+      role="menuitem"
+      className="chat-menu-item"
+      disabled={disabled}
+      onClick={() => {
+        setMenuOpen(false);
+        onClick();
+      }}
+    >
+      <span className="chat-menu-icon" aria-hidden>
+        {icon}
+      </span>
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="chat-screen">
+      <header className="chat-topbar">
+        <Link href="/" className="chat-round" aria-label="Back to Home">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M15 5l-7 7 7 7" />
+          </svg>
+        </Link>
+        <h1 className="chat-title">
+          <SparkleIcon size={18} />
+          Khata AI
+        </h1>
+        <button
+          type="button"
+          className="chat-round"
+          aria-label="New chat"
+          onClick={() => setMessages([])}
+          disabled={busy || recording || messages.length === 0}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 20.5a8.5 8.5 0 1 0-7.4-4.3L3.5 20.5l4.3-1.1a8.5 8.5 0 0 0 4.2 1.1z" />
+            <path d="M12 8.5v7M8.5 12h7" />
+          </svg>
+        </button>
+      </header>
+
+      <div className="chat-body" aria-live="polite" aria-label="Conversation">
         {loaded && messages.length === 0 && (
-          <div className="my-auto flex flex-col items-center text-center gap-3 py-6">
-            <p className="text-[14px]" style={{ color: "var(--muted)" }}>
-              Type, record a voice note, or attach a photo of a bill. For example:
-            </p>
-            <div className="flex flex-wrap justify-center gap-2">
-              {EXAMPLES.map((ex) => (
+          <div className="chat-empty">
+            <div className="chat-glow-card rise">
+              <p className="chat-glow-title">What can Khata do for you?</p>
+              <p className="chat-glow-hint">&ldquo;{EXAMPLES[0]}&rdquo;</p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2 max-w-sm">
+              {EXAMPLES.slice(1).map((ex) => (
                 <button
                   key={ex}
                   type="button"
-                  className="btn btn-ghost !py-2 !px-3 text-[13px]"
+                  className="chat-chip"
                   onClick={() => {
                     setText(ex);
                     inputRef.current?.focus();
@@ -461,35 +494,29 @@ export default function AssistantPage() {
 
         {messages.map((m) =>
           m.role === "user" ? (
-            <div
-              key={m.id}
-              className="self-end max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-[14px]"
-              style={{ background: "var(--accent)", color: "#fff" }}
-            >
+            <div key={m.id} className="chat-bubble-user">
               {m.photoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element -- a local object URL, nothing to optimise
-                <img src={m.photoUrl} alt="Attached photo" className="rounded-lg mb-2 max-h-48 object-cover" />
+                <img src={m.photoUrl} alt="Attached photo" className="rounded-2xl mb-2 max-h-56 object-cover" />
               ) : m.photo ? (
                 <p className="text-[12px] opacity-80 mb-1">Photo</p>
               ) : null}
               {m.voiceSeconds !== undefined && (
                 <p className="flex items-center gap-1.5">
-                  <MicIcon size={20} />
+                  <MicIcon size={18} />
                   <span>Voice note · {clock(m.voiceSeconds)}</span>
                 </p>
               )}
               {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
             </div>
           ) : (
-            <div
-              key={m.id}
-              className="tile self-start max-w-[85%] rounded-2xl rounded-bl-md px-4 py-2.5 text-[14px]"
-              style={m.failed ? { borderLeft: "3px solid var(--bad)" } : undefined}
-            >
+            <div key={m.id} className={`chat-bubble-bot${m.failed ? " failed" : ""}`}>
               {m.pending ? (
-                <p style={{ color: "var(--muted)" }} role="status">
-                  Thinking…
-                </p>
+                <span className="chat-typing" role="status" aria-label="Thinking">
+                  <i />
+                  <i />
+                  <i />
+                </span>
               ) : (
                 <Reply text={m.text} />
               )}
@@ -499,106 +526,135 @@ export default function AssistantPage() {
         <div ref={endRef} />
       </div>
 
-      {notice && (
-        <p className="text-[13px] mt-3" style={{ color: "var(--bad)" }} role="alert">
-          {notice}
-        </p>
-      )}
+      <div className="chat-dock">
+        {notice && (
+          <p className="chat-notice" role="alert">
+            {notice}
+          </p>
+        )}
 
-      {photo && !recording && (
-        <div className="mt-3 flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, nothing to optimise */}
-          <img src={photo.url} alt="Photo to send" className="h-14 w-14 rounded-lg object-cover" />
-          <button type="button" className="btn btn-ghost !py-1.5 !px-3 text-[12px]" onClick={removePhoto}>
-            Remove photo
-          </button>
-        </div>
-      )}
+        {menuOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
+            <div className="chat-menu rise" role="menu">
+              {menuItem("Camera", <CameraIcon size={22} />, () => cameraRef.current?.click(), busy)}
+              {menuItem(
+                "Photos",
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3.5" y="4.5" width="17" height="15" rx="3" />
+                  <circle cx="9" cy="10" r="1.6" />
+                  <path d="M20.5 15.5l-4.5-4.5-8 8.5" />
+                </svg>,
+                () => fileRef.current?.click(),
+                busy
+              )}
+              {menuItem(
+                "Undo last change",
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 14L4 9l5-5" />
+                  <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+                </svg>,
+                () => send("undo"),
+                busy
+              )}
+              {menuItem(
+                "What can I say?",
+                <SparkleIcon size={22} />,
+                () => send("help"),
+                busy
+              )}
+            </div>
+          </>
+        )}
 
-      {recording ? (
-        <div className="tile mt-3 flex items-center gap-3 px-4 py-2.5" role="status" aria-live="polite">
-          <span className="h-2.5 w-2.5 rounded-full animate-pulse shrink-0" style={{ background: "var(--bad)" }} aria-hidden="true" />
-          <span className="text-[14px] font-medium tabular">Recording {clock(elapsed)}</span>
-          <span className="text-[12px]" style={{ color: "var(--muted)" }}>
-            up to {clock(MAX_VOICE_SECONDS)}
-          </span>
-          <div className="ml-auto flex gap-2">
-            <button type="button" className="btn btn-ghost !py-1.5 !px-3 text-[13px]" onClick={() => stopRecording(true)}>
-              Cancel
-            </button>
-            <button type="button" className="btn btn-primary !py-1.5 !px-3.5 text-[13px]" onClick={() => stopRecording(false)}>
-              Send
-            </button>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => attach(e.target.files?.[0])} />
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => attach(e.target.files?.[0])}
+        />
+
+        {recording ? (
+          <div className="chat-composer" role="status" aria-live="polite">
+            <div className="flex items-center gap-3 px-2 py-1.5">
+              <span className="h-3 w-3 rounded-full animate-pulse shrink-0" style={{ background: "var(--bad)" }} aria-hidden />
+              <span className="text-[16px] font-bold tabular">{clock(elapsed)}</span>
+              <span className="text-[13px] truncate" style={{ color: "var(--muted)" }}>
+                Listening… up to {clock(MAX_VOICE_SECONDS)}
+              </span>
+              <div className="ml-auto flex items-center gap-2 shrink-0">
+                <button type="button" className="chat-round !w-11 !h-11" aria-label="Cancel recording" onClick={() => stopRecording(true)}>
+                  ✕
+                </button>
+                <button type="button" className="chat-send" aria-label="Send voice note" onClick={() => stopRecording(false)}>
+                  <ArrowUpIcon size={22} />
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      ) : (
-        <form
-          className="mt-3 flex items-end gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            send(text);
-          }}
-        >
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => attach(e.target.files?.[0])}
-          />
-          <button
-            type="button"
-            className="btn btn-ghost !p-0 w-11 h-11 shrink-0"
-            aria-label="Attach a photo of a bill"
-            onClick={() => fileRef.current?.click()}
-            disabled={busy}
-          >
-            <CameraIcon size={20} />
-          </button>
-          <textarea
-            ref={inputRef}
-            className="field flex-1 resize-none"
-            rows={1}
-            value={text}
-            maxLength={1000}
-            placeholder="Message Khata…"
-            aria-label="Message to Khata"
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                send(text);
-              }
+        ) : (
+          <form
+            className="chat-composer"
+            onSubmit={(e) => {
+              e.preventDefault();
+              send(text);
             }}
-          />
-          {text.trim() || photo ? (
-            <button className="btn btn-primary !p-0 w-11 h-11 shrink-0" aria-label="Send" disabled={busy}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 12h14M13 6l6 6-6 6" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-primary !p-0 w-11 h-11 shrink-0"
-              aria-label="Record a voice note"
-              onClick={startRecording}
-              disabled={busy}
-            >
-              <MicIcon size={20} />
-            </button>
-          )}
-        </form>
-      )}
-
-      <div className="mt-2 flex flex-wrap gap-2">
-        <button type="button" className="btn btn-ghost !py-1.5 !px-3 text-[12px]" onClick={() => send("undo")} disabled={busy || recording}>
-          Undo last
-        </button>
-        <button type="button" className="btn btn-ghost !py-1.5 !px-3 text-[12px]" onClick={() => send("help")} disabled={busy || recording}>
-          What can I say?
-        </button>
+          >
+            {photo && (
+              <div className="flex items-center gap-3 px-2 pt-1 pb-2">
+                {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, nothing to optimise */}
+                <img src={photo.url} alt="Photo to send" className="h-16 w-16 rounded-2xl object-cover" />
+                <button type="button" className="chat-chip" onClick={removePhoto}>
+                  Remove
+                </button>
+              </div>
+            )}
+            <textarea
+              ref={inputRef}
+              className="chat-input"
+              rows={1}
+              value={text}
+              maxLength={1000}
+              placeholder={photo ? "Add a note, or just send" : "Ask or tell Khata anything"}
+              aria-label="Message to Khata"
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  send(text);
+                }
+              }}
+            />
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                className="chat-round !w-11 !h-11"
+                aria-label="More options"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <span className="flex-1" />
+              {text.trim() || photo ? (
+                <button className="chat-send" aria-label="Send" disabled={busy}>
+                  <ArrowUpIcon size={22} />
+                </button>
+              ) : (
+                <button type="button" className="chat-send" aria-label="Record a voice note" onClick={startRecording} disabled={busy}>
+                  <MicIcon size={22} />
+                </button>
+              )}
+            </div>
+          </form>
+        )}
       </div>
-    </section>
+    </div>
   );
 }

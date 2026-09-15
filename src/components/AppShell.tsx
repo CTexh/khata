@@ -157,6 +157,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const home = pathname === "/";
   const displayName = user?.name || user?.username;
 
+  // The assistant is a full-screen chat with its own top bar and composer.
+  if (pathname === "/assistant") {
+    return (
+      <>
+        <a className="skip-link" href="#main-content">Skip to main content</a>
+        <main id="main-content">{children}</main>
+      </>
+    );
+  }
+
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
