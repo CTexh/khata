@@ -2,6 +2,7 @@ import { detectCommand } from "../src/lib/assistant-actions.ts";
 import {
   BUSY_COOLDOWN_MS,
   BROKEN_COOLDOWN_MS,
+  RATE_LIMIT_COOLDOWN_MS,
   GEMINI_BUDGET_MS,
   IMAGE_ATTEMPT_MS,
   MAX_AMOUNT,
@@ -201,6 +202,7 @@ check("min attempt below text limit", MIN_ATTEMPT_MS < TEXT_ATTEMPT_MS, true);
 check("backoff is short", RETRY_BACKOFF_MS <= 3_000, true);
 check("attempt cap allows several fallbacks", MAX_ATTEMPTS >= 5, true);
 check("busy cooldown shorter than broken", BUSY_COOLDOWN_MS < BROKEN_COOLDOWN_MS, true);
+check("rate-limited models step aside longer than overloaded ones", RATE_LIMIT_COOLDOWN_MS > BUSY_COOLDOWN_MS, true);
 
 /* candidate order from shared health */
 const ranked = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];

@@ -612,6 +612,10 @@ export const RETRY_BACKOFF_MS = 1_500;
 export const MAX_ATTEMPTS = 8;
 // How long a failing model is moved to the back of the queue.
 export const BUSY_COOLDOWN_MS = 2 * 60_000;
+// A model that says its quota is used up (429) rarely recovers within minutes,
+// so it steps aside for longer; retrying it every two minutes cost each message
+// several wasted attempts while the free-tier quota was exhausted.
+export const RATE_LIMIT_COOLDOWN_MS = 10 * 60_000;
 export const BROKEN_COOLDOWN_MS = 30 * 60_000;
 // A model the API reports as gone (404) stays out of the way for a day.
 export const RETIRED_COOLDOWN_MS = 24 * 60 * 60_000;
@@ -843,7 +847,15 @@ export async function callGemini(opts: {
     if (res.status === 404) retired.add(model);
     record(
       `http_${res.status}`,
-      kind === "retry" ? BUSY_COOLDOWN_MS : kind === "skip" ? (res.status === 404 ? RETIRED_COOLDOWN_MS : BROKEN_COOLDOWN_MS) : 0
+      kind === "retry"
+        ? res.status === 429
+          ? RATE_LIMIT_COOLDOWN_MS
+          : BUSY_COOLDOWN_MS
+        : kind === "skip"
+          ? res.status === 404
+            ? RETIRED_COOLDOWN_MS
+            : BROKEN_COOLDOWN_MS
+          : 0
     );
     if (kind === "fatal") {
       const detail = (await res.text().catch(() => "")).slice(0, 300);
