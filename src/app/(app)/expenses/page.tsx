@@ -1649,7 +1649,7 @@ function ExpensesView({
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                className="chat-round !w-11 !h-11"
+                className="chat-round !w-12 !h-12"
                 aria-label="Search expenses"
                 aria-pressed={searching}
                 onClick={() => {
@@ -1662,8 +1662,10 @@ function ExpensesView({
                   <path d="M20 20l-4-4" />
                 </svg>
               </button>
-              <button type="button" className="btn btn-expense !min-h-11 !py-2 !px-4" onClick={onAdd}>
-                + Log
+              <button type="button" className="tab-fab !w-12 !h-12 !m-0 !shadow-none" aria-label="Log expense" onClick={onAdd}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
               </button>
             </div>
           </div>
