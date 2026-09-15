@@ -14,6 +14,7 @@ export async function GET() {
       username: session.username,
       name: record?.name ?? null,
       isAdmin: session.isAdmin,
+      createdAt: record?.created_at ?? null,
     },
   });
 }

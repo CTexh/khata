@@ -6,10 +6,11 @@ import Link from "next/link";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
+import { WelcomeTour } from "@/components/WelcomeTour";
 import { clearCache, prefetch, useCached } from "@/lib/swr";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
 
-type CurrentUser = { id: string; username: string; name?: string | null; isAdmin: boolean };
+type CurrentUser = { id: string; username: string; name?: string | null; isAdmin: boolean; createdAt?: string | null };
 
 function EditProfileModal({ initialName, onClose, onSaved }: { initialName: string; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initialName);
@@ -120,6 +121,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const closeProfile = useCallback(() => setProfileOpen(false), []);
+
+  // A new account (made in the last two weeks) sees the welcome tour once on
+  // this device. It can be skipped, and replayed from the account menu.
+  const [tourOpen, setTourOpen] = useState(false);
+  const tourKey = user ? `khata-tour-done:${user.id}` : null;
+  useEffect(() => {
+    if (!user || !tourKey) return;
+    const created = user.createdAt ? Date.parse(user.createdAt) : NaN;
+    if (!Number.isFinite(created) || Date.now() - created > 14 * 24 * 60 * 60 * 1000) return;
+    try {
+      if (!localStorage.getItem(tourKey)) setTourOpen(true);
+    } catch {}
+  }, [user, tourKey]);
+  const closeTour = useCallback(() => {
+    setTourOpen(false);
+    try {
+      if (tourKey) localStorage.setItem(tourKey, "1");
+    } catch {}
+  }, [tourKey]);
   const home = pathname === "/";
   const displayName = user?.name || user?.username;
 
@@ -210,6 +230,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       >
                         Edit Profile
                       </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setTourOpen(true);
+                        }}
+                        className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-xl text-[14px] cursor-pointer hover:bg-[var(--surface-2)]"
+                      >
+                        Welcome tour
+                      </button>
                       {user.isAdmin && (
                         <Link
                           href="/admin"
@@ -266,6 +297,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )
         )}
       </nav>
+
+      {tourOpen && user && <WelcomeTour withAssistant={user.isAdmin} onClose={closeTour} />}
 
       {profileOpen && (
         <EditProfileModal initialName={user?.name ?? ""} onClose={closeProfile} onSaved={() => refreshMe()} />
