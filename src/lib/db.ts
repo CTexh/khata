@@ -1540,6 +1540,24 @@ export async function saveModelHealth(updates: HealthUpdate[]): Promise<void> {
 
 /* ---------- reads and small writes for assistant questions ---------- */
 
+// Udhar Khata entries made in a time window (ISO timestamps, end exclusive),
+// oldest first, with the person's name - for the daily recap email.
+export async function listLedgerActivity(
+  userId: string,
+  fromIso: string,
+  toIso: string
+): Promise<{ name: string; amount: number; created_at: string }[]> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT p.name, t.amount, t.created_at FROM transactions t
+          JOIN people p ON p.id = t.person_id
+          WHERE p.user_id = ? AND t.created_at >= ? AND t.created_at < ?
+          ORDER BY t.created_at ASC`,
+    args: [userId, fromIso, toIso],
+  });
+  return rs.rows.map((r) => ({ name: r.name as string, amount: Number(r.amount), created_at: r.created_at as string }));
+}
+
 // Expenses between two days, inclusive (YYYY-MM-DD), newest first.
 export async function listExpensesInRange(userId: string, from: string, to: string): Promise<Expense[]> {
   const c = await db();

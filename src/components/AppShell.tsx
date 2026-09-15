@@ -93,7 +93,7 @@ function EditProfileModal({ initialName, onClose, onSaved }: { initialName: stri
           <div>
             <p className="text-[15px] font-bold">Email reminders</p>
             <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
-              Subscriptions due (a day before and on the day), Udhar follow-up dates and a monthly summary, at 6pm.
+              Subscriptions due (a day before and on the day) and Udhar follow-up dates at 6pm, a recap of your day at 4:30am, and a monthly summary.
             </p>
           </div>
           <input

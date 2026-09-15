@@ -1576,6 +1576,13 @@ export default function ExpensesPage() {
   const closeDetail = useCallback(() => setViewingDetail(null), []);
   const closeRecat = useCallback(() => setRecategorizing(false), []);
 
+  // The daily recap email links to /expenses?add=1 to add a missed expense.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("add") !== "1") return;
+    setAdding(true);
+    window.history.replaceState(null, "", "/expenses");
+  }, []);
+
   return (
     <>
       {adding && (

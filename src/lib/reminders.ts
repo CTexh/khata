@@ -102,12 +102,15 @@ export function longDate(ymd: string): string {
   });
 }
 
+type Section = { title?: string; rows: [string, string][]; empty?: string };
+
 type Layout = {
   eyebrow: string;
   heading: string;
   greeting: string;
   intro: string;
-  rows: [string, string][];
+  rows?: [string, string][];
+  sections?: Section[];
   button: { label: string; url: string };
   note: string;
   manageUrl: string;
@@ -116,14 +119,28 @@ type Layout = {
 // One consistent, table-based layout: email clients ignore most modern CSS,
 // so everything is inline and nothing depends on flexbox or web fonts.
 function render(o: Layout): { html: string; text: string } {
-  const rows = o.rows
-    .map(
-      ([label, value], i) => `<tr>
-<td style="padding:12px 0;${i ? "border-top:1px solid #e6e9f2;" : ""}font-size:14px;color:#5a6275;">${escapeHtml(label)}</td>
-<td style="padding:12px 0;${i ? "border-top:1px solid #e6e9f2;" : ""}font-size:14px;color:#0b0d14;font-weight:600;text-align:right;">${escapeHtml(value)}</td>
+  const sections: Section[] = o.sections ?? [{ rows: o.rows ?? [] }];
+
+  const tableFor = (section: Section) => {
+    const cell = (i: number) => `padding:12px 0;${i ? "border-top:1px solid #e6e9f2;" : ""}font-size:14px;`;
+    const body = section.rows.length
+      ? section.rows
+          .map(
+            ([label, value], i) => `<tr>
+<td style="${cell(i)}color:#5a6275;padding-right:16px;">${escapeHtml(label)}</td>
+<td style="${cell(i)}color:#0b0d14;font-weight:600;text-align:right;white-space:nowrap;">${escapeHtml(value)}</td>
 </tr>`
-    )
-    .join("\n");
+          )
+          .join("\n")
+      : `<tr><td colspan="2" style="padding:12px 0;font-size:14px;color:#5a6275;">${escapeHtml(section.empty ?? "Nothing to show.")}</td></tr>`;
+    const title = section.title
+      ? `<p style="margin:0 0 4px;font-size:13px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#0b0d14;">${escapeHtml(section.title)}</p>`
+      : "";
+    return `${title}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e9f2;border-bottom:1px solid #e6e9f2;margin:0 0 28px;">
+${body}
+</table>`;
+  };
 
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(o.heading)}</title></head>
@@ -142,9 +159,7 @@ function render(o: Layout): { html: string; text: string } {
 <h1 style="margin:0 0 20px;font-size:22px;line-height:1.3;font-weight:800;color:#0b0d14;">${escapeHtml(o.heading)}</h1>
 <p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#303746;">${escapeHtml(o.greeting)}</p>
 <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#303746;">${escapeHtml(o.intro)}</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e9f2;border-bottom:1px solid #e6e9f2;margin:0 0 28px;">
-${rows}
-</table>
+${sections.map(tableFor).join("\n")}
 <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:10px;background:#2a78d6;">
 <a href="${escapeHtml(o.button.url)}" style="display:inline-block;padding:14px 24px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">${escapeHtml(o.button.label)}</a>
 </td></tr></table>
@@ -158,7 +173,16 @@ ${rows}
 </table>
 </body></html>`;
 
-  const width = Math.max(...o.rows.map(([label]) => label.length));
+  const textSection = (section: Section) => {
+    const width = Math.max(0, ...section.rows.map(([label]) => label.length));
+    return [
+      ...(section.title ? [section.title.toUpperCase()] : []),
+      ...(section.rows.length
+        ? section.rows.map(([label, value]) => `${label.padEnd(width)}  ${value}`)
+        : [section.empty ?? "Nothing to show."]),
+      "",
+    ];
+  };
   const text = [
     o.heading,
     "",
@@ -166,8 +190,7 @@ ${rows}
     "",
     o.intro,
     "",
-    ...o.rows.map(([label, value]) => `${label.padEnd(width)}  ${value}`),
-    "",
+    ...sections.flatMap(textSection),
     `${o.button.label}: ${o.button.url}`,
     "",
     o.note,
@@ -269,4 +292,111 @@ export function monthlySummaryEmail(o: {
     manageUrl: o.appUrl,
   });
   return { subject: `Your Khata summary for ${summary.label}`, text, html };
+}
+
+/* ---------- daily recap ---------- */
+
+// The UTC instants a Pakistan calendar day starts and ends, for comparing with
+// created_at / paid_at timestamps (Pakistan is UTC+5 all year).
+export function pakistanDayWindow(date: string): { from: string; to: string } {
+  const start = Date.parse(`${date}T00:00:00+05:00`);
+  return { from: new Date(start).toISOString(), to: new Date(start + 86_400_000).toISOString() };
+}
+
+export type RecapData = {
+  date: string; // the Pakistan day being summarised
+  expenses: { label: string; amount: number }[];
+  ledger: { name: string; amount: number }[]; // positive = lent, negative = paid back
+  subsDue: { name: string; amount: number; paid: boolean }[];
+  subsPaid: { name: string; amount: number }[]; // marked paid that day
+};
+
+// Sent early the next morning: what was recorded on a day, and a nudge to add
+// anything that was missed.
+export function dailyRecapEmail(o: { name: string; recap: RecapData; appUrl: string }): ReminderEmail {
+  const { recap } = o;
+  const when = longDate(recap.date);
+  const total = recap.expenses.reduce((sum, e) => sum + e.amount, 0);
+  const dueNames = new Set(recap.subsDue.map((s) => s.name));
+
+  const sections: Section[] = [
+    {
+      title: "Expenses",
+      rows: recap.expenses.length
+        ? [...recap.expenses.map((e): [string, string] => [e.label, fmtRs(e.amount)]), ["Total", fmtRs(total)]]
+        : [],
+      empty: "No expenses were recorded.",
+    },
+    {
+      title: "Udhar Khata",
+      rows: recap.ledger.map((l): [string, string] => [l.amount > 0 ? `Lent to ${l.name}` : `${l.name} paid you back`, fmtRs(Math.abs(l.amount))]),
+      empty: "No changes.",
+    },
+    {
+      title: "Subscriptions",
+      rows: [
+        ...recap.subsDue.map((s): [string, string] => [`${s.name} was due`, `${fmtRs(s.amount)} · ${s.paid ? "Paid" : "Unpaid"}`]),
+        ...recap.subsPaid.filter((s) => !dueNames.has(s.name)).map((s): [string, string] => [`${s.name} marked paid`, fmtRs(s.amount)]),
+      ],
+      empty: "None were due.",
+    },
+  ];
+
+  const dayName = when.replace(/ \d{4}$/, "");
+  const subject = recap.expenses.length
+    ? `Your Khata recap for ${dayName}: ${fmtRs(total)} spent`
+    : `Your Khata recap for ${dayName}: no expenses recorded`;
+  const unpaid = recap.subsDue.filter((s) => !s.paid);
+
+  const { html, text } = render({
+    eyebrow: "Daily recap",
+    heading: `Your recap for ${when}`,
+    greeting: greet(o.name),
+    intro: recap.expenses.length
+      ? `Here is a summary of your activity on ${when}. You recorded ${recap.expenses.length} ${recap.expenses.length === 1 ? "expense" : "expenses"} totalling ${fmtRs(total)}.`
+      : `Here is a summary of your activity on ${when}. No expenses were recorded on this day.`,
+    sections,
+    button: { label: "Add a missed expense", url: `${o.appUrl}/expenses?add=1` },
+    note:
+      "Forgot something? Please add any expense you missed manually so your records stay complete." +
+      (unpaid.length ? ` ${unpaid.map((s) => s.name).join(", ")} ${unpaid.length === 1 ? "is" : "are"} still unpaid.` : ""),
+    manageUrl: o.appUrl,
+  });
+  return { subject, text, html };
+}
+
+type RecapSources = {
+  expenses: (fromDate: string, toDate: string) => Promise<{ amount: number; vendor?: string | null; note: string; category?: string | null }[]>;
+  ledger: (fromIso: string, toIso: string) => Promise<{ name: string; amount: number }[]>;
+  subscriptions: () => Promise<
+    { name: string; amount: number; active: boolean | number; history: { due_date: string; paid_at: string | null }[] }[]
+  >;
+};
+
+// Gathers one day's recap. The data comes through `sources`, so the daily job
+// and the test email share this without it touching the database itself.
+export async function buildRecap(date: string, sources: RecapSources): Promise<RecapData> {
+  const { from, to } = pakistanDayWindow(date);
+  const [expenses, ledger, subs] = await Promise.all([
+    sources.expenses(date, date),
+    sources.ledger(from, to),
+    sources.subscriptions(),
+  ]);
+  return {
+    date,
+    expenses: expenses.map((e) => {
+      const note = e.note.replace(/^(WhatsApp|Assistant):\s*/, "");
+      const what = e.vendor || note || "Expense";
+      return { label: e.category ? `${what} · ${e.category}` : what, amount: e.amount };
+    }),
+    ledger: ledger.map((l) => ({ name: l.name, amount: l.amount })),
+    subsDue: subs.flatMap((s) =>
+      s.history.filter((h) => h.due_date === date).map((h) => ({ name: s.name, amount: s.amount, paid: Boolean(h.paid_at) }))
+    ),
+    subsPaid: subs.flatMap((s) =>
+      s.history
+        .filter((h) => h.paid_at && h.paid_at >= from && h.paid_at < to)
+        .map(() => ({ name: s.name, amount: s.amount }))
+    ),
+  };
 }

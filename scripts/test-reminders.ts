@@ -1,5 +1,8 @@
 // Tests for reminder emails: what counts as due, and how each email reads.
 import {
+  buildRecap,
+  dailyRecapEmail,
+  pakistanDayWindow,
   findDue,
   longDate,
   monthlySummaryEmail,
@@ -89,6 +92,49 @@ check("summary subject", summary.subject, "Your Khata summary for August 2026");
 check("summary rows", [summary.text.includes("Rs 37,251"), summary.text.includes("Top category: Shopping"), summary.text.includes("Rs 2,700 (2 people)")], [true, true, true]);
 const quiet = monthlySummaryEmail({ name: "", summary: { label: "August 2026", total: 0, count: 0, top: [] }, owed: { total: 0, people: 0 }, appUrl: url });
 check("empty month", [quiet.text.includes("No expenses were recorded in August 2026."), quiet.text.includes("Nothing outstanding")], [true, true]);
+
+/* daily recap */
+check("Pakistan day window", pakistanDayWindow("2026-09-15"), { from: "2026-09-14T19:00:00.000Z", to: "2026-09-15T19:00:00.000Z" });
+const recap = await buildRecap("2026-09-15", {
+  expenses: async () => [
+    { amount: 3000, vendor: "Shell", note: "fuel", category: "Car" },
+    { amount: 1200, vendor: null, note: "Assistant: dinner", category: null },
+  ],
+  ledger: async () => [
+    { name: "Ali", amount: 500 },
+    { name: "Usama", amount: -300 },
+  ],
+  subscriptions: async () => [
+    { name: "Netflix", amount: 1500, active: true, history: [{ due_date: "2026-09-15", paid_at: null }] },
+    { name: "Spotify", amount: 900, active: true, history: [{ due_date: "2026-09-05", paid_at: "2026-09-15T08:00:00.000Z" }] },
+    { name: "Gym", amount: 5000, active: true, history: [{ due_date: "2026-09-01", paid_at: "2026-09-15T20:00:00.000Z" }] },
+  ],
+});
+check("recap expense labels", recap.expenses.map((e) => e.label), ["Shell · Car", "dinner"]);
+check("recap due and paid", [recap.subsDue, recap.subsPaid.map((s) => s.name)], [[{ name: "Netflix", amount: 1500, paid: false }], ["Spotify"]]);
+const recapMail = dailyRecapEmail({ name: "Walli", recap, appUrl: url });
+check("recap subject", recapMail.subject, "Your Khata recap for Tuesday, 15 September: Rs 4,200 spent");
+check(
+  "recap body",
+  [
+    recapMail.text.includes("Total        Rs 4,200") || recapMail.text.includes("Rs 4,200"),
+    recapMail.text.includes("Lent to Ali"),
+    recapMail.text.includes("Usama paid you back"),
+    recapMail.text.includes("Netflix was due"),
+    recapMail.text.includes("Unpaid"),
+    recapMail.text.includes("Spotify marked paid"),
+    recapMail.text.includes("Please add any expense you missed manually"),
+    recapMail.text.includes("Netflix is still unpaid"),
+    recapMail.html.includes(`${url}/expenses?add=1`),
+  ],
+  [true, true, true, true, true, true, true, true, true]
+);
+const emptyRecap = dailyRecapEmail({ name: "", recap: { date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [] }, appUrl: url });
+check(
+  "quiet day recap",
+  [emptyRecap.subject, emptyRecap.text.includes("No expenses were recorded."), emptyRecap.text.includes("No changes."), emptyRecap.text.includes("None were due.")],
+  ["Your Khata recap for Tuesday, 15 September: no expenses recorded", true, true, true]
+);
 
 /* email addresses */
 check("valid emails", [validEmail("a@b.co"), validEmail("walli.ullah+khata@gmail.com")], [true, true]);

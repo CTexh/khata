@@ -4,11 +4,15 @@ import {
   categoryTotals,
   ensureTablesExist,
   getProfileSettings,
+  listExpensesInRange,
+  listLedgerActivity,
   listLedgerPeople,
   listSubscriptions,
 } from "@/lib/db";
 import { mailConfigured, sendMail } from "@/lib/mailer";
 import {
+  buildRecap,
+  dailyRecapEmail,
   monthlySummaryEmail,
   subscriptionReminderEmail,
   udharReminderEmail,
@@ -73,6 +77,15 @@ export async function POST() {
       appUrl: APP_URL,
     }),
   ];
+
+  // The recap covers yesterday, as the 4:30am email does.
+  const recapDate = addDays(today, -1);
+  const recap = await buildRecap(recapDate, {
+    expenses: (from, to) => listExpensesInRange(session.userId, from, to),
+    ledger: (from, to) => listLedgerActivity(session.userId, from, to),
+    subscriptions: async () => subs,
+  });
+  samples.push(dailyRecapEmail({ name, recap, appUrl: APP_URL }));
 
   let sent = 0;
   try {
