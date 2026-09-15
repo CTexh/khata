@@ -51,6 +51,7 @@ import {
   udharPersonReply,
   udharSummaryReply,
   withTranscript,
+  QUESTION_REFUSAL_HEADING,
 } from "../src/lib/whatsapp-replies.ts";
 import { encodeWav } from "../src/lib/wav.ts";
 import { fmtDateLabel } from "../src/lib/format.ts";
@@ -461,6 +462,33 @@ check(
   undoReply({ expense: null, transactions: [], dueDates: [{ name: "Ali", dueDate: null }, { name: "Usama", dueDate: "2026-10-01" }] }),
   `*Removed*\n\nDue date for Ali removed\nDue date for Usama back to ${fmtDateLabel("2026-10-01")}`
 );
+
+/* names the model left out are found in the message itself */
+check(
+  "balance question with the name only in the text",
+  (validateParsed({ intent: "query", query_type: "udhar_person" }, today, people, "How much abdurrehman owe me", cats) as any).query?.people,
+  ["Abdur Rehman"]
+);
+check(
+  "balance question with empty entries uses the text",
+  (validateParsed({ intent: "query", query_type: "udhar_person", entries: [] }, today, people, "how much does usama irtaza owe?", cats) as any).query?.people,
+  ["Usama Irtaza"]
+);
+check(
+  "entries given by the model still win",
+  (validateParsed({ intent: "query", query_type: "udhar_person", entries: [{ person: "Ali" }] }, today, people, "how much abdurrehman owe me", cats) as any).query?.people,
+  ["Ali"]
+);
+check("no name anywhere still asks whose khata", (validateParsed({ intent: "query", query_type: "udhar_person" }, today, people, "how much do they owe me", cats) as any).ok, false);
+check(
+  "due date with the name only in the text",
+  (validateParsed({ intent: "due_date", due_date: "2026-10-01" }, today, people, "ali will pay back on 1 october", cats) as any).due,
+  { person: "Ali", date: "2026-10-01" }
+);
+check("question refusals are marked", [q({ query_type: "weather" }).question, q({ query_type: "spending", month: 13 }).question], [true, true]);
+check("other refusals aren't", exp({ amount: 0 }).question, undefined);
+check("question refusal heading", refusalReply("Whose khata?", QUESTION_REFUSAL_HEADING), "*Couldn't answer that*\n\nWhose khata?");
+check("default refusal heading unchanged", refusalReply("x"), "*Nothing added*\n\nx");
 
 /* voice notes: recorded in the browser, sent as 16 kHz mono WAV */
 const wav = new DataView(encodeWav(new Float32Array([0, 1, -1, 0.5, 2]), 16000));

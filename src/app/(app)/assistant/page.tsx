@@ -12,15 +12,24 @@ type ChatMessage = {
   photoUrl?: string; // this session only; photos aren't kept in history
   voiceSeconds?: number;
   pending?: boolean;
+  requestId?: string; // for a pending reply, so it can be picked up after a reload
   failed?: boolean;
 };
+
+type Delivery = { reply: string } | { error: string };
 
 // History lives only in this browser. Replies can mention amounts and names,
 // and the device is the user's own, so nothing is stored server-side for it.
 const STORAGE_KEY = "khata-assistant-v1";
 const KEEP = 60;
 const MAX_VOICE_SECONDS = 60;
+// How long to keep checking for a reply. The server's own work is bounded
+// well inside this.
+const REPLY_WAIT_MS = 90_000;
+const POLL_EVERY_MS = 1_500;
 const EXAMPLES = ["fuel 3000 shell", "who owes me?", "what did I spend this month?", "Ali paid me back 500"];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function loadHistory(): ChatMessage[] {
   try {
@@ -43,13 +52,67 @@ function loadHistory(): ChatMessage[] {
 function saveHistory(messages: ChatMessage[]) {
   try {
     const kept = messages
-      .filter((m) => !m.pending)
+      // A pending reply is kept only if it can be fetched again later.
+      .filter((m) => !m.pending || m.requestId)
       .slice(-KEEP)
-      .map(({ id, role, text, photo, voiceSeconds, failed }) => ({ id, role, text, photo, voiceSeconds, failed }));
+      .map(({ id, role, text, photo, voiceSeconds, pending, requestId, failed }) => ({
+        id,
+        role,
+        text,
+        photo,
+        voiceSeconds,
+        pending,
+        requestId,
+        failed,
+      }));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(kept));
   } catch {
     // Storage unavailable (private browsing, full): history just isn't kept.
   }
+}
+
+// The server answers a message straight away and works on it in the
+// background, so the reply is fetched separately. A connection that drops
+// while waiting no longer loses the reply: checking simply continues.
+async function waitForReply(requestId: string, maxMs: number): Promise<Delivery | null> {
+  const started = Date.now();
+  while (Date.now() - started < maxMs) {
+    try {
+      const res = await fetch(`/api/assistant?id=${encodeURIComponent(requestId)}`, { cache: "no-store" });
+      if (res.status === 401) return { error: "Please log in again." };
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.status === "done") return { reply: typeof data.reply === "string" && data.reply ? data.reply : "Done." };
+      } else if (res.status === 404 && Date.now() - started > 8_000) {
+        // Still unknown after a few seconds: the message never arrived.
+        return null;
+      }
+    } catch {
+      // A network blip: keep checking.
+    }
+    await sleep(POLL_EVERY_MS);
+  }
+  return { error: "This is taking longer than usual. Check Mera Khata or Udhar Khata before sending it again." };
+}
+
+async function deliver(form: FormData, requestId: string): Promise<Delivery> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch("/api/assistant", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { error: typeof data.error === "string" ? data.error : "Something went wrong. Please try again." };
+      }
+      if (data.status === "done") return { reply: typeof data.reply === "string" && data.reply ? data.reply : "Done." };
+      break;
+    } catch {
+      // The upload dropped. It may still have arrived, so the retry reuses the
+      // same id and the server won't process it twice.
+      await sleep(1_200);
+    }
+  }
+  const result = await waitForReply(requestId, REPLY_WAIT_MS);
+  return result ?? { error: "Couldn't reach Khata. Check your connection and try again." };
 }
 
 // Phone photos are several megabytes; a bill is perfectly readable at 1600px.
@@ -92,10 +155,14 @@ async function toWav(recording: Blob): Promise<Blob> {
   }
 }
 
-const newId = () =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+// The server only accepts UUIDs as message ids.
+const newId = (): string => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+};
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
@@ -148,10 +215,34 @@ export default function AssistantPage() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const discardRef = useRef(false);
 
+  const finish = (bubbleId: string, result: Delivery) =>
+    setMessages((all) =>
+      all.map((msg) =>
+        msg.id === bubbleId
+          ? {
+              ...msg,
+              pending: false,
+              requestId: undefined,
+              text: "reply" in result ? result.reply : result.error,
+              failed: !("reply" in result),
+            }
+          : msg
+      )
+    );
+
   // Read after mount: localStorage doesn't exist while the server renders.
+  // A reply still pending when the page was left is picked up again here.
   useEffect(() => {
-    setMessages(loadHistory());
+    const history = loadHistory();
+    setMessages(history);
     setLoaded(true);
+    for (const m of history) {
+      if (m.pending && m.requestId) {
+        waitForReply(m.requestId, REPLY_WAIT_MS).then((result) =>
+          finish(m.id, result ?? { error: "That message didn't reach Khata. Please send it again." })
+        );
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -216,6 +307,7 @@ export default function AssistantPage() {
     setNotice("");
 
     const sentPhoto = photo;
+    const requestId = newId();
     const pendingId = newId();
     setMessages((m) => [
       ...m,
@@ -227,35 +319,18 @@ export default function AssistantPage() {
         photoUrl: sentPhoto?.url,
         voiceSeconds: voice?.seconds,
       },
-      { id: pendingId, role: "assistant", text: "", pending: true },
+      { id: pendingId, role: "assistant", text: "", pending: true, requestId },
     ]);
     setText("");
     setPhoto(null);
 
     const form = new FormData();
+    form.set("id", requestId);
     form.set("text", message);
     if (sentPhoto) form.set("image", sentPhoto.blob, "photo.jpg");
     if (voice) form.set("audio", voice.audio, "voice.wav");
 
-    let replyText: string;
-    let failed = false;
-    try {
-      const res = await fetch("/api/assistant", { method: "POST", body: form });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && typeof data.reply === "string") {
-        replyText = data.reply || "Done.";
-      } else {
-        failed = true;
-        replyText = typeof data.error === "string" ? data.error : "Something went wrong. Please try again.";
-      }
-    } catch {
-      failed = true;
-      replyText = "Couldn't reach Khata. Check your connection and try again.";
-    }
-
-    setMessages((m) =>
-      m.map((msg) => (msg.id === pendingId ? { ...msg, text: replyText, pending: false, failed } : msg))
-    );
+    finish(pendingId, await deliver(form, requestId));
     setBusy(false);
     inputRef.current?.focus();
   };

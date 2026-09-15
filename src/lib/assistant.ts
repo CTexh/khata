@@ -48,6 +48,7 @@ import {
   ledgerReply,
   periodLabel,
   recentExpensesReply,
+  QUESTION_REFUSAL_HEADING,
   refusalReply,
   spendingReply,
   subscriptionsDueReply,
@@ -200,7 +201,7 @@ async function act(
 
   if (!outcome.ok) {
     log.outcome = "rejected";
-    return refusalReply(outcome.reason);
+    return refusalReply(outcome.reason, outcome.question ? QUESTION_REFUSAL_HEADING : undefined);
   }
   if (outcome.kind === "query") return answerQuery(input.userId, outcome.query, people, log);
   if (outcome.kind === "due_date") return saveDueDate(input, outcome.due, people, log);

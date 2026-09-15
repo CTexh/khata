@@ -1,12 +1,11 @@
-import { NextResponse } from "next/server";
-import { randomUUID } from "crypto";
+import { NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
-import { claimInboundMessage } from "@/lib/db";
+import { claimInboundMessage, getInboundReply, saveInboundReply } from "@/lib/db";
 import { runAssistant } from "@/lib/assistant";
 
 export const dynamic = "force-dynamic";
-// Reading a bill photo can take several seconds, and the model fallbacks are
-// bounded to fit inside this.
+// Bounds the work scheduled with after(): reading a bill photo or voice note
+// can take a while, and the model fallbacks are budgeted to fit inside this.
 export const maxDuration = 60;
 
 const MAX_TEXT = 1000;
@@ -16,9 +15,18 @@ const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 // A minute of 16 kHz mono WAV, the format the page records in, is about 1.9 MB.
 const MAX_AUDIO_BYTES = 2.5 * 1024 * 1024;
+// Chosen by the page, so a retry after a dropped connection is recognised.
+const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// The in-app assistant. Same engine as WhatsApp, reached with the normal
-// login session instead of a phone number.
+function status(requestId: string, reply: string | null) {
+  return { id: requestId, status: reply === null ? "pending" : "done", reply };
+}
+
+// The in-app assistant. Same engine as WhatsApp, reached with the normal login
+// session. The message is accepted straight away and worked on after the
+// response: a slow model used to keep the phone's request open long enough
+// for the connection to drop, so the page showed an error even though the
+// expense had been saved. The page now fetches the reply with GET.
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Please log in again." }, { status: 401 });
@@ -30,7 +38,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Couldn't read that message. Please try again." }, { status: 400 });
   }
 
+  const requestId = String(form.get("id") ?? "");
+  if (!REQUEST_ID.test(requestId)) {
+    return NextResponse.json({ error: "Please refresh the page and try again." }, { status: 400 });
+  }
+
   const text = String(form.get("text") ?? "").trim().slice(0, MAX_TEXT);
+
   const file = form.get("image");
   let image: { data: string; mimeType: string } | null = null;
   if (file instanceof File && file.size > 0) {
@@ -61,16 +75,37 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Type a message, record a voice note, or attach a photo." }, { status: 400 });
   }
 
-  // Recorded like a WhatsApp message, so anything it saves can be undone.
-  const messageId = `app-${randomUUID()}`;
-  await claimInboundMessage(messageId, session.userId);
-  const { reply, log } = await runAssistant({
-    userId: session.userId,
-    messageId,
-    channel: "app",
-    text,
-    image,
-    audio,
+  const userId = session.userId;
+  const messageId = `app-${requestId}`;
+  // A retry of a message that already arrived: report on the original rather
+  // than saving it twice. Recording it also ties saved entries to it for UNDO.
+  if (!(await claimInboundMessage(messageId, userId))) {
+    const existing = await getInboundReply(messageId, userId);
+    if (!existing) return NextResponse.json({ error: "Please refresh the page and try again." }, { status: 409 });
+    return NextResponse.json(status(requestId, existing.reply));
+  }
+
+  after(async () => {
+    try {
+      const { reply } = await runAssistant({ userId, messageId, channel: "app", text, image, audio });
+      await saveInboundReply(messageId, reply || "Done.");
+    } catch (err) {
+      console.error(JSON.stringify({ evt: "assistant", msg: requestId.slice(-8), outcome: "reply_not_saved", error: (err as Error).message.slice(0, 300) }));
+    }
   });
-  return NextResponse.json({ reply: reply ?? "", outcome: log.outcome });
+
+  return NextResponse.json(status(requestId, null), { status: 202 });
+}
+
+export async function GET(req: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Please log in again." }, { status: 401 });
+
+  const requestId = new URL(req.url).searchParams.get("id") ?? "";
+  if (!REQUEST_ID.test(requestId)) {
+    return NextResponse.json({ error: "Please refresh the page and try again." }, { status: 400 });
+  }
+  const row = await getInboundReply(`app-${requestId}`, session.userId);
+  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(status(requestId, row.reply), { headers: { "Cache-Control": "no-store" } });
 }

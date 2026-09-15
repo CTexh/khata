@@ -485,6 +485,13 @@ export async function ensureCategoryTables(): Promise<void> {
   } catch {
     // Column already exists.
   }
+  // The finished reply for an in-app message, which the page fetches once it's
+  // ready rather than holding one long request open.
+  try {
+    await c.execute(`ALTER TABLE whatsapp_inbound ADD COLUMN reply TEXT`);
+  } catch {
+    // Column already exists.
+  }
   // Which Gemini models have been answering. Shared across server instances,
   // so a model found overloaded on one request is skipped on the next even
   // when Vercel runs it somewhere else. Times are epoch milliseconds.
@@ -1466,4 +1473,30 @@ export async function setPersonDueDate(
     args: [dueDate, personId, userId],
   });
   return { previous: (row.due_date as string) ?? null };
+}
+
+/* ---------- in-app assistant replies ---------- */
+
+export async function saveInboundReply(messageId: string, reply: string): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: "UPDATE whatsapp_inbound SET reply = ? WHERE message_id = ?",
+    args: [reply, messageId],
+  });
+}
+
+// null when the message doesn't exist or isn't this user's; reply is null
+// while it is still being worked on.
+export async function getInboundReply(
+  messageId: string,
+  userId: string
+): Promise<{ reply: string | null } | null> {
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT reply FROM whatsapp_inbound WHERE message_id = ? AND user_id = ?",
+    args: [messageId, userId],
+  });
+  const row = rs.rows[0];
+  return row ? { reply: (row.reply as string) ?? null } : null;
 }

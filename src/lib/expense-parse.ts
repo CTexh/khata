@@ -44,7 +44,7 @@ export type ParseOutcome =
   | { ok: true; kind: "ledger"; ledger: ParsedLedger }
   | { ok: true; kind: "query"; query: ParsedQuery }
   | { ok: true; kind: "due_date"; due: ParsedDueDate }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; question?: true };
 
 // Largest single amount accepted without question. A misread receipt (an
 // invoice number or phone number taken for the total) is far more likely than
@@ -111,7 +111,7 @@ export function buildPrompt(opts: {
     '- "expense": money the user spent (a bill, shopping, fuel, food).',
     '- "lend": the user lent or gave money to people in their Udhar Khata (loan ledger), e.g. "add 700 to usama\'s khata", "gave ali 500 udhar".',
     '- "repayment": someone paid the user back, e.g. "abdurrehman paid me back 1000", "got 2000 back from ali".',
-    '- "query": a question about their own data, e.g. "how much does ali owe?", "who owes me?", "what did I spend in august?", "how much on fuel this month?", "last expenses", "which subscriptions are due?". Set query_type to one of: udhar_person (named people\'s balances - put each person in entries), udhar_summary (everyone who owes money), spending (a total - set year, and month if a month is meant, and category_hint and/or vendor if narrowed), recent_expenses, subscriptions_due.',
+    '- "query": a question about their own data, e.g. "how much does ali owe?", "who owes me?", "what did I spend in august?", "how much on fuel this month?", "last expenses", "which subscriptions are due?". Set query_type to one of: udhar_person (named people\'s balances), udhar_summary (everyone who owes money), spending (a total - set year, and month if a month is meant, and category_hint and/or vendor if narrowed), recent_expenses, subscriptions_due. For udhar_person, always put every person named into entries, e.g. "how much abdurrehman owe me" means entries [{"person": "Abdur Rehman"}].',
     '- "due_date": when someone in Udhar Khata will pay back, or when to follow up with them, e.g. "ali will pay back on the 1st", "remind me about usama next friday". Put the one person in entries and due_date as YYYY-MM-DD resolved against today. To remove a due date, set clear_due_date to true.',
     '- "other": anything else.',
     "",
@@ -184,8 +184,8 @@ export function validateParsed(
   const intent = typeof r.intent === "string" ? r.intent.trim().toLowerCase() : "";
 
   if (intent === "lend" || intent === "repayment") return validateLedger(r, intent, people, messageText);
-  if (intent === "query") return validateQuery(r, today, people, categories);
-  if (intent === "due_date") return validateDueDate(r, today, people);
+  if (intent === "query") return validateQuery(r, today, people, categories, messageText);
+  if (intent === "due_date") return validateDueDate(r, today, people, messageText);
   if (intent !== "expense") return unclear;
 
   const amount = typeof r.amount === "number" ? r.amount : Number(r.amount);
@@ -262,18 +262,25 @@ function matchPeople(names: string[], people: string[]): { matched: string[]; un
   return { matched, unknown };
 }
 
+// The model sometimes recognises a balance question but leaves the name out
+// of entries. Names already in the khata are then found in the message itself,
+// using the same matching that treats "abdurrehman" and "Abdur Rehman" alike.
+function namesFrom(r: Record<string, unknown>, people: string[], messageText: string): string[] {
+  const named = entryNames(r);
+  return named.length ? named : people.filter((p) => mentionsPerson(messageText, p));
+}
+
 function validateQuery(
   r: Record<string, unknown>,
   today: string,
   people: string[],
-  categories: string[]
+  categories: string[],
+  messageText = ""
 ): ParseOutcome {
+  const refuse = (reason: string): ParseOutcome => ({ ok: false, reason, question: true });
   const type = cleanString(r.query_type, 40)?.toLowerCase() ?? "";
   if (!QUERY_TYPES.has(type)) {
-    return {
-      ok: false,
-      reason: "I couldn't tell what you wanted to know. Try: how much does Ali owe? - or: what did I spend this month?",
-    };
+    return refuse("I couldn't tell what you wanted to know. Try: how much does Ali owe? - or: what did I spend this month?");
   }
   const base: ParsedQuery = {
     type: type as QueryType,
@@ -285,13 +292,13 @@ function validateQuery(
   };
 
   if (type === "udhar_person") {
-    const names = entryNames(r);
-    if (!names.length) return { ok: false, reason: "Whose khata do you want to know about? e.g. how much does Ali owe?" };
+    const names = namesFrom(r, people, messageText);
+    if (!names.length) return refuse("Whose khata do you want to know about? e.g. how much does Ali owe?");
     if (names.length > MAX_LEDGER_ENTRIES) {
-      return { ok: false, reason: `That's more than ${MAX_LEDGER_ENTRIES} people in one message. Please split it up.` };
+      return refuse(`That's more than ${MAX_LEDGER_ENTRIES} people in one message. Please split it up.`);
     }
     const { matched, unknown } = matchPeople(names, people);
-    if (unknown.length) return { ok: false, reason: `I couldn't find ${unknown.join(", ")} in your Udhar Khata.` };
+    if (unknown.length) return refuse(`I couldn't find ${unknown.join(", ")} in your Udhar Khata.`);
     return { ok: true, kind: "query", query: { ...base, people: matched } };
   }
 
@@ -300,15 +307,15 @@ function validateQuery(
     const askedYear = wholeNumber(r.year);
     const askedMonth = wholeNumber(r.month);
     if (askedMonth !== null && (askedMonth < 1 || askedMonth > 12)) {
-      return { ok: false, reason: "That month doesn't look right. Try: what did I spend in August?" };
+      return refuse("That month doesn't look right. Try: what did I spend in August?");
     }
     // Nothing said means this month. A month on its own means its most recent
     // occurrence: "December", asked in September, is last December.
     const month = askedYear === null && askedMonth === null ? thisMonth : askedMonth;
     const year = askedYear ?? (askedMonth !== null && askedMonth > thisMonth ? thisYear - 1 : thisYear);
-    if (year < 2000 || year > thisYear) return { ok: false, reason: "That year doesn't look right." };
+    if (year < 2000 || year > thisYear) return refuse("That year doesn't look right.");
     if (year === thisYear && month !== null && month > thisMonth) {
-      return { ok: false, reason: "That month hasn't happened yet." };
+      return refuse("That month hasn't happened yet.");
     }
     // Only a category the user actually has; anything else is ignored rather
     // than turned into a filter that silently matches nothing.
@@ -324,8 +331,13 @@ function validateQuery(
   return { ok: true, kind: "query", query: base };
 }
 
-function validateDueDate(r: Record<string, unknown>, today: string, people: string[]): ParseOutcome {
-  const names = entryNames(r);
+function validateDueDate(
+  r: Record<string, unknown>,
+  today: string,
+  people: string[],
+  messageText = ""
+): ParseOutcome {
+  const names = namesFrom(r, people, messageText);
   if (names.length !== 1) {
     return { ok: false, reason: "Set a due date for one person at a time, e.g. Ali will pay back on the 1st" };
   }

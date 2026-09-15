@@ -86,8 +86,11 @@ export function undoReply(
 }
 
 // A reason from validation, e.g. "The amount needs to be more than zero."
-export function refusalReply(reason: string): string {
-  return join(["*Nothing added*", "", reason]);
+// Questions get their own heading: nothing was going to be added.
+export const QUESTION_REFUSAL_HEADING = "Couldn't answer that";
+
+export function refusalReply(reason: string, heading = "Nothing added"): string {
+  return join([`*${heading}*`, "", reason]);
 }
 
 export const HELP_REPLY = join([
