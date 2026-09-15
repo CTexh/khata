@@ -7,7 +7,10 @@ import {
 } from "../src/lib/whatsapp-webhook.ts";
 import {
   MAX_AMOUNT,
+  MAX_MODEL_ATTEMPTS,
   buildPrompt,
+  isRetryableStatus,
+  rankFlashModels,
   pakistanToday,
   pickFlashModel,
   validateParsed,
@@ -122,6 +125,29 @@ check(
   "gemini-3.5-flash"
 );
 check("model none", pickFlashModel(["models/gemini-3.5-pro", "models/embedding-001"]), null);
+
+/* model fallback order: stable Flash newest first, then Flash-Lite; previews and other families excluded */
+check(
+  "rank fallback order",
+  rankFlashModels([
+    "models/gemini-2.5-flash-lite",
+    "models/gemini-3.8-flash",
+    "models/gemini-2.5-flash",
+    "models/gemini-3.5-flash-lite",
+    "models/gemini-3.5-flash",
+    "models/gemini-3.8-flash-preview",
+    "models/gemini-3.5-pro",
+    "models/gemini-3.8-flash",
+  ]),
+  ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]
+);
+check("rank lite only", rankFlashModels(["models/gemini-2.5-flash-lite"]), ["gemini-2.5-flash-lite"]);
+check("rank empty", rankFlashModels([]), []);
+check("attempt cap is small", MAX_MODEL_ATTEMPTS >= 2 && MAX_MODEL_ATTEMPTS <= 3, true);
+
+/* which failures move on to another model */
+for (const s of [429, 500, 502, 503, 504]) check(`retryable ${s}`, isRetryableStatus(s), true);
+for (const s of [400, 401, 403, 404, 413, 505]) check(`not retryable ${s}`, isRetryableStatus(s), false);
 
 /* prompt + date */
 const prompt = buildPrompt({ today, categories: ["Car", "Groceries"], text: "fuel 3000", hasImage: true });

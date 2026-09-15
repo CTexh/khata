@@ -10,7 +10,7 @@ import {
   resolveExpenseCategory,
   undoLastWhatsAppExpense,
 } from "@/lib/db";
-import { parseExpense, pakistanToday } from "@/lib/expense-parse";
+import { GeminiBusyError, parseExpense, pakistanToday } from "@/lib/expense-parse";
 import { downloadWhatsAppMedia, sendWhatsAppText } from "@/lib/whatsapp";
 import { detectCommand, extractMessages, type InboundMessage } from "@/lib/whatsapp-webhook";
 import { fmtDateLabel, fmtRs } from "@/lib/format";
@@ -30,7 +30,12 @@ export async function handleInbound(payload: unknown): Promise<void> {
       await handleMessage(message);
     } catch (err) {
       console.error("[whatsapp] message failed", message.id, err);
-      await reply(message.from, "Sorry, I couldn't add that. Please try again in a minute.");
+      await reply(
+        message.from,
+        err instanceof GeminiBusyError
+          ? "The AI that reads your messages is busy right now, so nothing was added. Please send it again in a minute."
+          : "Sorry, I couldn't add that. Please try again in a minute."
+      );
     }
   }
 }

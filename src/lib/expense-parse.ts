@@ -121,35 +121,65 @@ export function validateParsed(raw: unknown, today: string): ParseOutcome {
 }
 
 // Gemini model names change as versions ship, so rather than hard-coding one
-// the API is asked what exists and the newest stable Flash model is used.
-// GEMINI_MODEL overrides this when a specific model is wanted.
-export function pickFlashModel(names: string[]): string | null {
-  const stable = names
-    .map((n) => n.replace(/^models\//, ""))
-    .map((n) => ({ n, m: /^gemini-(\d+(?:\.\d+)?)-flash$/.exec(n) }))
-    .filter((x): x is { n: string; m: RegExpExecArray } => x.m !== null)
-    .sort((a, b) => Number(b.m[1]) - Number(a.m[1]));
-  return stable[0]?.n ?? null;
+// the API is asked what exists. Stable Flash models come first, newest first,
+// then Flash-Lite as a fallback tier: the newest model is also the one most
+// often overloaded, and a slightly older one answering beats no answer.
+export function rankFlashModels(names: string[]): string[] {
+  const bare = [...new Set(names.map((n) => n.replace(/^models\//, "")))];
+  const tier = (re: RegExp) =>
+    bare
+      .map((n) => ({ n, m: re.exec(n) }))
+      .filter((x): x is { n: string; m: RegExpExecArray } => x.m !== null)
+      .sort((x, y) => Number(y.m[1]) - Number(x.m[1]))
+      .map((x) => x.n);
+  return [...tier(/^gemini-(\d+(?:\.\d+)?)-flash$/), ...tier(/^gemini-(\d+(?:\.\d+)?)-flash-lite$/)];
 }
 
-const API = "https://generativelanguage.googleapis.com/v1beta";
-let cachedModel: string | null = null;
+export function pickFlashModel(names: string[]): string | null {
+  return rankFlashModels(names)[0] ?? null;
+}
 
-async function resolveModel(apiKey: string): Promise<string> {
-  if (process.env.GEMINI_MODEL) return process.env.GEMINI_MODEL;
-  if (cachedModel) return cachedModel;
-  const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": apiKey } });
-  if (!res.ok) throw new Error(`Gemini model list failed: HTTP ${res.status}`);
-  const data = (await res.json()) as {
-    models?: { name: string; supportedGenerationMethods?: string[] }[];
-  };
-  const usable = (data.models ?? [])
-    .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
-    .map((m) => m.name);
-  const picked = pickFlashModel(usable);
-  if (!picked) throw new Error("No Gemini Flash model available to this API key");
-  cachedModel = picked;
-  return picked;
+// Overloaded (503), rate-limited (429) or briefly failing (5xx): worth trying
+// another model. Anything else - a bad key, a malformed request - would fail
+// the same way on every model, so it is reported at once.
+export function isRetryableStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 504);
+}
+
+// Every model tried was busy. Distinct from other failures so the reply can
+// say "try again shortly" rather than implying something is broken.
+export class GeminiBusyError extends Error {
+  constructor(detail: string) {
+    super(`Gemini busy: ${detail}`);
+    this.name = "GeminiBusyError";
+  }
+}
+
+// How many models one message may try before giving up. Bounded so a bad
+// minute at Google can't run the webhook past its time limit.
+export const MAX_MODEL_ATTEMPTS = 3;
+
+const API = "https://generativelanguage.googleapis.com/v1beta";
+let cachedModels: string[] | null = null;
+
+async function candidateModels(apiKey: string): Promise<string[]> {
+  if (!cachedModels) {
+    const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": apiKey } });
+    if (!res.ok) throw new Error(`Gemini model list failed: HTTP ${res.status}`);
+    const list = (await res.json()) as {
+      models?: { name: string; supportedGenerationMethods?: string[] }[];
+    };
+    const ranked = rankFlashModels(
+      (list.models ?? [])
+        .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
+        .map((m) => m.name)
+    );
+    if (!ranked.length) throw new Error("No Gemini Flash model available to this API key");
+    cachedModels = ranked;
+  }
+  // GEMINI_MODEL, when set, is tried first; the ranked list still backs it up.
+  const pinned = process.env.GEMINI_MODEL;
+  return pinned ? [pinned, ...cachedModels.filter((m) => m !== pinned)] : cachedModels;
 }
 
 export async function parseExpense(opts: {
@@ -162,27 +192,41 @@ export async function parseExpense(opts: {
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
   const today = pakistanToday(opts.now);
-  const model = await resolveModel(apiKey);
   const parts: unknown[] = [
     { text: buildPrompt({ today, categories: opts.categories, text: opts.text, hasImage: !!opts.image }) },
   ];
   if (opts.image) parts.push({ inlineData: { mimeType: opts.image.mimeType, data: opts.image.data } });
-
-  const res = await fetch(`${API}/models/${model}:generateContent`, {
-    method: "POST",
-    headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
-        temperature: 0,
-      },
-    }),
+  const request = JSON.stringify({
+    contents: [{ role: "user", parts }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: RESPONSE_SCHEMA,
+      temperature: 0,
+    },
   });
-  if (!res.ok) {
-    throw new Error(`Gemini ${model} failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+
+  const models = (await candidateModels(apiKey)).slice(0, MAX_MODEL_ATTEMPTS);
+  const busy: string[] = [];
+  let res: Response | null = null;
+  for (const [i, model] of models.entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 800));
+    const attempt = await fetch(`${API}/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+      body: request,
+    });
+    if (attempt.ok) {
+      res = attempt;
+      break;
+    }
+    const detail = `${model} HTTP ${attempt.status}`;
+    if (!isRetryableStatus(attempt.status)) {
+      throw new Error(`Gemini ${detail} ${(await attempt.text()).slice(0, 300)}`);
+    }
+    console.warn(`[gemini] ${detail}, trying next model`);
+    busy.push(detail);
   }
+  if (!res) throw new GeminiBusyError(busy.join("; "));
 
   const data = (await res.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
