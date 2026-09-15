@@ -127,6 +127,7 @@ function EditProfileModal({ onClose }: { onClose: () => void }) {
 
 const NAV_ITEMS = [
   { href: "/", label: "Home", icon: "" },
+  { href: "/assistant", label: "Assistant", icon: "" },
   { href: "/expenses", label: "Mera Khata", icon: "" },
   { href: "/udhar-khata", label: "Udhar Khata", icon: "" },
   { href: "/subscriptions", label: "Subscriptions", icon: "" },

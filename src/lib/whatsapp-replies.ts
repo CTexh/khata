@@ -91,7 +91,7 @@ export function refusalReply(reason: string): string {
 }
 
 export const HELP_REPLY = join([
-  "*Khata on WhatsApp*",
+  "*What you can say*",
   "",
   "*Expenses*",
   "fuel 3000 shell",
@@ -225,4 +225,10 @@ export function dueDateReply(o: { name: string; date: string | null }): string {
   return o.date
     ? join(["*Due date set*", "", `*${o.name}*: ${fmtDateLabel(o.date)}`, "", "Reply *UNDO* to change it back."])
     : join(["*Due date removed*", "", `*${o.name}* no longer has a due date.`, "", "Reply *UNDO* to change it back."]);
+}
+
+// For a voice note, the reply opens with what was heard, so a mishearing is
+// noticed before the saved result is trusted.
+export function withTranscript(transcript: string | null, reply: string): string {
+  return transcript ? join([`*Heard:* ${transcript}`, "", reply]) : reply;
 }

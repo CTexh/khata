@@ -50,8 +50,11 @@ import {
   subscriptionsDueReply,
   udharPersonReply,
   udharSummaryReply,
+  withTranscript,
 } from "../src/lib/whatsapp-replies.ts";
+import { encodeWav } from "../src/lib/wav.ts";
 import { fmtDateLabel } from "../src/lib/format.ts";
+import { splitBold } from "../src/lib/chat-format.ts";
 
 let pass = 0;
 let fail = 0;
@@ -458,6 +461,29 @@ check(
   undoReply({ expense: null, transactions: [], dueDates: [{ name: "Ali", dueDate: null }, { name: "Usama", dueDate: "2026-10-01" }] }),
   `*Removed*\n\nDue date for Ali removed\nDue date for Usama back to ${fmtDateLabel("2026-10-01")}`
 );
+
+/* voice notes: recorded in the browser, sent as 16 kHz mono WAV */
+const wav = new DataView(encodeWav(new Float32Array([0, 1, -1, 0.5, 2]), 16000));
+const riffTag = (offset: number) => String.fromCharCode(...[0, 1, 2, 3].map((i) => wav.getUint8(offset + i)));
+check("wav chunk tags", [riffTag(0), riffTag(8), riffTag(12), riffTag(36)], ["RIFF", "WAVE", "fmt ", "data"]);
+check("wav is PCM mono 16 kHz 16-bit", [wav.getUint16(20, true), wav.getUint16(22, true), wav.getUint32(24, true), wav.getUint32(28, true), wav.getUint16(32, true), wav.getUint16(34, true)], [1, 1, 16000, 32000, 2, 16]);
+check("wav sizes", [wav.byteLength, wav.getUint32(40, true), wav.getUint32(4, true)], [54, 10, 46]);
+check("wav samples scaled and clipped", [0, 1, 2, 3, 4].map((i) => wav.getInt16(44 + i * 2, true)), [0, 32767, -32768, 16383, 32767]);
+check("a minute of voice fits the upload limit", 44 + 60 * 16000 * 2 <= 2.5 * 1024 * 1024, true);
+check("reply opens with what was heard", withTranscript("fuel 3000 shell", "*Expense added*"), "*Heard:* fuel 3000 shell\n\n*Expense added*");
+check("no transcript leaves reply alone", withTranscript(null, "*Expense added*"), "*Expense added*");
+check("prompt voice line", buildPrompt({ today, categories: [], people: [], text: "", hasImage: false, hasAudio: true }).includes("A voice note is attached"), true);
+check("prompt says the message is in the voice note", buildPrompt({ today, categories: [], people: [], text: "", hasImage: false, hasAudio: true }).includes("Message: (in the voice note)"), true);
+check("prompt without voice has no voice line", buildPrompt({ today, categories: [], people: [], text: "x", hasImage: false }).includes("voice note"), false);
+
+/* in-app rendering of *bold*: split into pieces, never HTML */
+check("bold split", splitBold("*Ali*: Rs 500 lent"), [{ text: "Ali", bold: true }, { text: ": Rs 500 lent", bold: false }]);
+check("bold in the middle", splitBold("Reply *UNDO* to remove it."), [{ text: "Reply ", bold: false }, { text: "UNDO", bold: true }, { text: " to remove it.", bold: false }]);
+check("no bold", splitBold("Balance: settled"), [{ text: "Balance: settled", bold: false }]);
+check("lone asterisk left alone", splitBold("2 * 3"), [{ text: "2 * 3", bold: false }]);
+check("empty line", splitBold(""), []);
+check("markup stays text", splitBold("*<img src=x onerror=alert(1)>*"), [{ text: "<img src=x onerror=alert(1)>", bold: true }]);
+check("help heading is channel-neutral", HELP_REPLY.startsWith("*What you can say*"), true);
 
 /* replies: bold heading, blank line, one fact per line, UNDO hint set apart */
 check(
