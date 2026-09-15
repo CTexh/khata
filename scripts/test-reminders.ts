@@ -64,6 +64,7 @@ check("long date", longDate("2026-09-16"), "Wednesday, 16 September 2026");
 const url = "https://khata.example";
 const item = { key: "k", id: "s 1", name: "Netflix", amount: 1500, date: "2026-09-16" };
 const before = subscriptionReminderEmail({ name: "Walli", item, stage: "before", appUrl: url });
+check("header has the logo and name", [before.html.includes(`src="${url}/icon-192.png"`), before.html.includes(">Khata</span>")], [true, true]);
 check("before subject", before.subject, "Reminder: Netflix payment of Rs 1,500 is due tomorrow");
 check("before links to the record", before.html.includes(`${url}/subscriptions?open=s%201`) && before.text.includes(`${url}/subscriptions?open=s%201`), true);
 check("before body", [before.text.includes("Dear Walli,"), before.text.includes("due tomorrow, Wednesday, 16 September 2026"), before.html.includes("Upcoming")], [true, true, true]);

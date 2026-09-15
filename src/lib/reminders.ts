@@ -131,8 +131,11 @@ function render(o: Layout): { html: string; text: string } {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f9;padding:32px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 <tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;">
-<tr><td style="background:#121833;padding:20px 32px;">
-<span style="font-size:18px;font-weight:800;color:#ffffff;letter-spacing:-0.01em;">Khata</span>
+<tr><td style="background:#121833;padding:18px 32px;">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+<td style="vertical-align:middle;padding-right:10px;"><img src="${escapeHtml(o.manageUrl)}/icon-192.png" width="32" height="32" alt="Khata logo" style="display:block;width:32px;height:32px;border-radius:9px;border:0;"></td>
+<td style="vertical-align:middle;"><span style="font-size:19px;font-weight:800;color:#ffffff;letter-spacing:-0.01em;">Khata</span></td>
+</tr></table>
 </td></tr>
 <tr><td style="padding:32px 32px 8px;">
 <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#2a78d6;">${escapeHtml(o.eyebrow)}</p>
