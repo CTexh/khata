@@ -37,7 +37,7 @@ export function expenseAddedReply(o: {
 
 export function ledgerReply(o: {
   direction: "lend" | "repayment";
-  lines: { name: string; amount: number; balance: number }[];
+  lines: { name: string; amount: number; balance: number; isNew?: boolean; settled?: boolean }[];
 }): string {
   const lend = o.direction === "lend";
   const out = [lend ? "*Udhar Khata updated*" : "*Payment recorded*", ""];
@@ -47,7 +47,11 @@ export function ledgerReply(o: {
   }
   o.lines.forEach((l, i) => {
     if (i > 0) out.push("");
-    out.push(lend ? `*${l.name}*: ${fmtRs(l.amount)} lent` : `*${l.name}* paid back ${fmtRs(l.amount)}`);
+    out.push(
+      lend
+        ? `*${l.name}*${l.isNew ? " (new)" : ""}: ${fmtRs(l.amount)} lent`
+        : `*${l.name}* paid back ${l.settled ? "everything, " : ""}${fmtRs(l.amount)}`
+    );
     out.push(balanceLine(l.balance));
   });
   out.push("", "Reply *UNDO* to reverse this.");
@@ -58,6 +62,7 @@ export function undoReply(
   u: {
     expense: { amount: number; vendor: string | null } | null;
     transactions: { name: string; amount: number }[];
+    peopleRemoved?: string[];
   } | null
 ): string {
   if (!u) return join(["*Nothing to undo*", "", "There's nothing from the last 24 hours to remove."]);
@@ -72,6 +77,7 @@ export function undoReply(
         : `Payment from ${t.name}: ${fmtRs(-t.amount)}`
     );
   }
+  for (const name of u.peopleRemoved ?? []) out.push(`Removed ${name} from Udhar Khata`);
   return join(out);
 }
 

@@ -473,6 +473,12 @@ export async function ensureCategoryTables(): Promise<void> {
   } catch {
     // Column already exists.
   }
+  // People a message added to Udhar Khata, so UNDO can remove them again.
+  try {
+    await c.execute(`ALTER TABLE whatsapp_inbound ADD COLUMN person_ids TEXT`);
+  } catch {
+    // Column already exists.
+  }
   // Which Gemini models have been answering. Shared across server instances,
   // so a model found overloaded on one request is skipped on the next even
   // when Vercel runs it somewhere else. Times are epoch milliseconds.
@@ -1147,44 +1153,58 @@ export async function attachInboundExpense(messageId: string, expenseId: string)
   });
 }
 
-export async function attachInboundTransactions(messageId: string, txIds: string[]): Promise<void> {
+export async function attachInboundTransactions(
+  messageId: string,
+  txIds: string[],
+  personIds: string[] = []
+): Promise<void> {
   const c = await db();
   await c.execute({
-    sql: "UPDATE whatsapp_inbound SET tx_ids = ? WHERE message_id = ?",
-    args: [JSON.stringify(txIds), messageId],
+    sql: "UPDATE whatsapp_inbound SET tx_ids = ?, person_ids = ? WHERE message_id = ?",
+    args: [JSON.stringify(txIds), JSON.stringify(personIds), messageId],
   });
+}
+
+function idList(raw: unknown): string[] {
+  try {
+    const parsed = JSON.parse((raw as string) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 export type UndoResult = {
   expense: { amount: number; vendor: string | null } | null;
   transactions: { name: string; amount: number }[];
+  peopleRemoved: string[];
 };
 
 // Reverses the most recent thing added over WhatsApp in the last 24 hours -
-// an expense or a set of Udhar Khata entries. Scoped to WhatsApp on purpose:
-// UNDO should never reach into something added in the app or imported from a
-// bank email. Anything already deleted in the app is simply skipped.
+// an expense, or a set of Udhar Khata entries and any people that message
+// added. Scoped to WhatsApp on purpose: UNDO should never reach into
+// something added in the app or imported from a bank email. Anything already
+// deleted in the app is skipped, and a person the message added is only
+// removed if nothing else has been recorded against them since.
 export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult | null> {
   await ensureCategoryTables();
   const c = await db();
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const rs = await c.execute({
-    sql: `SELECT message_id, expense_id, tx_ids FROM whatsapp_inbound
+    sql: `SELECT message_id, expense_id, tx_ids, person_ids FROM whatsapp_inbound
           WHERE user_id = ? AND created_at >= ?
-            AND (expense_id IS NOT NULL OR (tx_ids IS NOT NULL AND tx_ids != '[]'))
+            AND (expense_id IS NOT NULL
+                 OR (tx_ids IS NOT NULL AND tx_ids != '[]')
+                 OR (person_ids IS NOT NULL AND person_ids != '[]'))
           ORDER BY created_at DESC LIMIT 1`,
     args: [userId, since],
   });
   const row = rs.rows[0];
   if (!row) return null;
 
-  let txIds: string[] = [];
-  try {
-    const parsed = JSON.parse((row.tx_ids as string) ?? "[]");
-    if (Array.isArray(parsed)) txIds = parsed.filter((x): x is string => typeof x === "string");
-  } catch {
-    // Unreadable - treated as no transactions.
-  }
+  const txIds = idList(row.tx_ids);
+  const personIds = idList(row.person_ids);
+  const placeholders = (n: number) => Array.from({ length: n }, () => "?").join(", ");
 
   const expenseId = (row.expense_id as string) ?? null;
   const expenseRs = expenseId
@@ -1196,16 +1216,29 @@ export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult 
   const txRs = txIds.length
     ? await c.execute({
         sql: `SELECT t.id, t.amount, p.name FROM transactions t JOIN people p ON p.id = t.person_id
-              WHERE p.user_id = ? AND t.id IN (${txIds.map(() => "?").join(", ")})`,
+              WHERE p.user_id = ? AND t.id IN (${placeholders(txIds.length)})`,
         args: [userId, ...txIds],
+      })
+    : null;
+  // A person counts as removable only if every transaction they have is one
+  // this UNDO is about to delete.
+  const peopleRs = personIds.length
+    ? await c.execute({
+        sql: `SELECT p.id, p.name,
+                (SELECT COUNT(*) FROM transactions t
+                 WHERE t.person_id = p.id${txIds.length ? ` AND t.id NOT IN (${placeholders(txIds.length)})` : ""}) AS others
+              FROM people p WHERE p.user_id = ? AND p.id IN (${placeholders(personIds.length)})`,
+        args: [...txIds, userId, ...personIds],
       })
     : null;
 
   const expenseRow = expenseRs?.rows[0];
   const txRows = txRs?.rows ?? [];
+  const removablePeople = (peopleRs?.rows ?? []).filter((p) => Number(p.others) === 0);
+
   const statements: { sql: string; args: (string | number)[] }[] = [
     {
-      sql: "UPDATE whatsapp_inbound SET expense_id = NULL, tx_ids = NULL WHERE message_id = ?",
+      sql: "UPDATE whatsapp_inbound SET expense_id = NULL, tx_ids = NULL, person_ids = NULL WHERE message_id = ?",
       args: [row.message_id as string],
     },
   ];
@@ -1215,14 +1248,24 @@ export async function undoLastWhatsAppEntry(userId: string): Promise<UndoResult 
   for (const t of txRows) {
     statements.push({ sql: "DELETE FROM transactions WHERE id = ?", args: [t.id as string] });
   }
+  // Runs after the transaction deletes in the same batch, and re-checks that
+  // nothing new was recorded against the person in the meantime.
+  for (const p of removablePeople) {
+    statements.push({
+      sql: `DELETE FROM people WHERE id = ? AND user_id = ?
+            AND NOT EXISTS (SELECT 1 FROM transactions WHERE person_id = ?)`,
+      args: [p.id as string, userId, p.id as string],
+    });
+  }
   await c.batch(statements, "write");
 
-  if (!expenseRow && !txRows.length) return null;
+  if (!expenseRow && !txRows.length && !removablePeople.length) return null;
   return {
     expense: expenseRow
       ? { amount: Number(expenseRow.amount), vendor: (expenseRow.vendor as string) ?? null }
       : null,
     transactions: txRows.map((t) => ({ name: t.name as string, amount: Number(t.amount) })),
+    peopleRemoved: removablePeople.map((p) => p.name as string),
   };
 }
 
@@ -1234,28 +1277,57 @@ export async function listLedgerPeople(userId: string): Promise<LedgerPerson[]> 
   return (await listPeople(userId)).map((p) => ({ id: p.id, name: p.name, balance: p.balance }));
 }
 
+export type LedgerWrite =
+  | { personId: string; amount: number }
+  | { newName: string; amount: number };
+
 // Same rows the Udhar Khata page writes: a positive amount is money lent, a
-// negative one is money paid back. Each insert only happens if the person
-// belongs to this user, checked in the same statement, and all of them are
-// written together or not at all.
-export async function addLedgerTransactions(
+// negative one is money paid back, and a new person gets a people row plus
+// their first transaction, as adding a borrower in the app does. Inserts for
+// existing people only happen if the person belongs to this user, checked in
+// the same statement, and everything for one message is one batch.
+export async function writeLedgerEntries(
   userId: string,
-  entries: { personId: string; amount: number }[],
+  entries: LedgerWrite[],
   note: string
-): Promise<string[]> {
-  if (!entries.length) return [];
+): Promise<{ txIds: string[]; createdPeople: string[] }> {
+  if (!entries.length) return { txIds: [], createdPeople: [] };
   const c = await db();
   const now = new Date().toISOString();
-  const ids = entries.map(() => randomUUID());
-  const results = await c.batch(
-    entries.map((e, i) => ({
-      sql: `INSERT INTO transactions (id, person_id, amount, note, created_at)
-            SELECT ?, id, ?, ?, ? FROM people WHERE id = ? AND user_id = ?`,
-      args: [ids[i], e.amount, note, now, e.personId, userId],
-    })),
-    "write"
-  );
-  return ids.filter((_, i) => results[i]?.rowsAffected === 1);
+  const statements: { sql: string; args: (string | number)[] }[] = [];
+  const txIds: string[] = [];
+  const txStatement: number[] = [];
+  const createdPeople: string[] = [];
+
+  for (const e of entries) {
+    const txId = randomUUID();
+    txIds.push(txId);
+    if ("newName" in e) {
+      const personId = randomUUID();
+      createdPeople.push(personId);
+      statements.push({
+        sql: "INSERT INTO people (id, name, created_at, user_id, due_date) VALUES (?, ?, ?, ?, NULL)",
+        args: [personId, e.newName, now, userId],
+      });
+      statements.push({
+        sql: "INSERT INTO transactions (id, person_id, amount, note, created_at) VALUES (?, ?, ?, ?, ?)",
+        args: [txId, personId, e.amount, note, now],
+      });
+    } else {
+      statements.push({
+        sql: `INSERT INTO transactions (id, person_id, amount, note, created_at)
+              SELECT ?, id, ?, ?, ? FROM people WHERE id = ? AND user_id = ?`,
+        args: [txId, e.amount, note, now, e.personId, userId],
+      });
+    }
+    txStatement.push(statements.length - 1);
+  }
+
+  const results = await c.batch(statements, "write");
+  return {
+    txIds: txIds.filter((_, i) => results[txStatement[i]]?.rowsAffected === 1),
+    createdPeople,
+  };
 }
 
 /* ---------- AI model health ---------- */

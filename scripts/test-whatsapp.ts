@@ -21,6 +21,8 @@ import {
   buildPrompt,
   classifyStatus,
   mentionsPerson,
+  asksForNewPerson,
+  newPersonName,
   orderCandidates,
   pakistanToday,
   parseOffline,
@@ -158,14 +160,14 @@ check("person key ignores case, spaces, punctuation", [personKey("Abdur Rehman")
 check(
   "lend 700 each to two people",
   led({ intent: "lend", entries: [{ person: "usama irtaza", amount: 700 }, { person: "abdurrehman", amount: 700 }] }),
-  { ok: true, kind: "ledger", ledger: { direction: "lend", entries: [{ person: "Usama Irtaza", amount: 700 }, { person: "Abdur Rehman", amount: 700 }], note: null } }
+  { ok: true, kind: "ledger", ledger: { direction: "lend", entries: [{ person: "Usama Irtaza", amount: 700, isNew: false }, { person: "Abdur Rehman", amount: 700, isNew: false }], note: null } }
 );
 check(
   "repayment 1000",
   led({ intent: "repayment", entries: [{ person: "Abdur Rehman", amount: 1000 }], note: " cash " }),
-  { ok: true, kind: "ledger", ledger: { direction: "repayment", entries: [{ person: "Abdur Rehman", amount: 1000 }], note: "cash" } }
+  { ok: true, kind: "ledger", ledger: { direction: "repayment", entries: [{ person: "Abdur Rehman", amount: 1000, isNew: false }], note: "cash" } }
 );
-check("ledger string amount", led({ intent: "lend", entries: [{ person: "ALI", amount: "1.5e3" }] }).ledger?.entries, [{ person: "Ali", amount: 1500 }]);
+check("ledger string amount", led({ intent: "lend", entries: [{ person: "ALI", amount: "1.5e3" }] }).ledger?.entries, [{ person: "Ali", amount: 1500, isNew: false }]);
 check("unknown person refused", led({ intent: "lend", entries: [{ person: "Bilal", amount: 500 }] }).ok, false);
 check("unknown person named in reply", led({ intent: "lend", entries: [{ person: "Bilal", amount: 500 }] }).reason.includes("Bilal"), true);
 check("one unknown blocks the whole message", led({ intent: "lend", entries: [{ person: "Ali", amount: 500 }, { person: "Bilal", amount: 500 }] }).ok, false);
@@ -296,6 +298,69 @@ check("prompt no image line without image", buildPrompt({ today, categories: [],
 check("prompt no doubled blank lines", /\n\n\n/.test(prompt), false);
 check("PKT date rolls at local midnight", pakistanToday(new Date("2026-09-14T19:30:00Z")), "2026-09-15");
 check("PKT date before local midnight", pakistanToday(new Date("2026-09-14T18:30:00Z")), "2026-09-14");
+
+/* new people: only when the message itself asks, and the model marks the name new */
+const fresh = (raw: Record<string, unknown>, text: string) => validateParsed(raw, today, people, text) as any;
+check(
+  "asks for new person",
+  [asksForNewPerson("Add new borrower habib ullah with 500 in his name"), asksForNewPerson("add 700 to habib"), asksForNewPerson("naya banda bilal 300")],
+  [true, false, true]
+);
+check(
+  "new person name tidied",
+  [newPersonName("habib ullah"), newPersonName("  o'brien  "), newPersonName("ali2"), newPersonName(""), newPersonName("a b c d e f")],
+  ["Habib Ullah", "O'brien", null, null, null]
+);
+check(
+  "new borrower created",
+  fresh({ intent: "lend", entries: [{ person: "habib ullah", amount: 500, is_new: true }] }, "Add new borrower habib ullah with 500 in his name"),
+  { ok: true, kind: "ledger", ledger: { direction: "lend", entries: [{ person: "Habib Ullah", amount: 500, isNew: true }], note: null } }
+);
+check("model says new but message didn't ask: refused", fresh({ intent: "lend", entries: [{ person: "habib ullah", amount: 500, is_new: true }] }, "add 500 to habib ullah").ok, false);
+check("message asks but model didn't mark new: refused", fresh({ intent: "lend", entries: [{ person: "habib ullah", amount: 500 }] }, "add new borrower habib ullah 500").ok, false);
+check("refusal suggests the new-borrower phrasing", fresh({ intent: "lend", entries: [{ person: "Bilal", amount: 5 }] }, "add 5 to bilal").reason.includes("add new borrower Bilal"), true);
+check(
+  "asked to add someone who exists: existing person used",
+  fresh({ intent: "lend", entries: [{ person: "ali", amount: 500, is_new: true }] }, "add new borrower ali 500").ledger?.entries,
+  [{ person: "Ali", amount: 500, isNew: false }]
+);
+check("new person can't repay", fresh({ intent: "repayment", entries: [{ person: "habib", amount: 500, is_new: true }] }, "new borrower habib paid back 500").ok, false);
+check("repayment from unknown names them", fresh({ intent: "repayment", entries: [{ person: "Bilal", amount: 5 }] }, "bilal paid back 5").reason.includes("Bilal isn't"), true);
+check("bad new name refused", fresh({ intent: "lend", entries: [{ person: "habib 123", amount: 500, is_new: true }] }, "add new borrower habib 123 with 500").ok, false);
+check(
+  "new and existing in one message",
+  fresh({ intent: "lend", entries: [{ person: "habib ullah", amount: 500, is_new: true }, { person: "ALI", amount: 200 }] }, "add new borrower habib ullah 500 and 200 to ali").ledger?.entries,
+  [{ person: "Habib Ullah", amount: 500, isNew: true }, { person: "Ali", amount: 200, isNew: false }]
+);
+check("same new person twice refused", fresh({ intent: "lend", entries: [{ person: "habib", amount: 5, is_new: true }, { person: "Habib", amount: 6, is_new: true }] }, "new borrower habib 5 and 6").ok, false);
+check("offline refuses new borrower", parseOffline("add new borrower habib 500", today, people).ok, false);
+check(
+  "lend reply marks new person",
+  ledgerReply({ direction: "lend", lines: [{ name: "Habib Ullah", amount: 500, balance: 500, isNew: true }] }),
+  "*Udhar Khata updated*\n\n*Habib Ullah* (new): Rs 500 lent\nBalance: owes you Rs 500\n\nReply *UNDO* to reverse this."
+);
+check(
+  "undo reply removes new person",
+  undoReply({ expense: null, transactions: [{ name: "Habib Ullah", amount: 500 }], peopleRemoved: ["Habib Ullah"] }),
+  "*Removed*\n\nLoan to Habib Ullah: Rs 500\nRemoved Habib Ullah from Udhar Khata"
+);
+
+/* "paid all his debt": no amount given, the balance is filled in when saved */
+check(
+  "settle all accepted without an amount",
+  fresh({ intent: "repayment", entries: [{ person: "ali", all: true }] }, "ali paid all his debt").ledger?.entries,
+  [{ person: "Ali", amount: null, isNew: false, all: true }]
+);
+check("settle all ignores a guessed amount", fresh({ intent: "repayment", entries: [{ person: "Ali", amount: 0, all: true }] }, "ali cleared his khata").ok, true);
+check("all only means everything for repayments", fresh({ intent: "lend", entries: [{ person: "Ali", all: true }] }, "give ali all").ok, false);
+check("settle all for unknown person refused", fresh({ intent: "repayment", entries: [{ person: "Bilal", all: true }] }, "bilal paid everything").ok, false);
+check("plain repayment still needs an amount", fresh({ intent: "repayment", entries: [{ person: "Ali" }] }, "ali paid me back").ok, false);
+check("offline refuses debt talk", [parseOffline("ahmed paid 500 of his dept", today, []).ok, parseOffline("settled 500", today, []).ok], [false, false]);
+check(
+  "settled reply",
+  ledgerReply({ direction: "repayment", lines: [{ name: "Ahmed Zahid", amount: 100, balance: 0, settled: true }] }),
+  "*Payment recorded*\n\n*Ahmed Zahid* paid back everything, Rs 100\nBalance: settled\n\nReply *UNDO* to reverse this."
+);
 
 /* replies: bold heading, blank line, one fact per line, UNDO hint set apart */
 check(

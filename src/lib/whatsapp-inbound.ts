@@ -3,7 +3,6 @@
 // back in Udhar Khata - save it, and reply. Runs after the webhook has already
 // answered Meta, so nothing here can make Meta retry.
 import {
-  addLedgerTransactions,
   attachInboundExpense,
   attachInboundTransactions,
   claimInboundMessage,
@@ -15,7 +14,9 @@ import {
   resolveExpenseCategory,
   saveModelHealth,
   undoLastWhatsAppEntry,
+  writeLedgerEntries,
   type LedgerPerson,
+  type LedgerWrite,
 } from "@/lib/db";
 import {
   GeminiBusyError,
@@ -56,6 +57,7 @@ type LogLine = {
   kind?: "expense" | "ledger";
   direction?: "lend" | "repayment";
   entries?: number;
+  newPeople?: number;
   category?: string | null;
   parser?: "gemini" | "offline";
   model?: string;
@@ -221,10 +223,31 @@ async function saveLedger(
   people: LedgerPerson[],
   log: LogLine
 ): Promise<void> {
-  // Validation matched each name against this same list, but two people can
-  // share a name ("Ali" and "ali"). Writing to either would be a guess.
-  const rows: { person: LedgerPerson; amount: number }[] = [];
+  // Same sign convention as the Udhar Khata page: lent is positive, paid back negative.
+  const sign = ledger.direction === "lend" ? 1 : -1;
+  const rows: {
+    write: LedgerWrite;
+    name: string;
+    amount: number;
+    balance: number;
+    isNew: boolean;
+    settled?: boolean;
+  }[] = [];
+
   for (const entry of ledger.entries) {
+    if (entry.isNew) {
+      const amount = entry.amount ?? 0;
+      rows.push({
+        write: { newName: entry.person, amount: sign * amount },
+        name: entry.person,
+        amount,
+        balance: sign * amount,
+        isNew: true,
+      });
+      continue;
+    }
+    // Validation matched the name against this same list, but two people can
+    // share a name ("Ali" and "ali"). Writing to either would be a guess.
     const matches = people.filter((p) => personKey(p.name) === personKey(entry.person));
     if (matches.length !== 1) {
       log.outcome = matches.length > 1 ? "ambiguous_person" : "rejected";
@@ -235,18 +258,36 @@ async function saveLedger(
           : refusalReply(`I couldn't find ${entry.person} in your Udhar Khata.`)
       );
     }
-    rows.push({ person: matches[0], amount: entry.amount });
+    const person = matches[0];
+    // "Paid everything back": the amount is whatever they owe right now.
+    let amount = entry.amount ?? 0;
+    if (entry.all) {
+      if (person.balance < 0.005) {
+        log.outcome = "nothing_to_settle";
+        return reply(
+          message.from,
+          refusalReply(`${person.name} doesn't owe you anything right now, so there's nothing to settle.`)
+        );
+      }
+      amount = Math.round(person.balance * 100) / 100;
+    }
+    rows.push({
+      write: { personId: person.id, amount: sign * amount },
+      name: person.name,
+      amount,
+      balance: person.balance + sign * amount,
+      isNew: false,
+      settled: entry.all === true,
+    });
   }
 
-  // Same sign convention as the Udhar Khata page: lent is positive, paid back negative.
-  const sign = ledger.direction === "lend" ? 1 : -1;
-  const txIds = await addLedgerTransactions(
+  const { txIds, createdPeople } = await writeLedgerEntries(
     userId,
-    rows.map((r) => ({ personId: r.person.id, amount: sign * r.amount })),
+    rows.map((r) => r.write),
     ledger.note ? `WhatsApp: ${ledger.note}` : "WhatsApp"
   );
   // Recorded before any check, so whatever was written can still be undone.
-  await attachInboundTransactions(message.id, txIds);
+  await attachInboundTransactions(message.id, txIds, createdPeople);
   if (txIds.length !== rows.length) {
     throw new Error(`Udhar Khata: wrote ${txIds.length} of ${rows.length} entries`);
   }
@@ -254,16 +295,13 @@ async function saveLedger(
   log.kind = "ledger";
   log.direction = ledger.direction;
   log.entries = rows.length;
+  log.newPeople = createdPeople.length;
   log.outcome = "added";
   await reply(
     message.from,
     ledgerReply({
       direction: ledger.direction,
-      lines: rows.map((r) => ({
-        name: r.person.name,
-        amount: r.amount,
-        balance: r.person.balance + sign * r.amount,
-      })),
+      lines: rows.map(({ name, amount, balance, isNew, settled }) => ({ name, amount, balance, isNew, settled })),
     })
   );
 }

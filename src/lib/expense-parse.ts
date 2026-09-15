@@ -13,8 +13,11 @@ export type ParsedExpense = {
 };
 
 export type LedgerDirection = "lend" | "repayment";
-// `person` is always a name exactly as it appears in the user's Udhar Khata.
-export type LedgerEntry = { person: string; amount: number };
+// `person` is a name exactly as it appears in the user's Udhar Khata - or, when
+// isNew is true, the tidied name to create a new person with. `all` marks a
+// repayment of the whole balance ("paid all his debt"): amount is null then,
+// and the balance at the time of saving is used.
+export type LedgerEntry = { person: string; amount: number | null; isNew: boolean; all?: true };
 export type ParsedLedger = { direction: LedgerDirection; entries: LedgerEntry[]; note: string | null };
 
 export type ParseOutcome =
@@ -50,8 +53,13 @@ export const RESPONSE_SCHEMA = {
       nullable: true,
       items: {
         type: "OBJECT",
-        properties: { person: { type: "STRING" }, amount: { type: "NUMBER" } },
-        required: ["person", "amount"],
+        properties: {
+          person: { type: "STRING" },
+          amount: { type: "NUMBER", nullable: true },
+          is_new: { type: "BOOLEAN", nullable: true },
+          all: { type: "BOOLEAN", nullable: true },
+        },
+        required: ["person"],
       },
     },
   },
@@ -80,6 +88,8 @@ export function buildPrompt(opts: {
     `Udhar Khata people: ${opts.people.length ? opts.people.join(", ") : "(none yet)"}.`,
     "For lend and repayment, put one item per person in entries, with that person's own amount.",
     '"700 each to A and B" means two entries of 700. Use each name exactly as written in the Udhar Khata list, matching misspellings to the closest name there. If someone is clearly not on the list, use the name as written. Leave vendor and category_hint empty.',
+    'Set is_new to true only when the message explicitly asks to add a new person or borrower who is not on the list, e.g. "add new borrower habib ullah with 500". Adding a new person is always intent "lend". Otherwise is_new is false.',
+    'If someone paid back everything they owe - "paid all his debt", "settled", "cleared his khata" - that is intent "repayment" with all set to true and amount left empty.',
     "",
     "For expense: amount, vendor (the shop, company or person paid), note (what it was for), date, and",
     `category_hint - the best match from this list, or null if none clearly fits: ${opts.categories.join(", ")}.`,
@@ -124,7 +134,12 @@ function currencyProblem(raw: unknown): string | null {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export function validateParsed(raw: unknown, today: string, people: string[] = []): ParseOutcome {
+export function validateParsed(
+  raw: unknown,
+  today: string,
+  people: string[] = [],
+  messageText = ""
+): ParseOutcome {
   const unclear: ParseOutcome = {
     ok: false,
     reason:
@@ -134,7 +149,7 @@ export function validateParsed(raw: unknown, today: string, people: string[] = [
   const r = raw as Record<string, unknown>;
   const intent = typeof r.intent === "string" ? r.intent.trim().toLowerCase() : "";
 
-  if (intent === "lend" || intent === "repayment") return validateLedger(r, intent, people);
+  if (intent === "lend" || intent === "repayment") return validateLedger(r, intent, people, messageText);
   if (intent !== "expense") return unclear;
 
   const amount = typeof r.amount === "number" ? r.amount : Number(r.amount);
@@ -165,10 +180,34 @@ export function validateParsed(raw: unknown, today: string, people: string[] = [
   };
 }
 
-// Nothing is saved unless every person named is already in the Udhar Khata.
-// Creating people from a message would turn every misspelling into a second
-// ledger for the same friend, so an unknown name is sent back to be fixed.
-function validateLedger(r: Record<string, unknown>, direction: LedgerDirection, people: string[]): ParseOutcome {
+// Creating a person needs the message itself to ask for it. The model's
+// is_new flag alone isn't trusted: a misspelt existing name must never become
+// a second ledger for the same friend because the model guessed.
+const NEW_PERSON_WORDS = /\b(new|naya|nayi|create|borrower|person|contact)\b/i;
+
+export function asksForNewPerson(text: string): boolean {
+  return NEW_PERSON_WORDS.test(text);
+}
+
+// "habib ullah" -> "Habib Ullah". Letters only (with . ' - inside words), at
+// most five words, so a misread amount or phone number can't become a name.
+export function newPersonName(raw: string): string | null {
+  const words = raw.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  if (!words.length || words.length > 5) return null;
+  if (!words.every((w) => /^[A-Za-z][A-Za-z.'-]*$/.test(w))) return null;
+  const name = words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  return name.length <= 60 ? name : null;
+}
+
+// Existing people are matched by name. A new person is added only when the
+// message asks for one and the model marked that name as new; any other
+// unknown name is sent back to be fixed rather than guessed into existence.
+function validateLedger(
+  r: Record<string, unknown>,
+  direction: LedgerDirection,
+  people: string[],
+  messageText: string
+): ParseOutcome {
   const rawEntries = Array.isArray(r.entries) ? r.entries : [];
   if (!rawEntries.length) {
     return { ok: false, reason: "Tell me who and how much, e.g. add 700 to Ali's khata, or Ali paid me back 500" };
@@ -179,32 +218,59 @@ function validateLedger(r: Record<string, unknown>, direction: LedgerDirection, 
   const currency = currencyProblem(r.currency);
   if (currency) return { ok: false, reason: currency };
 
+  // Someone who isn't in the khata yet can't have paid anything back.
+  const canCreate = direction === "lend" && asksForNewPerson(messageText);
   const known = new Map(people.map((name) => [personKey(name), name]));
   const entries: LedgerEntry[] = [];
   const unknown: string[] = [];
   for (const item of rawEntries as Record<string, unknown>[]) {
     const name = cleanString(item?.person, 80);
     if (!name) return { ok: false, reason: "I couldn't tell whose khata that is. Please include the name." };
+    // "Paid all his debt" names no amount; the balance is filled in when it's
+    // saved. Only a repayment can mean "everything", and any amount the model
+    // guessed alongside it is ignored.
+    const all = direction === "repayment" && item.all === true;
     const amount = typeof item.amount === "number" ? item.amount : Number(item.amount);
-    const problem = amountProblem(amount);
-    if (problem) return { ok: false, reason: `${name}: ${problem}` };
+    if (!all) {
+      const problem = amountProblem(amount);
+      if (problem) return { ok: false, reason: `${name}: ${problem}` };
+    }
 
     const match = known.get(personKey(name));
-    if (!match) {
+    let entry: LedgerEntry;
+    if (match) {
+      // Asked to add someone who is already there: use the existing person.
+      entry = all
+        ? { person: match, amount: null, isNew: false, all: true }
+        : { person: match, amount: round2(amount), isNew: false };
+    } else if (canCreate && item.is_new === true) {
+      const tidy = newPersonName(name);
+      if (!tidy) {
+        return {
+          ok: false,
+          reason: `"${name}" doesn't look like a name I can add. Use letters only, e.g. add new borrower Habib Ullah with 500`,
+        };
+      }
+      entry = { person: tidy, amount: round2(amount), isNew: true };
+    } else {
       unknown.push(name);
       continue;
     }
-    if (entries.some((e) => e.person === match)) {
-      return { ok: false, reason: `${match} is mentioned twice. Please send one amount per person.` };
+
+    if (entries.some((e) => personKey(e.person) === personKey(entry.person))) {
+      return { ok: false, reason: `${entry.person} is mentioned twice. Please send one amount per person.` };
     }
-    entries.push({ person: match, amount: round2(amount) });
+    entries.push(entry);
   }
 
   if (unknown.length) {
     const list = unknown.join(", ");
     return {
       ok: false,
-      reason: `I couldn't find ${list} in your Udhar Khata. Check the spelling, or add them in the app first.`,
+      reason:
+        direction === "repayment"
+          ? `${list} ${unknown.length === 1 ? "isn't" : "aren't"} in your Udhar Khata, so I can't record a payment. Check the spelling.`
+          : `I couldn't find ${list} in your Udhar Khata. Check the spelling, or to add someone new say: add new borrower ${unknown[0]} with 500`,
     };
   }
   return { ok: true, kind: "ledger", ledger: { direction, entries, note: cleanString(r.note, 200) } };
@@ -225,7 +291,7 @@ const FILLER = new Set([
 ]);
 // Words that mean the message is about Udhar Khata, not spending.
 const LEDGER_WORDS =
-  /\b(udhar|udhaar|khata|lend|lent|loan|borrow\w*|owes?|owed|paid\s+(me\s+)?back|pay\s+back|returned|wapas|gave|given|received\s+from|back\s+from)\b/i;
+  /\b(udhar|udhaar|khata|lend|lent|loan|borrow\w*|owes?|owed|paid\s+(me\s+)?back|pay\s+back|returned|wapas|gave|given|received\s+from|back\s+from|debts?|depts?|settle|settled)\b/i;
 
 // True when a person's name appears as whole words - "Ali" in "ali 500" but
 // not in "quality" - allowing the words to be run together ("abdurrehman").
@@ -561,5 +627,5 @@ export async function parseMessage(opts: {
   } catch {
     // Falls through to validateParsed's "couldn't tell what to add".
   }
-  return { outcome: validateParsed(raw, today, opts.people), model: hit.model, attempts };
+  return { outcome: validateParsed(raw, today, opts.people, opts.text), model: hit.model, attempts };
 }
