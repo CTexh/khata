@@ -8,29 +8,34 @@ const STEPS: Step[] = [
   {
     emoji: "👋",
     title: "Welcome to Khata",
-    text: "Your spending, loans and subscriptions in one place. Home shows what you spent today, this week or this month.",
+    text: "Your spending, loans and subscriptions in one place. On Home, switch between Today, This Week and This Month to see what you spent.",
   },
   {
     emoji: "🧾",
     title: "Mera Khata",
-    text: "Tap + to log an expense. Categories fill in for you, and you can see where your money went each month.",
+    text: "Tap + to log an expense - categories fill in for you. See where your money went, tap a category to filter, and tap any expense to edit it.",
   },
   {
     emoji: "🤝",
     title: "Udhar Khata",
-    text: "Add people who owe you. Tap a name to record more lent or money paid back, and set a date to remind you.",
+    text: "Add people who owe you. Tap a name to record more lent or money paid back, and set a follow-up date so you remember to ask.",
   },
   {
     emoji: "🔁",
     title: "Subscriptions",
-    text: "Keep every monthly payment in one list. Tap one to mark it paid - Khata tells you what's still due.",
+    text: "Every monthly payment in one list. Tap one to mark it paid or pause it - overdue ones are flagged so nothing slips.",
+  },
+  {
+    emoji: "📧",
+    title: "Email reminders",
+    text: "Add your email in Edit profile. Get reminders at 6pm when a subscription or follow-up is due, a recap of your day at 4:30am, and a monthly summary.",
   },
 ];
 
 const ASSISTANT_STEP: Step = {
   emoji: "✨",
   title: "Ask the assistant",
-  text: "Tap the middle button and just say it: \"fuel 3000 shell\" or \"who owes me?\". You can type, talk or snap a bill.",
+  text: "Tap the middle button and just say it: \"fuel 3000 shell\", \"who owes me?\" or \"what did I spend this week?\". Type, talk or snap a bill.",
 };
 
 // A few cards that introduce the app. Skippable at any point; finishing or
