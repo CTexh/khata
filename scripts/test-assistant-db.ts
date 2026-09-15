@@ -242,6 +242,44 @@ check("undo refuses to restore another user's row", steps.length, 0);
 await act({ ok: true, kind: "expense_delete", target: target({ vendor: "shell", amount: 999 }) });
 check("other user's expense untouched", await count("SELECT COUNT(*) AS n FROM expenses WHERE user_id = ?", [otherUser]), 1);
 
+/* ---------- deleting an account removes everything it owns ---------- */
+
+const doomed = randomUUID();
+await c.execute({
+  sql: "INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES (?, 'delete-me', 'unused', 0, ?)",
+  args: [doomed, now],
+});
+await dbm.listUserCategories(doomed); // seeds categories
+const doomedSub = await dbm.createSubscription(doomed, "Netflix", 1500, today);
+await dbm.listSubscriptions(doomed); // writes this month's payment row
+await c.execute({
+  sql: "INSERT INTO expenses (id, user_id, amount, note, expense_date, expense_datetime, created_at) VALUES (?, ?, 50, '', ?, '', ?)",
+  args: [randomUUID(), doomed, today, now],
+});
+const doomedPerson = randomUUID();
+await c.execute({ sql: "INSERT INTO people (id, name, created_at, user_id) VALUES (?, 'Kamran', ?, ?)", args: [doomedPerson, now, doomed] });
+await c.execute({ sql: "INSERT INTO transactions (id, person_id, amount, note, created_at) VALUES (?, ?, 300, '', ?)", args: [randomUUID(), doomedPerson, now] });
+await dbm.recordAssistantFeedback(doomed, "suggestion", "delete me too");
+const otherBefore = await count("SELECT COUNT(*) AS n FROM expenses WHERE user_id = ?", [otherUser]);
+
+await dbm.deleteUser(doomed);
+const left = async (table: string, where = "user_id = ?") => count(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`, [doomed]);
+check(
+  "account with a subscription deletes cleanly",
+  [
+    await left("users", "id = ?"),
+    await left("subscriptions"),
+    await count("SELECT COUNT(*) AS n FROM subscription_payments WHERE subscription_id = ?", [doomedSub.id]),
+    await left("expenses"),
+    await left("people"),
+    await count("SELECT COUNT(*) AS n FROM transactions WHERE person_id = ?", [doomedPerson]),
+    await left("expense_categories"),
+    await left("assistant_feedback"),
+  ],
+  [0, 0, 0, 0, 0, 0, 0, 0]
+);
+check("other accounts untouched by a delete", await count("SELECT COUNT(*) AS n FROM expenses WHERE user_id = ?", [otherUser]), otherBefore);
+
 c.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

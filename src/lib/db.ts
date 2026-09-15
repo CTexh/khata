@@ -339,7 +339,21 @@ export async function listUsers(): Promise<UserSummary[]> {
   }));
 }
 
+// Removes an account and everything it owns, in one batch: if any statement
+// fails, nothing is deleted. subscriptions references users, so the account
+// row has to go last - deleting it before the subscriptions is what made
+// deleting anyone with a subscription fail with a foreign-key error.
 export async function deleteUser(id: string): Promise<void> {
+  // Every table the batch touches must exist, even on a database that has
+  // never used reminders or the assistant.
+  await Promise.all([
+    ensureTablesExist(),
+    ensureCategoryTables(),
+    ensureUserEmailColumns(),
+    ensureFeedbackTable(),
+    ensureLoginAttemptsTable(),
+  ]);
+  const user = await findUserById(id);
   const c = await db();
   await c.batch(
     [
@@ -349,6 +363,17 @@ export async function deleteUser(id: string): Promise<void> {
       },
       { sql: "DELETE FROM people WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM expenses WHERE user_id = ?", args: [id] },
+      {
+        sql: `DELETE FROM subscription_payments WHERE subscription_id IN (SELECT id FROM subscriptions WHERE user_id = ?)`,
+        args: [id],
+      },
+      { sql: "DELETE FROM subscriptions WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM expense_categories WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM expense_vendor_rules WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM whatsapp_inbound WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM reminder_log WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM assistant_feedback WHERE user_id = ?", args: [id] },
+      ...(user ? [{ sql: "DELETE FROM login_failures WHERE username = ?", args: [user.username.toLowerCase()] }] : []),
       { sql: "DELETE FROM users WHERE id = ?", args: [id] },
     ],
     "write"
