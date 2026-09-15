@@ -17,49 +17,94 @@
 // sending number + permanent access token for the whole app, not per-user.
 export type WhatsAppSendResult = { ok: boolean; error?: string };
 
-async function sendTemplate(
-  phone: string,
-  templateName: string,
-  languageCode: string,
-  components: unknown[]
-): Promise<WhatsAppSendResult> {
+const GRAPH = "https://graph.facebook.com/v21.0";
+
+function credentials(): { phoneNumberId: string; accessToken: string } | null {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-  if (!phoneNumberId || !accessToken) {
+  return phoneNumberId && accessToken ? { phoneNumberId, accessToken } : null;
+}
+
+// Surface Meta's actual error (invalid token, unapproved template, phone
+// not registered, etc.) instead of a generic failure.
+async function metaError(res: Response): Promise<string> {
+  const body = await res.text();
+  try {
+    return JSON.parse(body)?.error?.message ?? body;
+  } catch {
+    return body;
+  }
+}
+
+async function sendMessage(phone: string, message: Record<string, unknown>): Promise<WhatsAppSendResult> {
+  const creds = credentials();
+  if (!creds) {
     return { ok: false, error: "WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN not set" };
   }
-
-  const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+  const res = await fetch(`${GRAPH}/${creds.phoneNumberId}/messages`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${creds.accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       messaging_product: "whatsapp",
       to: phone.replace(/[^\d]/g, ""), // Meta expects digits only, no "+"
-      type: "template",
-      template: {
-        name: templateName,
-        language: { code: languageCode },
-        components,
-      },
+      ...message,
     }),
   });
+  return res.ok ? { ok: true } : { ok: false, error: await metaError(res) };
+}
 
-  if (res.ok) return { ok: true };
+function sendTemplate(
+  phone: string,
+  templateName: string,
+  languageCode: string,
+  components: unknown[]
+): Promise<WhatsAppSendResult> {
+  return sendMessage(phone, {
+    type: "template",
+    template: { name: templateName, language: { code: languageCode }, components },
+  });
+}
 
-  // Surface Meta's actual error (invalid token, unapproved template, phone
-  // not registered, etc.) instead of a generic failure.
-  const body = await res.text();
-  let error = body;
-  try {
-    const parsed = JSON.parse(body);
-    error = parsed?.error?.message ?? body;
-  } catch {
-    // Not JSON - use the raw body as-is.
-  }
-  return { ok: false, error };
+// A plain reply. Only valid inside the 24-hour window that opens when the
+// user messages the business number - which is exactly when the expense
+// webhook replies, so no approved template is needed.
+export function sendWhatsAppText(phone: string, body: string): Promise<WhatsAppSendResult> {
+  return sendMessage(phone, { type: "text", text: { body, preview_url: false } });
+}
+
+// Largest image passed on for reading. WhatsApp compresses photos well below
+// this; anything bigger is not a receipt photo.
+const MAX_MEDIA_BYTES = 10 * 1024 * 1024;
+
+// An incoming image arrives as an id, not bytes. The id resolves to a URL
+// that is valid for five minutes and itself needs the access token.
+export async function downloadWhatsAppMedia(
+  mediaId: string
+): Promise<{ data: string; mimeType: string }> {
+  const creds = credentials();
+  if (!creds) throw new Error("WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN not set");
+  const auth = { Authorization: `Bearer ${creds.accessToken}` };
+
+  const meta = await fetch(
+    `${GRAPH}/${encodeURIComponent(mediaId)}?phone_number_id=${creds.phoneNumberId}`,
+    { headers: auth }
+  );
+  if (!meta.ok) throw new Error(`Media lookup failed: ${await metaError(meta)}`);
+  const info = (await meta.json()) as { url?: string; mime_type?: string; file_size?: number };
+  if (!info.url) throw new Error("Media lookup returned no URL");
+  if ((info.file_size ?? 0) > MAX_MEDIA_BYTES) throw new Error("Image is too large");
+
+  const file = await fetch(info.url, { headers: auth });
+  if (!file.ok) throw new Error(`Media download failed: HTTP ${file.status}`);
+  const bytes = Buffer.from(await file.arrayBuffer());
+  if (bytes.length > MAX_MEDIA_BYTES) throw new Error("Image is too large");
+  return {
+    data: bytes.toString("base64"),
+    mimeType: info.mime_type?.split(";")[0] || "image/jpeg",
+  };
 }
 
 export async function sendWhatsAppReminder(

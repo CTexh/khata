@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import {
-  db,
   listExpenses,
   findUserByUsername,
   ensureCategoryTables,
   resolveExpenseCategory,
   upsertVendorRule,
+  insertExpense,
 } from "@/lib/db";
 import { getSession, verifyRoutineSecret } from "@/lib/auth";
-import { randomUUID } from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -78,9 +77,6 @@ export async function POST(req: Request) {
     expenseDateTime = expenseDateTime + "T00:00:00Z";
   }
 
-  // Extract date part for backward compatibility
-  const expenseDate = expenseDateTime.substring(0, 10);
-
   await ensureCategoryTables();
   const resolvedCategory = await resolveExpenseCategory({
     userId,
@@ -92,22 +88,14 @@ export async function POST(req: Request) {
     explicit: !viaRoutine,
   });
 
-  const c = await db();
-  const id = randomUUID();
-  await c.execute({
-    sql: "INSERT INTO expenses (id, user_id, amount, note, expense_date, expense_datetime, created_at, vendor, category, vendor_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    args: [
-      id,
-      userId,
-      amount,
-      note,
-      expenseDate,
-      expenseDateTime,
-      new Date().toISOString(),
-      vendor,
-      resolvedCategory.category,
-      resolvedCategory.vendorKey || null,
-    ],
+  const id = await insertExpense({
+    userId,
+    amount,
+    note,
+    expenseDateTime,
+    vendor,
+    category: resolvedCategory.category,
+    vendorKey: resolvedCategory.vendorKey,
   });
 
   // A human picking a category for a payee teaches it permanently.

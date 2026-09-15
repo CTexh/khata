@@ -7,6 +7,7 @@ import {
   matchRuleCategory,
   normalizeVendor,
 } from "@/lib/categorize";
+import { normalizePhone } from "@/lib/whatsapp-webhook";
 
 let client: Client | null = null;
 
@@ -448,6 +449,22 @@ export async function ensureCategoryTables(): Promise<void> {
     } catch {
       // Index already exists, or the column it covers predates this build.
     }
+  }
+  // One row per WhatsApp message handled. Meta redelivers webhooks it thinks
+  // failed, so the primary key is what stops one message becoming two
+  // expenses; expense_id is what UNDO removes.
+  await c.execute(`CREATE TABLE IF NOT EXISTS whatsapp_inbound (
+    message_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expense_id TEXT,
+    created_at TEXT NOT NULL
+  )`);
+  try {
+    await c.execute(
+      `CREATE INDEX IF NOT EXISTS idx_whatsapp_inbound_user ON whatsapp_inbound (user_id, created_at)`
+    );
+  } catch {
+    // Index already exists.
   }
   categoryTablesEnsured = true;
 }
@@ -1044,4 +1061,99 @@ export async function ensureTablesExist(): Promise<void> {
   }
 
   tablesEnsured = true;
+}
+
+/* ---------- expense writes shared by the app and WhatsApp ---------- */
+
+// The one place an expense row is written, used by POST /api/expenses and by
+// the WhatsApp webhook, so both store dates and vendor keys the same way.
+export async function insertExpense(opts: {
+  userId: string;
+  amount: number;
+  note: string;
+  expenseDateTime: string;
+  vendor: string | null;
+  category: string | null;
+  vendorKey: string | null;
+}): Promise<string> {
+  const c = await db();
+  const id = randomUUID();
+  await c.execute({
+    sql: "INSERT INTO expenses (id, user_id, amount, note, expense_date, expense_datetime, created_at, vendor, category, vendor_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    args: [
+      id,
+      opts.userId,
+      opts.amount,
+      opts.note,
+      opts.expenseDateTime.substring(0, 10),
+      opts.expenseDateTime,
+      new Date().toISOString(),
+      opts.vendor,
+      opts.category,
+      opts.vendorKey || null,
+    ],
+  });
+  return id;
+}
+
+/* ---------- inbound WhatsApp ---------- */
+
+// Profile numbers are free text, so every saved number is normalised before
+// comparing. The users table holds a handful of rows, so reading them all is
+// cheaper than a migration to store a normalised copy.
+export async function findUserIdByPhone(phone: string): Promise<string | null> {
+  const target = normalizePhone(phone);
+  if (!target) return null;
+  await ensureUserNotificationColumns();
+  const c = await db();
+  const rs = await c.execute(`SELECT id, phone FROM users WHERE phone IS NOT NULL AND phone != ''`);
+  const match = rs.rows.find((r) => normalizePhone(r.phone as string) === target);
+  return match ? (match.id as string) : null;
+}
+
+// True only for the first delivery of a message id; a redelivery returns false.
+export async function claimInboundMessage(messageId: string, userId: string): Promise<boolean> {
+  await ensureCategoryTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "INSERT OR IGNORE INTO whatsapp_inbound (message_id, user_id, created_at) VALUES (?, ?, ?)",
+    args: [messageId, userId, new Date().toISOString()],
+  });
+  return rs.rowsAffected === 1;
+}
+
+export async function attachInboundExpense(messageId: string, expenseId: string): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: "UPDATE whatsapp_inbound SET expense_id = ? WHERE message_id = ?",
+    args: [expenseId, messageId],
+  });
+}
+
+// Removes the most recent expense added over WhatsApp in the last 24 hours.
+// Scoped to WhatsApp entries on purpose: UNDO should never reach into
+// something added in the app or imported from a bank email.
+export async function undoLastWhatsAppExpense(
+  userId: string
+): Promise<{ amount: number; vendor: string | null } | null> {
+  await ensureCategoryTables();
+  const c = await db();
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const rs = await c.execute({
+    sql: `SELECT w.message_id, e.id, e.amount, e.vendor
+          FROM whatsapp_inbound w JOIN expenses e ON e.id = w.expense_id AND e.user_id = w.user_id
+          WHERE w.user_id = ? AND w.created_at >= ?
+          ORDER BY w.created_at DESC LIMIT 1`,
+    args: [userId, since],
+  });
+  const row = rs.rows[0];
+  if (!row) return null;
+  await c.batch(
+    [
+      { sql: "DELETE FROM expenses WHERE id = ? AND user_id = ?", args: [row.id as string, userId] },
+      { sql: "UPDATE whatsapp_inbound SET expense_id = NULL WHERE message_id = ?", args: [row.message_id as string] },
+    ],
+    "write"
+  );
+  return { amount: Number(row.amount), vendor: (row.vendor as string) ?? null };
 }
