@@ -1012,7 +1012,6 @@ function ReviewRow({
 // Where the money went, at a glance: one bar split by category, then only
 // the biggest few with their amounts. The full list is one tap away instead of
 // every category being thrown at the reader up front.
-const BREAKDOWN_TOP = 4;
 
 function ShareBar({ points }: { points: CategoryPoint[] }) {
   const grand = points.reduce((s, p) => s + p.total, 0);
@@ -1026,159 +1025,9 @@ function ShareBar({ points }: { points: CategoryPoint[] }) {
   );
 }
 
-// Every category in one list, with what each came to - the whole point of
-// filtering is choosing from all of them, which a row that scrolls off the
-// screen never allowed.
-function CategoryPicker({
-  points,
-  selected,
-  onPick,
-  onClose,
-}: {
-  points: CategoryPoint[];
-  selected: string | null;
-  onPick: (category: string | null) => void;
-  onClose: () => void;
-}) {
-  const grand = points.reduce((sum, p) => sum + p.total, 0);
-  const count = points.reduce((sum, p) => sum + p.count, 0);
+// Category pills shown before "+N more" takes over.
+const PILLS_SHOWN = 6;
 
-  const Row = ({
-    emoji,
-    name,
-    total,
-    items,
-    on,
-    onSelect,
-  }: {
-    emoji: string;
-    name: string;
-    total: number;
-    items: number;
-    on: boolean;
-    onSelect: () => void;
-  }) => (
-    <li>
-      <button type="button" onClick={onSelect} aria-pressed={on} className="picker-row">
-        <span className="icon-tile !w-10 !h-10 !rounded-xl" style={on ? { background: "var(--accent-soft)" } : undefined} aria-hidden>
-          {emoji}
-        </span>
-        <span className="min-w-0 flex-1 text-left">
-          <span className="block text-[15px] font-bold truncate">{name}</span>
-          <span className="block text-[12px]" style={{ color: "var(--muted)" }}>
-            {items} {items === 1 ? "expense" : "expenses"}
-          </span>
-        </span>
-        <span className="text-[15px] font-extrabold tabular shrink-0">{fmtRs(total)}</span>
-        {on && (
-          <span style={{ color: "var(--accent)" }} aria-hidden>
-            ✓
-          </span>
-        )}
-      </button>
-    </li>
-  );
-
-  return (
-    <Sheet title="Filter by category" onClose={onClose}>
-      <div className="card px-3 py-1">
-        <ul>
-          <Row emoji="🧾" name="All categories" total={grand} items={count} on={!selected} onSelect={() => onPick(null)} />
-          {points.map((p) => (
-            <Row
-              key={p.category}
-              emoji={categoryEmoji(p.category)}
-              name={p.category}
-              total={p.total}
-              items={p.count}
-              on={selected === p.category}
-              onSelect={() => onPick(p.category)}
-            />
-          ))}
-        </ul>
-      </div>
-    </Sheet>
-  );
-}
-
-function CategoryBreakdown({
-  points,
-  selected,
-  onSelect,
-}: {
-  points: CategoryPoint[];
-  selected: string | null;
-  onSelect: (category: string) => void;
-}) {
-  const [all, setAll] = useState(false);
-  const grand = points.reduce((s, p) => s + p.total, 0);
-  const shown = all ? points : points.slice(0, BREAKDOWN_TOP);
-
-  return (
-    <section className="card p-4 sm:p-5 rise" aria-labelledby="breakdown-title">
-      <div className="section-head mb-2 px-1">
-        <h2 id="breakdown-title" className="text-[16px] font-extrabold">
-          Where it went
-        </h2>
-        <span className="text-[12px]" style={{ color: "var(--muted)" }}>
-          {points.length} {points.length === 1 ? "category" : "categories"}
-        </span>
-      </div>
-      <ul>
-        {shown.map((p) => {
-          const color = categoryVars(p.category);
-          const share = grand > 0 ? (p.total / grand) * 100 : 0;
-          const on = selected === p.category;
-          return (
-            <li key={p.category}>
-              <button
-                type="button"
-                onClick={() => onSelect(p.category)}
-                aria-pressed={on}
-                className="w-full flex items-center gap-3 rounded-2xl px-1 py-2 text-left transition hover:bg-[var(--surface-2)]"
-                style={on ? { background: "var(--surface-2)" } : undefined}
-              >
-                <span className="icon-tile !w-11 !h-11 !text-[20px]" style={{ background: color.bg }} aria-hidden>
-                  {categoryEmoji(p.category)}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline justify-between gap-3">
-                    <span className="text-[15px] font-bold truncate">{p.category}</span>
-                    <span className="text-[15px] font-extrabold tabular shrink-0">{fmtRs(p.total)}</span>
-                  </span>
-                  <span className="mt-1.5 flex items-center gap-2">
-                    <span className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ background: "var(--hairline)" }}>
-                      <span
-                        className="block h-full rounded-full transition-[width] duration-500"
-                        style={{ width: `${Math.max(share, 2)}%`, background: color.fg }}
-                      />
-                    </span>
-                    <span className="text-[11px] font-semibold tabular w-9 text-right" style={{ color: "var(--muted)" }}>
-                      {share.toFixed(share < 10 ? 1 : 0)}%
-                    </span>
-                  </span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {points.length > BREAKDOWN_TOP && (
-        <button
-          type="button"
-          className="w-full min-h-11 mt-1 rounded-2xl text-[14px] font-bold"
-          style={{ color: "var(--accent)" }}
-          onClick={() => setAll((v) => !v)}
-          aria-expanded={all}
-        >
-          {all ? "Show less" : `Show all ${points.length} categories`}
-        </button>
-      )}
-    </section>
-  );
-}
-
-// "Today", "Yesterday", or the date - for the day headings in the list.
 function dayHeading(ymd: string): string {
   const d = new Date();
   const local = (x: Date) =>
@@ -1215,7 +1064,7 @@ function ExpensesView({
   const [searching, setSearching] = useState(false);
   const { categories, setCategories } = useCategories();
   const [managing, setManaging] = useState(false);
-  const [picking, setPicking] = useState(false);
+  const [showAllPills, setShowAllPills] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const monthParam = scope === "month" ? `&month=${month}` : "";
@@ -1490,32 +1339,36 @@ function ExpensesView({
             </div>
           </div>
 
-          {/* One pill naming the filter. A scrolling row of chips ran off the
-              edge of the screen and hid most of the categories; the picker
-              shows every one, with what each came to. */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="filter-pill"
-              aria-haspopup="dialog"
-              data-on={selected ? "" : undefined}
-              onClick={() => setPicking(true)}
-            >
-              {selected ? (
-                <>
-                  <span aria-hidden>{categoryEmoji(selected)}</span>
-                  <span className="truncate">{selected}</span>
-                </>
-              ) : (
-                <span>All categories</span>
-              )}
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M6 9l6 6 6-6" />
-              </svg>
+          {/* Selectable category pills. They wrap onto as many lines as they
+              need rather than running off the side of the screen, and past a
+              handful the rest stay behind "+N more" so the list never buries
+              the expenses. */}
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by category">
+            <button type="button" onClick={() => pick(null)} aria-pressed={!selected} className="cat-pill" data-on={!selected ? "" : undefined}>
+              All
             </button>
-            {selected && (
-              <button type="button" className="filter-clear" onClick={() => pick(null)}>
-                Clear
+            {(showAllPills ? points : points.slice(0, PILLS_SHOWN)).map((p) => (
+              <button
+                key={p.category}
+                type="button"
+                onClick={() => pick(p.category)}
+                aria-pressed={selected === p.category}
+                className="cat-pill"
+                data-on={selected === p.category ? "" : undefined}
+              >
+                <span aria-hidden>{categoryEmoji(p.category)}</span>
+                <span className="truncate">{p.category}</span>
+              </button>
+            ))}
+            {points.length > PILLS_SHOWN && (
+              <button
+                type="button"
+                onClick={() => setShowAllPills((v) => !v)}
+                aria-expanded={showAllPills}
+                className="cat-pill"
+                style={{ color: "var(--accent)" }}
+              >
+                {showAllPills ? "Less" : `+${points.length - PILLS_SHOWN} more`}
               </button>
             )}
           </div>
@@ -1614,25 +1467,7 @@ function ExpensesView({
             Log expense
           </button>
         </div>
-      ) : (
-        points.length > 0 && (
-          <div style={{ opacity: refreshing ? 0.5 : 1, transition: "opacity .18s ease" }}>
-            <CategoryBreakdown points={points} selected={selected} onSelect={(c) => pick(c)} />
-          </div>
-        )
-      )}
-
-      {picking && (
-        <CategoryPicker
-          points={points}
-          selected={selected}
-          onPick={(category) => {
-            setSelected(category);
-            setPicking(false);
-          }}
-          onClose={() => setPicking(false)}
-        />
-      )}
+      ) : null}
 
       {managing && (
         <ManageCategoriesModal

@@ -294,10 +294,32 @@ export default function AssistantPage() {
     if (loaded) saveHistory(messages);
   }, [messages, loaded]);
 
+  // Opening the chat lands on the newest message. The first pass runs before
+  // the bubbles have finished being laid out, so it used to stop short of the
+  // bottom: the jump is repeated on the next two frames, once the browser has
+  // settled, and only then does scrolling become smooth for new replies.
+  const openedAt = useRef(true);
   useEffect(() => {
+    if (!loaded) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    endRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "end" });
-  }, [messages]);
+    const instant = openedAt.current || reduce;
+    const toBottom = () => {
+      endRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" });
+      if (instant) window.scrollTo(0, document.documentElement.scrollHeight);
+    };
+    toBottom();
+    if (!instant) return;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      toBottom();
+      second = requestAnimationFrame(toBottom);
+    });
+    if (messages.length) openedAt.current = false;
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [messages, loaded]);
 
   const stopRecording = (discard: boolean) => {
     discardRef.current = discard;

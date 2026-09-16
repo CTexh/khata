@@ -19,6 +19,11 @@ type Expense = {
 
 type Period = "today" | "week" | "month";
 
+// Categories named on Home before the rest fold into "Other", and how many
+// expenses the list shows before "See all" takes over.
+const BREAKDOWN_SHOWN = 4;
+const RECENT_SHOWN = 5;
+
 const PERIODS: { id: Period; label: string; heading: string; compare: string }[] = [
   { id: "today", label: "Today", heading: "Today's expense", compare: "yesterday" },
   { id: "week", label: "This Week", heading: "This week's expense", compare: "last week" },
@@ -109,7 +114,24 @@ export default function Home() {
           (b.expense_datetime || "").localeCompare(a.expense_datetime || "")
       );
     const change = previous > 0 ? Math.round(((total - previous) / previous) * 100) : null;
-    return { total, previous, change, items };
+
+    // Where the money went, biggest first. Everything past the fourth is one
+    // "Other" line: a long list here would bury the rest of the page.
+    const byCategory = new Map<string, number>();
+    for (const e of items) {
+      const key = e.category || "Uncategorised";
+      byCategory.set(key, (byCategory.get(key) ?? 0) + e.amount);
+    }
+    const ranked = [...byCategory.entries()]
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((a, b) => b.amount - a.amount);
+    const lead = ranked.slice(0, BREAKDOWN_SHOWN);
+    const rest = ranked.slice(BREAKDOWN_SHOWN);
+    const breakdown = rest.length
+      ? [...lead, { category: "Other", amount: rest.reduce((sum, r) => sum + r.amount, 0) }]
+      : lead;
+
+    return { total, previous, change, items, breakdown, categories: ranked.length };
   }, [expenses, period]);
 
   const meta = PERIODS.find((p) => p.id === period)!;
@@ -161,6 +183,37 @@ export default function Home() {
           )}
         </div>
       </section>
+
+      {view && view.total > 0 && (
+        // Where it went, at a glance: one bar for the shape of the period and
+        // the biggest few named underneath. The full breakdown, and filtering
+        // by category, live in Mera Khata.
+        <Link href="/expenses" className="card p-4 rise block" aria-label="Where your money went - open Mera Khata">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-[15px] font-extrabold">Where it went</h2>
+            <span className="text-[12px]" style={{ color: "var(--muted)" }}>
+              {view.categories} {view.categories === 1 ? "category" : "categories"}
+            </span>
+          </div>
+          <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full gap-[2px]" style={{ background: "var(--hairline)" }} aria-hidden>
+            {view.breakdown.map((b) => (
+              <span
+                key={b.category}
+                style={{ width: `${(b.amount / view.total) * 100}%`, background: categoryVars(b.category).fg, minWidth: 3 }}
+              />
+            ))}
+          </div>
+          <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
+            {view.breakdown.map((b) => (
+              <li key={b.category} className="flex items-center gap-2 min-w-0">
+                <span className="h-2 w-2 rounded-full shrink-0" style={{ background: categoryVars(b.category).fg }} aria-hidden />
+                <span className="text-[13px] font-semibold truncate">{b.category}</span>
+                <span className="text-[13px] font-extrabold tabular ml-auto shrink-0">{fmtRs(b.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </Link>
+      )}
 
       <section className="grid grid-cols-2 gap-3">
         <Link href="/udhar-khata" className="card p-4 rise flex flex-col gap-3">
@@ -235,7 +288,7 @@ export default function Home() {
             </Link>
           </div>
         ) : (
-          view.items.slice(0, 8).map((e) => {
+          view.items.slice(0, RECENT_SHOWN).map((e) => {
             const colors = categoryVars(e.category);
             const note = e.note.replace(/^(WhatsApp|Assistant):\s*/, "");
             return (
@@ -257,9 +310,9 @@ export default function Home() {
             );
           })
         )}
-        {view && view.items.length > 8 && (
+        {view && view.items.length > RECENT_SHOWN && (
           <Link href="/expenses" className="text-center text-[14px] font-bold py-2" style={{ color: "var(--accent)" }}>
-            {view.items.length - 8} more in Mera Khata
+            {view.items.length - RECENT_SHOWN} more in Mera Khata
           </Link>
         )}
       </section>

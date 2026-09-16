@@ -528,12 +528,12 @@ body {
 }
 
 /* ---- filtering a list by category ---- */
-.filter-pill {
+.cat-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 44px;
+  gap: 6px;
   max-width: 100%;
+  min-height: 40px;
   padding: 0 14px;
   border-radius: 999px;
   border: 1px solid var(--ring);
@@ -543,31 +543,10 @@ body {
   font-weight: 700;
   cursor: pointer;
 }
-.filter-pill[data-on] {
+.cat-pill[data-on] {
   background: var(--ink);
   border-color: transparent;
   color: var(--page);
-}
-.filter-clear {
-  min-height: 44px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--muted);
-  cursor: pointer;
-}
-.picker-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--hairline);
-  cursor: pointer;
-}
-li:last-child > .picker-row {
-  border-bottom: 0;
 }
 
 /* ---- assistant: full-screen chat ---- */
