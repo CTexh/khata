@@ -8,12 +8,20 @@ jobs:
   prune:
     runs-on: ubuntu-latest
     steps:
-      - name: Remove non-current deployments in every project
+      - name: Discover and prune every project in the team
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          TEAM_ID: team_GPfxRoqBAWM4UISIHqci5krM
         run: |
-          for p in century-score eymena-transformation-challenge khata invocraft \
-                   rizviz-international-impex calorie-tracker interviews chattha-technologies-prod; do
+          projects=$(curl -s -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects?teamId=$TEAM_ID&limit=100" \
+            | jq -r '.projects[].name')
+
+          echo "Found projects:"
+          echo "$projects"
+          echo "---"
+
+          for p in $projects; do
             echo "=== $p ==="
             npx --yes vercel@latest remove "$p" --safe --yes \
               --scope walli-ullah-s-projects --token "$VERCEL_TOKEN" || true
