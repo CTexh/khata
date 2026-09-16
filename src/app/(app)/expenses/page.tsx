@@ -1026,6 +1026,81 @@ function ShareBar({ points }: { points: CategoryPoint[] }) {
   );
 }
 
+// Every category in one list, with what each came to - the whole point of
+// filtering is choosing from all of them, which a row that scrolls off the
+// screen never allowed.
+function CategoryPicker({
+  points,
+  selected,
+  onPick,
+  onClose,
+}: {
+  points: CategoryPoint[];
+  selected: string | null;
+  onPick: (category: string | null) => void;
+  onClose: () => void;
+}) {
+  const grand = points.reduce((sum, p) => sum + p.total, 0);
+  const count = points.reduce((sum, p) => sum + p.count, 0);
+
+  const Row = ({
+    emoji,
+    name,
+    total,
+    items,
+    on,
+    onSelect,
+  }: {
+    emoji: string;
+    name: string;
+    total: number;
+    items: number;
+    on: boolean;
+    onSelect: () => void;
+  }) => (
+    <li>
+      <button type="button" onClick={onSelect} aria-pressed={on} className="picker-row">
+        <span className="icon-tile !w-10 !h-10 !rounded-xl" style={on ? { background: "var(--accent-soft)" } : undefined} aria-hidden>
+          {emoji}
+        </span>
+        <span className="min-w-0 flex-1 text-left">
+          <span className="block text-[15px] font-bold truncate">{name}</span>
+          <span className="block text-[12px]" style={{ color: "var(--muted)" }}>
+            {items} {items === 1 ? "expense" : "expenses"}
+          </span>
+        </span>
+        <span className="text-[15px] font-extrabold tabular shrink-0">{fmtRs(total)}</span>
+        {on && (
+          <span style={{ color: "var(--accent)" }} aria-hidden>
+            ✓
+          </span>
+        )}
+      </button>
+    </li>
+  );
+
+  return (
+    <Sheet title="Filter by category" onClose={onClose}>
+      <div className="card px-3 py-1">
+        <ul>
+          <Row emoji="🧾" name="All categories" total={grand} items={count} on={!selected} onSelect={() => onPick(null)} />
+          {points.map((p) => (
+            <Row
+              key={p.category}
+              emoji={categoryEmoji(p.category)}
+              name={p.category}
+              total={p.total}
+              items={p.count}
+              on={selected === p.category}
+              onSelect={() => onPick(p.category)}
+            />
+          ))}
+        </ul>
+      </div>
+    </Sheet>
+  );
+}
+
 function CategoryBreakdown({
   points,
   selected,
@@ -1140,6 +1215,7 @@ function ExpensesView({
   const [searching, setSearching] = useState(false);
   const { categories, setCategories } = useCategories();
   const [managing, setManaging] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const monthParam = scope === "month" ? `&month=${month}` : "";
@@ -1414,41 +1490,34 @@ function ExpensesView({
             </div>
           </div>
 
-          {/* One scrollable row of category chips: filter without leaving the list. */}
-          <div className="nav-scroll flex gap-2 overflow-x-auto -mx-4 px-4 pb-1" role="group" aria-label="Filter by category">
+          {/* One pill naming the filter. A scrolling row of chips ran off the
+              edge of the screen and hid most of the categories; the picker
+              shows every one, with what each came to. */}
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => pick(null)}
-              aria-pressed={!selected}
-              className="shrink-0 min-h-10 px-4 rounded-full text-[14px] font-bold border"
-              style={
-                !selected
-                  ? { background: "var(--ink)", color: "var(--page)", borderColor: "transparent" }
-                  : { background: "var(--surface)", color: "var(--ink-2)", borderColor: "var(--ring)" }
-              }
+              className="filter-pill"
+              aria-haspopup="dialog"
+              data-on={selected ? "" : undefined}
+              onClick={() => setPicking(true)}
             >
-              All
+              {selected ? (
+                <>
+                  <span aria-hidden>{categoryEmoji(selected)}</span>
+                  <span className="truncate">{selected}</span>
+                </>
+              ) : (
+                <span>All categories</span>
+              )}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M6 9l6 6 6-6" />
+              </svg>
             </button>
-            {points.map((p) => {
-              const on = selected === p.category;
-              return (
-                <button
-                  key={p.category}
-                  type="button"
-                  onClick={() => pick(p.category)}
-                  aria-pressed={on}
-                  className="shrink-0 min-h-10 px-3.5 rounded-full text-[14px] font-bold border flex items-center gap-1.5"
-                  style={
-                    on
-                      ? { background: "var(--ink)", color: "var(--page)", borderColor: "transparent" }
-                      : { background: "var(--surface)", color: "var(--ink-2)", borderColor: "var(--ring)" }
-                  }
-                >
-                  <span aria-hidden>{categoryEmoji(p.category)}</span>
-                  {p.category}
-                </button>
-              );
-            })}
+            {selected && (
+              <button type="button" className="filter-clear" onClick={() => pick(null)}>
+                Clear
+              </button>
+            )}
           </div>
 
           {searching && (
@@ -1551,6 +1620,18 @@ function ExpensesView({
             <CategoryBreakdown points={points} selected={selected} onSelect={(c) => pick(c)} />
           </div>
         )
+      )}
+
+      {picking && (
+        <CategoryPicker
+          points={points}
+          selected={selected}
+          onPick={(category) => {
+            setSelected(category);
+            setPicking(false);
+          }}
+          onClose={() => setPicking(false)}
+        />
       )}
 
       {managing && (

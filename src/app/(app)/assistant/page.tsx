@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { replyBlocks, splitBold } from "@/lib/chat-format";
 import { encodeWav } from "@/lib/wav";
-import { ASSISTANT_DRAFT_KEY } from "@/lib/assistant-draft";
 import { invalidate, useCached } from "@/lib/swr";
 import { getMic, micPermissionIsPermanent, parkMic, releaseMic } from "@/lib/mic";
 import Link from "next/link";
@@ -453,25 +452,19 @@ export default function AssistantPage() {
     setRecordingSince(started);
   };
 
-  // Arriving from Home: send what was typed there, or open straight into a
-  // voice note or the photo picker. Runs once, after history has loaded.
+  // /assistant?start=voice opens straight into a recording, ?start=photo into
+  // the picker - used by links from outside the app. Runs once, after history
+  // has loaded.
   const startedRef = useRef(false);
   useEffect(() => {
     if (!loaded || startedRef.current) return;
     startedRef.current = true;
-    let draft = "";
-    try {
-      draft = sessionStorage.getItem(ASSISTANT_DRAFT_KEY) ?? "";
-      sessionStorage.removeItem(ASSISTANT_DRAFT_KEY);
-    } catch {}
     const start = new URLSearchParams(window.location.search).get("start");
-    if (start) window.history.replaceState(null, "", "/assistant");
-    if (draft) send(draft);
-    else if (start === "voice") startRecording();
-    else if (start === "photo") {
-      setMenuOpen(true);
-    }
-    // send and startRecording are stable enough here: this runs exactly once.
+    if (!start) return;
+    window.history.replaceState(null, "", "/assistant");
+    if (start === "voice") startRecording();
+    else if (start === "photo") setMenuOpen(true);
+    // startRecording is stable enough here: this runs exactly once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 

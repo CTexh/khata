@@ -166,7 +166,7 @@ function UserSheet({ user, onClose, onChanged }: { user: UserSummary; onClose: (
         <span className="min-w-0">
           <span className="block text-[15px] font-bold">Assistant access</span>
           <span className="block text-[13px]" style={{ color: "var(--muted)" }}>
-            Let {user.username} use the AI assistant: the middle button, Ask Khata on Home and voice or photo entries.
+            Let {user.username} use the AI assistant: the button in the middle of the tab bar, with voice notes and bill photos.
           </span>
         </span>
         <input

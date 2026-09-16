@@ -5,6 +5,40 @@ import { useEffect } from "react";
 // One detail view for the whole app: slides up from the bottom on a phone,
 // sits in the middle on a wide screen. Udhar Khata people and subscriptions
 // both open in it, so every record looks and behaves the same.
+// Locking the page behind a sheet. Hiding overflow is not enough on a phone:
+// iOS keeps scrolling the page behind the dialog, and the reader loses their
+// place. Fixing the body in position - offset by how far it was scrolled -
+// holds it still, and the offset is put back on close so nothing jumps.
+// Counted, so a sheet opened on top of another doesn't unlock the page early
+// or restore the wrong position.
+let locks = 0;
+let lockedAt = 0;
+
+function lockPage() {
+  if (locks++ > 0) return;
+  const body = document.body;
+  lockedAt = window.scrollY;
+  body.style.position = "fixed";
+  body.style.top = `-${lockedAt}px`;
+  body.style.left = "0";
+  body.style.right = "0";
+  body.style.width = "100%";
+  body.style.overflow = "hidden";
+}
+
+function unlockPage() {
+  if (--locks > 0) return;
+  locks = 0;
+  const body = document.body;
+  body.style.position = "";
+  body.style.top = "";
+  body.style.left = "";
+  body.style.right = "";
+  body.style.width = "";
+  body.style.overflow = "";
+  window.scrollTo(0, lockedAt);
+}
+
 export function Sheet({
   title,
   onClose,
@@ -18,11 +52,10 @@ export function Sheet({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    lockPage();
     window.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = previous;
+      unlockPage();
       window.removeEventListener("keydown", onKey);
     };
   }, [onClose]);

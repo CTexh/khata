@@ -1,0 +1,47 @@
+# The scheduler for Khata's reminder emails.
+#
+# Vercel's own cron jobs are a single moment each: on the free plan a run that
+# lands while a new deployment is taking over is dropped, and that day's email
+# never arrives. This asks the app every ten minutes instead. The endpoint
+# decides what is actually due by the clock in Pakistan and claims each email
+# before sending it, so asking often costs nothing and sends nothing twice.
+#
+# Needs one repository secret, CRON_SECRET, matching the one in Vercel:
+#   gh secret set CRON_SECRET --repo CTexh/khata
+#
+# GitHub disables scheduled workflows in a repository with no activity for 60
+# days and emails the owner; one click re-enables it. The Vercel cron jobs and
+# the app itself still cover that case.
+name: Reminder emails
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+# A slow run should never overlap the next one.
+concurrency:
+  group: reminders
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send anything due
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET is not set for this repository - see the comment at the top of this file."
+            exit 1
+          fi
+          status=$(curl -sS --max-time 60 --retry 2 --retry-delay 5 \
+            -o response.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://khata-delta.vercel.app/api/cron/run)
+          echo "HTTP $status"
+          cat response.json
+          echo
+          [ "$status" = "200" ]

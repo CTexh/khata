@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { fmtRs, fmtDateLabel } from "@/lib/format";
 import { categoryEmoji, categoryVars } from "@/lib/category-style";
-import { ASSISTANT_DRAFT_KEY } from "@/lib/assistant-draft";
 import { useCached } from "@/lib/swr";
-import { ArrowUpIcon, CameraIcon, HandshakeIcon, MicIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
+import { ArrowUpIcon, HandshakeIcon, RepeatIcon } from "@/components/icons";
 
 type Expense = {
   id: string;
@@ -27,7 +25,6 @@ const PERIODS: { id: Period; label: string; heading: string; compare: string }[]
   { id: "month", label: "This Month", heading: "This month's expense", compare: "last month" },
 ];
 
-const SUGGESTIONS = ["fuel 3000 shell", "what did I spend this week?", "who owes me?", "mark Netflix paid"];
 
 // Local calendar days, as YYYY-MM-DD, matching how expense dates are stored.
 function ymd(d: Date): string {
@@ -57,7 +54,6 @@ function sum(list: Expense[], from: string, to: string) {
 }
 
 export default function Home() {
-  const router = useRouter();
   const [period, setPeriod] = useState<Period>("today");
   // Everything here comes from the shared cache: a return visit renders at
   // once from the last answer while fresh figures load in the background.
@@ -67,11 +63,6 @@ export default function Home() {
   const lastMonth = useCached<Expense[]>(`/api/expenses?year=${prevDate.getFullYear()}&month=${prevDate.getMonth() + 1}`);
   const peopleQ = useCached<{ balance: number }[]>("/api/people");
   const subsQ = useCached<{ amount: number; active: number | boolean; paid_this_period: boolean }[]>("/api/subscriptions");
-  // The assistant is only offered to accounts with assistant access.
-  const me = useCached<{ user: { aiAccess?: boolean } | null }>("/api/auth/me");
-  const hasAi = Boolean(me.data?.user?.aiAccess);
-  const [draft, setDraft] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const loadError = thisMonth.failedStatus !== undefined && !thisMonth.data;
   // This month and last month cover every range shown, including a week
@@ -123,13 +114,6 @@ export default function Home() {
 
   const meta = PERIODS.find((p) => p.id === period)!;
 
-  const ask = (text: string, mode?: "voice" | "photo") => {
-    try {
-      if (text.trim()) sessionStorage.setItem(ASSISTANT_DRAFT_KEY, text.trim());
-    } catch {}
-    router.push(mode ? `/assistant?start=${mode}` : "/assistant");
-  };
-
   return (
     <div className="flex flex-col gap-5 pb-2">
       <div className="segmented rise" role="group" aria-label="Period">
@@ -177,84 +161,6 @@ export default function Home() {
           )}
         </div>
       </section>
-
-      {hasAi && (
-        <>
-      {/* The assistant, right on Home: type and go, or jump straight to voice or a bill photo. */}
-      <section className="card p-4 rise" aria-labelledby="ask-title">
-        <div className="flex items-center gap-2 mb-3">
-          <span
-            className="flex h-8 w-8 items-center justify-center rounded-full text-white"
-            style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
-            aria-hidden
-          >
-            <SparkleIcon size={18} />
-          </span>
-          <h2 id="ask-title" className="text-[16px] font-extrabold">
-            Ask Khata
-          </h2>
-          <span className="text-[12px] ml-auto" style={{ color: "var(--muted)" }}>
-            Add, change or ask anything
-          </span>
-        </div>
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (draft.trim()) ask(draft);
-            else inputRef.current?.focus();
-          }}
-        >
-          <input
-            ref={inputRef}
-            className="field flex-1 !rounded-full"
-            value={draft}
-            maxLength={1000}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                if (draft.trim()) ask(draft);
-              }
-            }}
-            placeholder="fuel 3000 shell, or: who owes me?"
-            aria-label="Message to the assistant"
-            enterKeyHint="send"
-          />
-          {draft.trim() ? (
-            <button className="btn btn-primary !p-0 w-12 h-12 shrink-0" aria-label="Send to the assistant">
-              <span style={{ display: "inline-flex", transform: "rotate(90deg)" }}>
-                <ArrowUpIcon size={20} />
-              </span>
-            </button>
-          ) : (
-            <>
-              <button type="button" className="btn btn-ghost !p-0 w-12 h-12 shrink-0" aria-label="Snap a bill" onClick={() => ask("", "photo")}>
-                <CameraIcon size={20} />
-              </button>
-              <button type="button" className="btn btn-primary !p-0 w-12 h-12 shrink-0" aria-label="Record a voice note" onClick={() => ask("", "voice")}>
-                <MicIcon size={20} />
-              </button>
-            </>
-          )}
-        </form>
-        <div className="nav-scroll mt-3 flex gap-2 overflow-x-auto -mx-1 px-1">
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => ask(s)}
-              className="shrink-0 rounded-full px-3.5 min-h-10 text-[13px] font-semibold"
-              style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </section>
-
-        </>
-      )}
 
       <section className="grid grid-cols-2 gap-3">
         <Link href="/udhar-khata" className="card p-4 rise flex flex-col gap-3">
@@ -322,8 +228,11 @@ export default function Home() {
             </p>
             <p className="font-bold mt-1">No expenses {period === "today" ? "today" : period === "week" ? "this week" : "this month"}</p>
             <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>
-              Tell the assistant what you spent, or snap a bill.
+              Anything you spend shows up here.
             </p>
+            <Link href="/expenses?add=1" className="btn btn-expense mt-4 inline-flex">
+              Log expense
+            </Link>
           </div>
         ) : (
           view.items.slice(0, 8).map((e) => {
