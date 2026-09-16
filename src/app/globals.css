@@ -162,7 +162,7 @@
      sheet means the panel is still off-screen and the tap reads as ignored. */
   --ease-sheet: cubic-bezier(0.16, 1, 0.3, 1);
   /* how far the app behind a sheet recedes */
-  --depth-scale: 0.94;
+  --depth-scale: 0.95;
 }
 
 @supports (animation-timing-function: linear(0 0%, 1 100%)) {
@@ -218,11 +218,20 @@
    disappearing, so a sheet reads as being above the page and not instead of
    it. */
 #app-canvas {
-  transform-origin: 50% 0%;
+  /* Scaled about the middle of what is on screen, not the top of the
+     document. The canvas is the whole page - often several thousand pixels -
+     so scaling it about its own top drags everything below that point
+     upwards: 6% of the scroll distance, which at 800px scrolled is a 48px
+     lurch as a sheet opens and a slap back as it closes. The origin is set
+     in JS when the page is locked, because only then is it known how far
+     down the reader is. */
+  transform-origin: 50% var(--depth-origin, 50%);
   transition: transform 380ms var(--ease-sheet);
 }
 html[data-depth] #app-canvas {
-  transform: scale(var(--depth-scale)) translate3d(0, 6px, 0);
+  /* No translate: pivoting about the middle of the screen is what puts the
+     page behind, and any nudge on top of that is just more movement. */
+  transform: scale(var(--depth-scale));
   /* Promoted only while a sheet is open. Left on permanently it would keep a
      layer the size of the whole app in memory for no reason. */
   will-change: transform;

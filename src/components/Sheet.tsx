@@ -35,7 +35,15 @@ function lockPage() {
   body.style.right = "0";
   body.style.width = "100%";
   body.style.overflow = "hidden";
-  // The app recedes; the depth itself is described in globals.css.
+  // The app recedes, about the centre of what the reader is actually looking
+  // at. The canvas is the full height of the page, so without this it would
+  // scale about the document's top and everything on screen would slide.
+  // Deliberately not cleared on unlock: the way back has to pivot about the
+  // same point it pivoted about on the way in.
+  document.documentElement.style.setProperty(
+    "--depth-origin",
+    `${lockedAt + window.innerHeight / 2}px`
+  );
   document.documentElement.setAttribute("data-depth", "");
 }
 
