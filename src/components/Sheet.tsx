@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { haptic, reducedMotion, rubberBand, springTo } from "@/lib/motion";
 
@@ -24,17 +24,31 @@ import { haptic, reducedMotion, rubberBand, springTo } from "@/lib/motion";
 // or restore the wrong position.
 let locks = 0;
 let lockedAt = 0;
+// When the app last started coming forward, and the page release waiting for
+// it to get there.
+let releasedAt = 0;
+let pendingRestore = 0;
+// Matches the #app-canvas return transition in globals.css.
+const RETURN_MS = 260;
 
 function lockPage() {
   if (locks++ > 0) return;
   const body = document.body;
-  lockedAt = window.scrollY;
-  body.style.position = "fixed";
-  body.style.top = `-${lockedAt}px`;
-  body.style.left = "0";
-  body.style.right = "0";
-  body.style.width = "100%";
-  body.style.overflow = "hidden";
+  if (pendingRestore) {
+    // A sheet reopened before the last one had finished letting go: the body
+    // is still fixed exactly where it was, so keep it. Reading scrollY now
+    // would give 0, because a fixed body does not scroll.
+    window.clearTimeout(pendingRestore);
+    pendingRestore = 0;
+  } else {
+    lockedAt = window.scrollY;
+    body.style.position = "fixed";
+    body.style.top = `-${lockedAt}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+  }
   // The app recedes, about the centre of what the reader is actually looking
   // at. The canvas is the full height of the page, so without this it would
   // scale about the document's top and everything on screen would slide.
@@ -47,9 +61,18 @@ function lockPage() {
   document.documentElement.setAttribute("data-depth", "");
 }
 
-function unlockPage() {
-  if (--locks > 0) return;
-  locks = 0;
+// Letting the app come forward again. Separate from unlocking the page,
+// because it has to start the moment a sheet is dismissed - the two are one
+// movement - while the body stays fixed until the sheet has actually gone.
+function releaseDepth() {
+  const root = document.documentElement;
+  if (!root.hasAttribute("data-depth")) return;
+  root.removeAttribute("data-depth");
+  releasedAt = performance.now();
+}
+
+function restoreBody() {
+  pendingRestore = 0;
   const body = document.body;
   body.style.position = "";
   body.style.top = "";
@@ -57,8 +80,20 @@ function unlockPage() {
   body.style.right = "";
   body.style.width = "";
   body.style.overflow = "";
-  document.documentElement.removeAttribute("data-depth");
   window.scrollTo(0, lockedAt);
+}
+
+// Unfixing the body lays the whole page out again. Doing that while the app is
+// still scaling back is what made closing a sheet look broken, so the page is
+// only released once the app has finished coming forward - within 260ms of
+// dismissal, and never noticeably late.
+function unlockPage() {
+  if (--locks > 0) return;
+  locks = 0;
+  releaseDepth();
+  const remaining = RETURN_MS - (performance.now() - releasedAt);
+  if (remaining <= 0) restoreBody();
+  else pendingRestore = window.setTimeout(restoreBody, remaining);
 }
 
 // For a dialog that isn't a Sheet but still needs the page held still behind it.
@@ -117,6 +152,9 @@ export function Sheet({
   const dismiss = useCallback(() => {
     if (closing.current) return;
     closing.current = true;
+    // The app starts coming forward now, with the sheet, rather than when
+    // React gets round to unmounting it a few frames later.
+    releaseDepth();
     const panel = panelRef.current;
     const backdrop = backdropRef.current;
     if (!panel || reducedMotion()) {
@@ -182,6 +220,53 @@ export function Sheet({
     return () => {
       document.removeEventListener("keydown", onTab);
       if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [mounted]);
+
+  // Most sheets are closed by the page, not by the sheet: Cancel, Save and
+  // Delete all flip the page's own state, and React removes the sheet in the
+  // same instant - no exit, while the app behind is already on its way back.
+  // So when a sheet is removed without having left through dismiss(), it
+  // leaves an inert copy of itself behind that slides out the same way and
+  // then removes itself. Every way of closing a sheet now looks the same,
+  // and not one form had to change.
+  useLayoutEffect(() => {
+    if (!mounted) return;
+    const node = backdropRef.current;
+    return () => {
+      if (closing.current || !node || reducedMotion()) return;
+      const ghost = node.cloneNode(true) as HTMLElement;
+      ghost.setAttribute("aria-hidden", "true");
+      ghost.style.pointerEvents = "none";
+      ghost.style.animation = "none";
+      ghost.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+      const panel = ghost.querySelector<HTMLElement>(".sheet-panel");
+      if (panel) {
+        // The copy must not replay the entrance it was built with.
+        panel.style.animation = "none";
+        panel.removeAttribute("role");
+      }
+      document.body.appendChild(ghost);
+
+      const travel = (panel?.getBoundingClientRect().height ?? 0) + 24;
+      // The end state goes on first, so the animation runs towards what the
+      // element already is - when it finishes there is nothing to snap back to.
+      if (panel) panel.style.transform = `translate3d(0, ${travel}px, 0)`;
+      ghost.style.opacity = "0";
+      const leave = panel
+        ? springTo(
+            panel,
+            { transform: "translate3d(0, 0, 0)" },
+            { transform: `translate3d(0, ${travel}px, 0)` },
+            EXIT_MS,
+            "settle"
+          )
+        : null;
+      springTo(ghost, { opacity: 1 }, { opacity: 0 }, EXIT_MS, "settle");
+      // Removed when it finishes, and on a timer in case it never runs.
+      const remove = () => ghost.remove();
+      if (leave) leave.onfinish = remove;
+      window.setTimeout(remove, EXIT_MS + 60);
     };
   }, [mounted]);
 

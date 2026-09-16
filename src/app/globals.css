@@ -226,9 +226,13 @@
      in JS when the page is locked, because only then is it known how far
      down the reader is. */
   transform-origin: 50% var(--depth-origin, 50%);
-  transition: transform 380ms var(--ease-sheet);
+  /* Coming back is quicker than going away, so that by the time the sheet has
+     gone and the page is unfixed - which costs a relayout - the movement is
+     all but over and a dropped frame there cannot be seen. */
+  transition: transform 260ms var(--ease-sheet);
 }
 html[data-depth] #app-canvas {
+  transition-duration: 380ms;
   /* No translate: pivoting about the middle of the screen is what puts the
      page behind, and any nudge on top of that is just more movement. */
   transform: scale(var(--depth-scale));
