@@ -1029,7 +1029,11 @@ function dayHeading(ymd: string): string {
 
 // The single expenses view. A compact summary, a row of category chips that
 // filter the list, a short breakdown, and the expenses grouped by day.
-function ExpensesView({
+// Memoised, with callbacks that keep their identity: opening a sheet is a
+// state change on the page above this, and there is no reason for a month of
+// expenses to be rebuilt because a form appeared on top of it. That work used
+// to land between the tap and the sheet.
+const ExpensesView = memo(function ExpensesView({
   onViewDetail,
   onRecategorize,
   onAdd,
@@ -1474,7 +1478,7 @@ function ExpensesView({
 
     </>
   );
-}
+});
 
 /* ---------- page ---------- */
 
@@ -1488,6 +1492,8 @@ export default function ExpensesPage() {
   const closeAdd = useCallback(() => setAdding(false), []);
   const closeDetail = useCallback(() => setViewingDetail(null), []);
   const closeRecat = useCallback(() => setRecategorizing(false), []);
+  const openAdd = useCallback(() => setAdding(true), []);
+  const openRecat = useCallback(() => setRecategorizing(true), []);
 
   // The daily recap notification links to /expenses?add=1 to add a missed expense.
   useEffect(() => {
@@ -1536,11 +1542,7 @@ export default function ExpensesPage() {
         />
       )}
 
-      <ExpensesView
-        onViewDetail={setViewingDetail}
-        onRecategorize={() => setRecategorizing(true)}
-        onAdd={() => setAdding(true)}
-      />
+      <ExpensesView onViewDetail={setViewingDetail} onRecategorize={openRecat} onAdd={openAdd} />
     </>
   );
 }

@@ -73,9 +73,9 @@ function usePortal() {
 const DISMISS_PX = 110; // far enough to mean it
 const FLING_PX = 40; // a flick still has to travel, so a tap can never dismiss
 const FLING_VELOCITY = 0.5; // px per ms - a flick that beats the distance test
-const EXIT_MS = 240;
+const EXIT_MS = 220;
 // Catching up to a size change is a small movement and should be over quickly.
-const GROW_MS = 380;
+const GROW_MS = 340;
 
 export function Sheet({
   title,
@@ -186,7 +186,7 @@ export function Sheet({
     const panel = panelRef.current;
     if (!panel || reducedMotion() || typeof ResizeObserver === "undefined") return;
 
-    const settle = window.setTimeout(() => (entering.current = false), 420);
+    const settle = window.setTimeout(() => (entering.current = false), 380);
     let last = panel.getBoundingClientRect().height;
 
     const observer = new ResizeObserver(() => {

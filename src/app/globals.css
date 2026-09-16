@@ -156,6 +156,11 @@
   --ease-settle: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-press: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-page: cubic-bezier(0.25, 1, 0.35, 1);
+  /* Sheets travel the full height of the screen, so the curve has to answer
+     the tap immediately: 41% of the distance in the first 30ms, 67% by 60ms.
+     A critically damped spring is only 10% along at 30ms, which on a tall
+     sheet means the panel is still off-screen and the tap reads as ignored. */
+  --ease-sheet: cubic-bezier(0.16, 1, 0.3, 1);
   /* how far the app behind a sheet recedes */
   --depth-scale: 0.94;
 }
@@ -214,7 +219,7 @@
    it. */
 #app-canvas {
   transform-origin: 50% 0%;
-  transition: transform 420ms var(--ease-settle);
+  transition: transform 380ms var(--ease-sheet);
 }
 html[data-depth] #app-canvas {
   transform: scale(var(--depth-scale)) translate3d(0, 6px, 0);
@@ -228,8 +233,8 @@ html[data-depth] .tabbar {
 }
 .tabbar {
   transition:
-    transform 420ms var(--ease-settle),
-    opacity 420ms var(--ease-settle);
+    transform 380ms var(--ease-sheet),
+    opacity 380ms var(--ease-sheet);
 }
 
 
@@ -688,7 +693,7 @@ body {
   animation: chat-fade 280ms ease-out backwards;
 }
 .chat-composer {
-  animation: chat-rise 420ms var(--ease-settle) 40ms backwards;
+  animation: chat-rise 380ms var(--ease-sheet) 40ms backwards;
 }
 @keyframes chat-top {
   from {
@@ -1060,9 +1065,9 @@ body {
   border-radius: 30px 30px 0 0;
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.25);
   padding-bottom: env(safe-area-inset-bottom);
-  /* Critically damped on purpose: a bottom sheet that overshoots upwards
-     lifts off the bottom edge and shows the backdrop under it. */
-  animation: sheet-up 420ms var(--ease-settle) backwards;
+  /* No overshoot: a bottom sheet that springs past its mark lifts off the
+     bottom edge and shows the backdrop under it. */
+  animation: sheet-up 380ms var(--ease-sheet) backwards;
   /* The drag writes translate3d here; keeping it on its own line means a
      gesture never fights the entrance animation for the transform. */
   will-change: transform;
@@ -1133,7 +1138,7 @@ body {
   border: 1px solid var(--ring);
   border-radius: 28px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-  animation: pop-in 420ms var(--ease-enter) backwards;
+  animation: pop-in 380ms var(--ease-sheet) backwards;
 }
 @media (max-width: 639px) {
   .sheet-backdrop > .pop-panel {
