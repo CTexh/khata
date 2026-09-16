@@ -157,8 +157,7 @@
   --ease-press: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-page: cubic-bezier(0.25, 1, 0.35, 1);
   /* how far the app behind a sheet recedes */
-  --depth-scale: 0.95;
-  --depth-blur: 2px;
+  --depth-scale: 0.94;
 }
 
 @supports (animation-timing-function: linear(0 0%, 1 100%)) {
@@ -219,7 +218,9 @@
 }
 html[data-depth] #app-canvas {
   transform: scale(var(--depth-scale)) translate3d(0, 6px, 0);
-  filter: blur(var(--depth-blur));
+  /* Promoted only while a sheet is open. Left on permanently it would keep a
+     layer the size of the whole app in memory for no reason. */
+  will-change: transform;
 }
 html[data-depth] .tabbar {
   transform: translateX(-50%) translate3d(0, 14px, 0) scale(0.97);
@@ -230,36 +231,17 @@ html[data-depth] .tabbar {
     transform var(--dur-enter) var(--ease-enter),
     opacity var(--dur-settle) var(--ease-settle);
 }
-/* Blur is the one expensive part, and the only part worth dropping on a
-   phone that has asked for less. */
-@media (prefers-reduced-transparency: reduce) {
-  html[data-depth] #app-canvas {
-    filter: none;
-  }
-}
+
 
 /* A page arriving: its cards come in together, a few milliseconds apart, and
    stop. Capped at six so the last card is never left waiting. */
-/* Most pages are one column wrapping their sections, a few are the sections
-   themselves; the arriving thing is whichever of those holds the cards. */
-.page-enter > *:not(:only-child),
-.page-enter > :only-child > * {
-  animation: page-in var(--dur-page) var(--ease-page) backwards;
+.page-enter > * {
+  animation: page-in 240ms var(--ease-page) backwards;
 }
-.page-enter > *:not(:only-child):nth-child(2),
-.page-enter > :only-child > *:nth-child(2) { animation-delay: 16ms; }
-.page-enter > *:not(:only-child):nth-child(3),
-.page-enter > :only-child > *:nth-child(3) { animation-delay: 32ms; }
-.page-enter > *:not(:only-child):nth-child(4),
-.page-enter > :only-child > *:nth-child(4) { animation-delay: 48ms; }
-.page-enter > *:not(:only-child):nth-child(5),
-.page-enter > :only-child > *:nth-child(5) { animation-delay: 64ms; }
-.page-enter > *:not(:only-child):nth-child(n + 6),
-.page-enter > :only-child > *:nth-child(n + 6) { animation-delay: 76ms; }
 @keyframes page-in {
   from {
-    opacity: 0.55;
-    transform: translate3d(0, 10px, 0) scale(0.995);
+    opacity: 0.6;
+    transform: translate3d(0, 8px, 0);
   }
   to {
     opacity: 1;
@@ -619,7 +601,7 @@ body {
   }
 }
 .rise {
-  animation: rise var(--dur-page) var(--ease-page) backwards;
+  animation: rise 200ms var(--ease-page) backwards;
 }
 
 @keyframes shimmer {
@@ -1066,7 +1048,9 @@ body {
   border-radius: 30px 30px 0 0;
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.25);
   padding-bottom: env(safe-area-inset-bottom);
-  animation: sheet-up var(--dur-enter) var(--ease-enter) both;
+  /* Critically damped on purpose: a bottom sheet that overshoots upwards
+     lifts off the bottom edge and shows the backdrop under it. */
+  animation: sheet-up 420ms var(--ease-settle) backwards;
   /* The drag writes translate3d here; keeping it on its own line means a
      gesture never fights the entrance animation for the transform. */
   will-change: transform;
@@ -1078,6 +1062,8 @@ body {
   }
   .sheet-panel {
     border-radius: 30px;
+    /* Centred on a wide screen, there is no bottom edge to rise from. */
+    animation-name: pop-in;
   }
   .sheet-grip {
     display: none;
@@ -1086,6 +1072,12 @@ body {
 .sheet-grip,
 .sheet-head {
   touch-action: none;
+}
+/* The panel takes focus when it opens so the keyboard follows it, but it is
+   the container, not a control - the ring belongs on what is tabbed to next. */
+.sheet-panel:focus,
+.sheet-panel:focus-visible {
+  outline: none;
 }
 .sheet-grip {
   width: 40px;
@@ -1111,10 +1103,10 @@ body {
 }
 @keyframes sheet-up {
   from {
-    transform: translate3d(0, 40px, 0);
+    transform: translate3d(0, 100%, 0);
   }
   to {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 /* The one-off announcement dialog: a card that settles into the middle of the

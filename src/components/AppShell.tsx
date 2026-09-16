@@ -8,7 +8,6 @@ import { NotificationSettings } from "@/components/NotificationSettings";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
-import { watchOrigins } from "@/lib/motion";
 import { NotificationsNews } from "@/components/NotificationsNews";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
@@ -177,7 +176,6 @@ function primeAppData() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   primeAppData();
-  useEffect(() => watchOrigins(), []);
   const { data: me, refresh: refreshMe } = useCached<{ user: CurrentUser | null }>("/api/auth/me");
   const user = me?.user ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -348,9 +346,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* Keyed on the route so each page plays its arrival once, and
-            display:contents so wrapping it changes no layout. */}
-        <main id="main-content" key={pathname} className="contents page-enter">
+        {/* display:contents, so wrapping the page changes no layout. Each
+            route is a different component, so its elements are new on every
+            navigation and the arrival plays by itself - no key needed, and no
+            forced remount of a page that is only re-rendering. */}
+        <main id="main-content" className="contents page-enter">
           {children}
         </main>
       </div>

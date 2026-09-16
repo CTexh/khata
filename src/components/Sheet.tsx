@@ -1,18 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ENTER_MS, haptic, morphFrom, reducedMotion, rubberBand, springTo, takeOrigin, watchOrigins } from "@/lib/motion";
+import { haptic, reducedMotion, rubberBand, springTo } from "@/lib/motion";
 
 // One detail view for the whole app: slides up from the bottom on a phone,
 // sits in the middle on a wide screen. Udhar Khata people and subscriptions
 // both open in it, so every record looks and behaves the same.
 //
-// Three things make it feel like part of the phone rather than a web page:
-// it grows out of whatever was tapped, it follows a finger dragged down it
-// (resisting upwards, carrying a flick into the dismissal), and the app behind
-// it sits back while it is open. All of it is transform and opacity, so it
-// runs on the compositor and leaves the main thread free.
+// Two things make it feel like part of the phone rather than a web page: it
+// follows a finger dragged down it (resisting upwards, carrying a flick into
+// the dismissal), and the app behind it sits back while it is open.
+//
+// It rises from the bottom edge and stops, with no scale on the way. Scaling a
+// panel full of text re-rasterises every glyph on every frame, which is what
+// makes an otherwise smooth animation look like it is shimmering.
 //
 // Locking the page behind a sheet. Hiding overflow is not enough on a phone:
 // iOS keeps scrolling the page behind the dialog, and the reader loses their
@@ -71,7 +73,9 @@ function usePortal() {
 const DISMISS_PX = 110; // far enough to mean it
 const FLING_PX = 40; // a flick still has to travel, so a tap can never dismiss
 const FLING_VELOCITY = 0.5; // px per ms - a flick that beats the distance test
-const EXIT_MS = 260;
+const EXIT_MS = 240;
+// Catching up to a size change is a small movement and should be over quickly.
+const GROW_MS = 380;
 
 export function Sheet({
   title,
@@ -112,7 +116,7 @@ export function Sheet({
       return;
     }
     stop();
-    const travel = panel.getBoundingClientRect().height + 24;
+    const travel = (drag.current?.height || panel.getBoundingClientRect().height) + 24;
     panel.style.transition = `transform ${EXIT_MS}ms var(--ease-settle)`;
     panel.style.transform = `translate3d(0, ${travel}px, 0)`;
     if (backdrop) {
@@ -123,42 +127,29 @@ export function Sheet({
   }, [onClose, stop]);
 
   useEffect(() => {
-    watchOrigins();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") dismiss();
     };
     lockPage();
     window.addEventListener("keydown", onKey);
+
     return () => {
       unlockPage();
       window.removeEventListener("keydown", onKey);
     };
   }, [dismiss]);
 
-  // The morph. The panel is put back over whatever was tapped and released to
-  // its own position in one movement, so the row and the sheet are visibly the
-  // same object. With no recent tap to grow from - opened by keyboard, or by
-  // the app itself - the CSS entrance plays instead.
-  useLayoutEffect(() => {
-    const panel = panelRef.current;
-    // Runs on the render that the portal appears in, not the one before it.
-    if (!panel || reducedMotion()) return;
-    const origin = takeOrigin();
-    if (!origin || origin.width < 24) return;
-
-    const rect = panel.getBoundingClientRect();
-    // The CSS entrance is for sheets with nothing to grow from; this one has.
-    panel.style.animation = "none";
-    panel.style.transformOrigin = "50% 0%";
-    stop();
-    const entrance = springTo(
-      panel,
-      { transform: morphFrom(rect, origin), opacity: 0.35 },
-      { transform: "translate3d(0, 0, 0)", opacity: 1 },
-      ENTER_MS
-    );
-    if (entrance) running.current.push(entrance);
-    return stop;
+  // Focus moves into the sheet and returns to whatever opened it. Without
+  // this, a keyboard or screen reader is left behind on the page underneath,
+  // tabbing through things it cannot see. Runs on the render the portal
+  // appears in - a render earlier there is no panel to focus.
+  useEffect(() => {
+    if (!mounted) return;
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
   }, [mounted]);
 
   // A sheet opens before it knows everything it will contain - a person's
@@ -170,7 +161,7 @@ export function Sheet({
     const panel = panelRef.current;
     if (!panel || reducedMotion() || typeof ResizeObserver === "undefined") return;
 
-    const settle = window.setTimeout(() => (entering.current = false), ENTER_MS);
+    const settle = window.setTimeout(() => (entering.current = false), 420);
     let last = panel.getBoundingClientRect().height;
 
     const observer = new ResizeObserver(() => {
@@ -193,8 +184,8 @@ export function Sheet({
         panel,
         { transform: `translate3d(0, ${hold.toFixed(1)}px, 0)` },
         { transform: "translate3d(0, 0, 0)" },
-        ENTER_MS,
-        "enter",
+        GROW_MS,
+        "settle",
         entering.current
       );
       if (grow) running.current.push(grow);
@@ -215,7 +206,15 @@ export function Sheet({
   // handle is a drag at once; anywhere else it only becomes one after the
   // finger has moved down a little, because at the top of the content an
   // upward drag is how you scroll, and that has to stay the browser's.
-  const drag = useRef<{ id: number; startY: number; y: number; t: number; v: number; armed: boolean } | null>(null);
+  const drag = useRef<{
+    id: number;
+    startY: number;
+    y: number;
+    t: number;
+    v: number;
+    armed: boolean;
+    height: number;
+  } | null>(null);
 
   const claim = (e: React.PointerEvent) => {
     const panel = panelRef.current;
@@ -242,7 +241,17 @@ export function Sheet({
     // the top - otherwise it would steal the scroll.
     if (!fromHandle && (bodyRef.current?.scrollTop ?? 0) > 0) return;
     if (target.closest("button, a, input, select, textarea")) return;
-    drag.current = { id: e.pointerId, startY: e.clientY, y: e.clientY, t: performance.now(), v: 0, armed: !fromHandle };
+    drag.current = {
+      id: e.pointerId,
+      startY: e.clientY,
+      y: e.clientY,
+      t: performance.now(),
+      v: 0,
+      armed: !fromHandle,
+      // Measured once, here: reading it per move would lay out the page on
+      // every frame of the gesture.
+      height: panelRef.current?.getBoundingClientRect().height || 400,
+    };
     if (!fromHandle) return;
     claim(e);
   };
@@ -271,7 +280,7 @@ export function Sheet({
 
     const raw = e.clientY - d.startY;
     // Down is one-to-one; up is rubber, against the sheet's own height.
-    const offset = raw >= 0 ? raw : -rubberBand(-raw, panel.getBoundingClientRect().height || 400);
+    const offset = raw >= 0 ? raw : -rubberBand(-raw, d.height);
     panel.style.transform = `translate3d(0, ${offset.toFixed(1)}px, 0)`;
     if (backdropRef.current) {
       const fade = Math.max(0, 1 - Math.max(0, raw) / 420);
@@ -312,6 +321,7 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         ref={panelRef}
         onClick={(e) => e.stopPropagation()}
         onPointerDown={onPointerDown}
