@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { Expense } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
 import { categoryVars } from "@/lib/category-style";
@@ -882,13 +882,13 @@ function RecategorizeModal({ onClose, onApplied }: { onClose: () => void; onAppl
 
 /* ---------- expense row ---------- */
 
-function ExpenseRow({
+const ExpenseRow = memo(function ExpenseRow({
   expense,
   onView,
   hideDate = false,
 }: {
   expense: Expense;
-  onView: () => void;
+  onView: (expense: Expense) => void;
   hideDate?: boolean;
 }) {
   const categoryColor = categoryVars(expense.category);
@@ -900,7 +900,7 @@ function ExpenseRow({
       <button
         type="button"
         className="flex w-full items-center gap-3 py-2.5 text-left cursor-pointer rounded-2xl transition hover:bg-[var(--surface-2)]"
-        onClick={onView}
+        onClick={() => onView(expense)}
         aria-label={`View ${expense.vendor || "expense"}, ${fmtRs(expense.amount)}`}
       >
         <span className="icon-tile" style={{ background: categoryColor.bg, color: categoryColor.fg }} aria-hidden>
@@ -927,7 +927,7 @@ function ExpenseRow({
       </button>
     </li>
   );
-}
+});
 
 /* ---------- category report ---------- */
 
@@ -1404,14 +1404,23 @@ function ExpensesView({
                       onAssigned={() => invalidate("/api/expenses")}
                     />
                   ) : (
-                    <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} />
+                    <ExpenseRow key={e.id} expense={e} onView={onViewDetail} />
                   )
                 )}
               </ul>
             </div>
           ) : (
             groups.map((g) => (
-              <div key={g.day} className="flex flex-col gap-1.5">
+              // A day the reader has not scrolled to yet is not laid out or
+              // painted. The size is given exactly - a heading plus a row each
+              // - so the page is the height it will be and nothing shifts when
+              // a group comes into view. Browsers without content-visibility
+              // ignore both and render as before.
+              <div
+                key={g.day}
+                className="day-group flex flex-col gap-1.5"
+                style={{ containIntrinsicSize: `auto ${40 + g.items.length * 68}px` }}
+              >
                 <div className="flex items-baseline justify-between px-1 pt-1">
                   <h3 className="text-[13px] font-bold uppercase tracking-wide" style={{ color: "var(--muted)" }}>
                     {dayHeading(g.day)}
@@ -1423,7 +1432,7 @@ function ExpensesView({
                 <div className="card px-3 py-1">
                   <ul>
                     {g.items.map((e) => (
-                      <ExpenseRow key={e.id} expense={e} onView={() => onViewDetail(e)} hideDate />
+                      <ExpenseRow key={e.id} expense={e} onView={onViewDetail} hideDate />
                     ))}
                   </ul>
                 </div>

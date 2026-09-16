@@ -646,6 +646,12 @@ body {
   display: none;
 }
 
+/* Long lists: skip the work for days that are off-screen. Paired with an
+   exact contain-intrinsic-size on each group, so the scrollbar never lies. */
+.day-group {
+  content-visibility: auto;
+}
+
 /* ---- filtering a list by category ---- */
 .cat-pill {
   display: inline-flex;

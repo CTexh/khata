@@ -146,8 +146,33 @@ export function Sheet({
   useEffect(() => {
     if (!mounted) return;
     const opener = document.activeElement as HTMLElement | null;
-    panelRef.current?.focus({ preventScroll: true });
+    const panel = panelRef.current;
+    panel?.focus({ preventScroll: true });
+
+    // Tab stays inside the sheet. Without this, tabbing past the last control
+    // walks off into the page behind - which is covered, inert to the eye, and
+    // still perfectly reachable by keyboard.
+    const onTab = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !panel) return;
+      const focusable = panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panel)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onTab);
     return () => {
+      document.removeEventListener("keydown", onTab);
       if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
   }, [mounted]);
