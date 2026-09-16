@@ -145,8 +145,8 @@
              wobble past its mark
    - press:  response 0.28s, damping 0.85 - release from a tap or a drag */
 :root {
-  --dur-enter: 550ms;
-  --dur-settle: 450ms;
+  --dur-enter: 420ms;
+  --dur-settle: 420ms;
   --dur-press: 360ms;
   --dur-quick: 180ms;
   /* Pages and small items arrive faster than sheets do: a screen you asked
@@ -214,7 +214,7 @@
    it. */
 #app-canvas {
   transform-origin: 50% 0%;
-  transition: transform var(--dur-enter) var(--ease-enter);
+  transition: transform 420ms var(--ease-settle);
 }
 html[data-depth] #app-canvas {
   transform: scale(var(--depth-scale)) translate3d(0, 6px, 0);
@@ -228,8 +228,8 @@ html[data-depth] .tabbar {
 }
 .tabbar {
   transition:
-    transform var(--dur-enter) var(--ease-enter),
-    opacity var(--dur-settle) var(--ease-settle);
+    transform 420ms var(--ease-settle),
+    opacity 420ms var(--ease-settle);
 }
 
 
@@ -688,7 +688,7 @@ body {
   animation: chat-fade 280ms ease-out backwards;
 }
 .chat-composer {
-  animation: chat-rise var(--dur-enter) var(--ease-enter) 40ms backwards;
+  animation: chat-rise 420ms var(--ease-settle) 40ms backwards;
 }
 @keyframes chat-top {
   from {
@@ -1127,7 +1127,7 @@ body {
   border: 1px solid var(--ring);
   border-radius: 28px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-  animation: pop-in var(--dur-enter) var(--ease-enter) both;
+  animation: pop-in 420ms var(--ease-enter) backwards;
 }
 @media (max-width: 639px) {
   .sheet-backdrop > .pop-panel {
