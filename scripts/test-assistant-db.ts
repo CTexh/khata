@@ -333,6 +333,25 @@ check("another account isn't blocked by it", await dbm.claimReminder(userId, key
 await dbm.releaseReminder(mailUser, key);
 check("a released claim can be taken again", await dbm.claimReminder(mailUser, key), true);
 
+/* ---------- push notifications: one row per device ---------- */
+
+const device = { endpoint: "https://push.example/abc", p256dh: "key-one", auth: "auth-one" };
+await dbm.savePushSubscription(mailUser, device);
+await dbm.savePushSubscription(mailUser, { ...device, endpoint: "https://push.example/second" });
+check("each device is its own row", (await dbm.listPushSubscriptions(mailUser)).length, 2);
+
+// The same phone subscribing again replaces its row rather than adding one.
+await dbm.savePushSubscription(mailUser, { ...device, p256dh: "key-two" });
+const devices = await dbm.listPushSubscriptions(mailUser);
+check("re-subscribing replaces that device", [devices.length, devices.find((d) => d.endpoint === device.endpoint)?.p256dh], [2, "key-two"]);
+
+await dbm.deletePushSubscription(device.endpoint, mailUser);
+check("a device can be removed", (await dbm.listPushSubscriptions(mailUser)).length, 1);
+check("another account sees none of them", (await dbm.listPushSubscriptions(userId)).length, 0);
+
+await dbm.deleteUser(mailUser);
+check("deleting an account takes its devices with it", (await dbm.listPushSubscriptions(mailUser)).length, 0);
+
 c.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

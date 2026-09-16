@@ -194,7 +194,7 @@ export async function findUserById(id: string): Promise<User | null> {
 // Email reminders: where to send them, whether they're on, and a log of what
 // has been sent so a retried daily job never sends the same reminder twice.
 let emailColumnsEnsured = false;
-const EMAIL_SCHEMA = "2";
+const EMAIL_SCHEMA = "3";
 export async function ensureUserEmailColumns(): Promise<void> {
   if (emailColumnsEnsured) return;
   if (await schemaCurrent("user_email", EMAIL_SCHEMA)) {
@@ -226,6 +226,22 @@ export async function ensureUserEmailColumns(): Promise<void> {
     sent_at TEXT NOT NULL,
     PRIMARY KEY (user_id, item)
   )`);
+  // One row per device that has agreed to receive notifications. The endpoint
+  // is the address the phone's push service gave us, and is unique to that
+  // device and this app, so it is the key: re-subscribing on the same phone
+  // replaces the row rather than adding another.
+  await c.execute(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+  try {
+    await c.execute(`CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions (user_id)`);
+  } catch {
+    // Index already exists.
+  }
   await markSchema("user_email", EMAIL_SCHEMA);
   emailColumnsEnsured = true;
 }
@@ -363,6 +379,51 @@ export async function getReminderRecipient(userId: string): Promise<ReminderReci
       monthlySummary: on(r.remind_summary),
     },
   };
+}
+
+/* ---------- push notifications: one row per device ---------- */
+
+export type PushSubscriptionRow = { endpoint: string; p256dh: string; auth: string };
+
+export async function savePushSubscription(
+  userId: string,
+  sub: PushSubscriptionRow
+): Promise<void> {
+  await ensureUserEmailColumns();
+  const c = await db();
+  await c.execute({
+    sql: `INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, created_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`,
+    args: [sub.endpoint, userId, sub.p256dh, sub.auth, new Date().toISOString()],
+  });
+}
+
+export async function listPushSubscriptions(userId: string): Promise<PushSubscriptionRow[]> {
+  await ensureUserEmailColumns();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
+    args: [userId],
+  });
+  return rs.rows.map((r) => ({
+    endpoint: r.endpoint as string,
+    p256dh: r.p256dh as string,
+    auth: r.auth as string,
+  }));
+}
+
+// Used when a device unsubscribes, and when its push service reports the
+// subscription as gone - a phone that reinstalled the app, say.
+export async function deletePushSubscription(endpoint: string, userId?: string): Promise<void> {
+  await ensureUserEmailColumns();
+  const c = await db();
+  await c.execute({
+    sql: userId
+      ? "DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?"
+      : "DELETE FROM push_subscriptions WHERE endpoint = ?",
+    args: userId ? [endpoint, userId] : [endpoint],
+  });
 }
 
 // The reminder keys from `items` that haven't been sent to this user yet.
@@ -516,6 +577,7 @@ export async function deleteUser(id: string): Promise<void> {
       { sql: "DELETE FROM expense_vendor_rules WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM whatsapp_inbound WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM reminder_log WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM push_subscriptions WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM assistant_feedback WHERE user_id = ?", args: [id] },
       ...(user ? [{ sql: "DELETE FROM login_failures WHERE username = ?", args: [user.username.toLowerCase()] }] : []),
       { sql: "DELETE FROM users WHERE id = ?", args: [id] },

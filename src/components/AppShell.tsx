@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ThemePicker } from "@/components/Theme";
+import { PushSettings } from "@/components/PushSettings";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
@@ -74,7 +75,17 @@ function Switch({
   );
 }
 
-function SettingsModal({ initialName, onClose, onSaved }: { initialName: string; onClose: () => void; onSaved: () => void }) {
+function SettingsModal({
+  initialName,
+  isAdmin,
+  onClose,
+  onSaved,
+}: {
+  initialName: string;
+  isAdmin: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const [name, setName] = useState(initialName);
   const [email, setEmail] = useState("");
   const [reminders, setReminders] = useState(true);
@@ -148,6 +159,10 @@ function SettingsModal({ initialName, onClose, onSaved }: { initialName: string;
           </div>
           <ThemePicker />
         </div>
+
+        {/* Notifications on the phone itself are being tried on admin
+            accounts first; everyone else has the email reminders. */}
+        {isAdmin && <PushSettings />}
 
         <div className="card p-4 flex flex-col gap-3">
           <div>
@@ -457,7 +472,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {tourOpen && user && <WelcomeTour withAssistant={Boolean(user.aiAccess)} onClose={closeTour} />}
 
       {profileOpen && (
-        <SettingsModal initialName={user?.name ?? ""} onClose={closeProfile} onSaved={() => refreshMe()} />
+        <SettingsModal
+          initialName={user?.name ?? ""}
+          isAdmin={Boolean(user?.isAdmin)}
+          onClose={closeProfile}
+          onSaved={() => refreshMe()}
+        />
       )}
     </>
   );

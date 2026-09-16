@@ -19,6 +19,7 @@ import {
   type ReminderRecipient,
 } from "@/lib/db";
 import { mailConfigured, sendMail } from "@/lib/mailer";
+import { sendPush, type PushMessage } from "@/lib/push";
 import {
   buildRecap,
   dailyRecapEmail,
@@ -31,7 +32,7 @@ import {
   type ReminderEmail,
 } from "@/lib/reminders";
 import { addDays, pakistanMinutes, pakistanToday } from "@/lib/expense-parse";
-import { MONTH_NAMES } from "@/lib/format";
+import { MONTH_NAMES, fmtDateLabel, fmtRs } from "@/lib/format";
 
 export const APP_URL = process.env.APP_URL ?? "https://khata-delta.vercel.app";
 
@@ -42,16 +43,26 @@ export const RECAP_MINUTE = 30;
 
 export type SendResult = { sent: number; errors: string[] };
 
-async function send(user: ReminderRecipient, key: string, build: () => Promise<ReminderEmail>): Promise<boolean> {
+// The email is what the reminder is; a notification is the same reminder on
+// the phone's lock screen, sent to whichever devices the account registered.
+// A notification that fails is not worth losing the email over, so it never
+// throws - sendPush logs and moves on.
+async function send(
+  user: ReminderRecipient,
+  key: string,
+  build: () => Promise<ReminderEmail>,
+  push?: PushMessage
+): Promise<boolean> {
   if (!(await claimReminder(user.id, key))) return false;
   try {
     await sendMail({ to: user.email, ...(await build()) });
-    return true;
   } catch (err) {
     // Not sent after all: let the next run try again.
     await releaseReminder(user.id, key);
     throw err;
   }
+  if (push) await sendPush(user.id, push);
+  return true;
 }
 
 // Everything that goes out at 6pm: a subscription due tomorrow, one due today
@@ -70,16 +81,28 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
   );
 
   // Built lazily, so only an email that still needs sending does any work.
-  const pending: { key: string; build: () => Promise<ReminderEmail> }[] = [];
+  const pending: { key: string; build: () => Promise<ReminderEmail>; push: PushMessage }[] = [];
   if (user.prefs.subscriptions) {
     pending.push(
       ...due.subsTomorrow.map((item) => ({
         key: item.key,
         build: async () => subscriptionReminderEmail({ name, item, stage: "before" as const, appUrl: APP_URL }),
+        push: {
+          title: `${item.name} is due tomorrow`,
+          body: `${fmtRs(item.amount)} · ${fmtDateLabel(item.date)}`,
+          url: `/subscriptions?open=${encodeURIComponent(item.id)}`,
+          tag: item.key,
+        },
       })),
       ...due.subsToday.map((item) => ({
         key: item.key,
         build: async () => subscriptionReminderEmail({ name, item, stage: "due" as const, appUrl: APP_URL }),
+        push: {
+          title: `${item.name} is due today`,
+          body: `${fmtRs(item.amount)} · not marked paid yet`,
+          url: `/subscriptions?open=${encodeURIComponent(item.id)}`,
+          tag: item.key,
+        },
       }))
     );
   }
@@ -88,6 +111,12 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
       ...due.reachOut.map((item) => ({
         key: item.key,
         build: async () => udharReminderEmail({ name, item, appUrl: APP_URL }),
+        push: {
+          title: `Follow up with ${item.name}`,
+          body: `${fmtRs(item.amount)} still owed to you`,
+          url: `/udhar-khata?open=${encodeURIComponent(item.id)}`,
+          tag: item.key,
+        },
       }))
     );
   }
@@ -95,6 +124,12 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
   if (summaryFor && user.prefs.monthlySummary) {
     pending.push({
       key: summaryFor.key,
+      push: {
+        title: `${MONTH_NAMES[summaryFor.month - 1]} summary`,
+        body: "Your month in Khata is ready.",
+        url: "/expenses",
+        tag: summaryFor.key,
+      },
       build: async () => {
         const totals = await categoryTotals(user.id, { year: summaryFor.year, month: summaryFor.month });
         const owing = people.filter((p) => p.balance >= 0.005);
@@ -115,7 +150,7 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
 
   for (const reminder of pending) {
     try {
-      if (await send(user, reminder.key, reminder.build)) result.sent++;
+      if (await send(user, reminder.key, reminder.build, reminder.push)) result.sent++;
     } catch (err) {
       result.errors.push(`${user.id.slice(0, 8)} ${reminder.key.split(":")[0]}: ${(err as Error).message.slice(0, 200)}`);
     }
@@ -145,6 +180,15 @@ export async function sendDailyRecap(user: ReminderRecipient, date: string): Pro
       ...dailyRecapEmail({ name: user.name || user.username, recap, appUrl: APP_URL }),
     });
     result.sent++;
+    const spent = recap.expenses.reduce((sum, e) => sum + e.amount, 0);
+    await sendPush(user.id, {
+      title: `Your recap for ${fmtDateLabel(date)}`,
+      body: recap.expenses.length
+        ? `${fmtRs(spent)} across ${recap.expenses.length} ${recap.expenses.length === 1 ? "expense" : "expenses"}. Anything missing?`
+        : "Nothing spent. Anything missing?",
+      url: "/expenses",
+      tag: key,
+    });
   } catch (err) {
     // Not sent after all: let the next run try again.
     await releaseReminder(user.id, key);
