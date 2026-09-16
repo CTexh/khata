@@ -18,6 +18,7 @@ import {
   asksForNewPerson,
   newPersonName,
   orderCandidates,
+  pakistanMinutes,
   pakistanToday,
   parseOffline,
   personKey,
@@ -507,6 +508,13 @@ check("help lists both sections", HELP_REPLY.includes("*Expenses*") && HELP_REPL
 for (const [label, text] of [["help", HELP_REPLY], ["busy", BUSY_REPLY]] as const) {
   check(`${label} has no doubled blank lines or trailing space`, /\n\n\n| \n| $/.test(text), false);
 }
+
+/* ---------- the clock the reminder emails run on ---------- */
+
+// Pakistan is UTC+5 all year.
+check("4:30am in Pakistan", pakistanMinutes(new Date("2026-09-15T23:30:00Z")), 4 * 60 + 30);
+check("6pm in Pakistan", pakistanMinutes(new Date("2026-09-15T13:00:00Z")), 18 * 60);
+check("just before midnight in Pakistan", pakistanMinutes(new Date("2026-09-15T18:59:00Z")), 23 * 60 + 59);
 
 /* ---------- how the page lays a reply out ---------- */
 

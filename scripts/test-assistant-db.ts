@@ -292,6 +292,47 @@ check(
 );
 check("other accounts untouched by a delete", await count("SELECT COUNT(*) AS n FROM expenses WHERE user_id = ?", [otherUser]), otherBefore);
 
+/* ---------- reminder emails: claims and per-kind preferences ---------- */
+
+const mailUser = randomUUID();
+await c.execute({
+  sql: "INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES (?, ?, 'x', 0, ?)",
+  args: [mailUser, "reminder-test", now],
+});
+
+check("no address means nothing to send to", await dbm.getReminderRecipient(mailUser), null);
+
+await dbm.updateUserProfile(mailUser, { email: "reminder@example.com" });
+const fresh = await dbm.getReminderRecipient(mailUser);
+check("a saved address gets every kind by default", fresh?.prefs, {
+  subscriptions: true,
+  udhar: true,
+  dailyRecap: true,
+  monthlySummary: true,
+});
+
+await dbm.updateUserProfile(mailUser, { prefs: { dailyRecap: false } });
+const narrowed = await dbm.getReminderRecipient(mailUser);
+check("one kind switched off leaves the rest alone", narrowed?.prefs, {
+  subscriptions: true,
+  udhar: true,
+  dailyRecap: false,
+  monthlySummary: true,
+});
+
+await dbm.updateUserProfile(mailUser, { emailReminders: false });
+check("the master switch takes the account out altogether", await dbm.getReminderRecipient(mailUser), null);
+await dbm.updateUserProfile(mailUser, { emailReminders: true });
+
+// The claim is what stops two senders - a cron run and the app's catch-up -
+// sending the same email.
+const key = "recap:2026-09-15";
+check("first claim wins", await dbm.claimReminder(mailUser, key), true);
+check("second claim finds it taken", await dbm.claimReminder(mailUser, key), false);
+check("another account isn't blocked by it", await dbm.claimReminder(userId, key), true);
+await dbm.releaseReminder(mailUser, key);
+check("a released claim can be taken again", await dbm.claimReminder(mailUser, key), true);
+
 c.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

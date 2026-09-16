@@ -1,27 +1,18 @@
 import { NextResponse } from "next/server";
-import {
-  ensureTablesExist,
-  listExpensesInRange,
-  listLedgerActivity,
-  listReminderRecipients,
-  listSubscriptions,
-  markRemindersSent,
-  unsentReminders,
-} from "@/lib/db";
-import { mailConfigured, sendMail } from "@/lib/mailer";
-import { buildRecap, dailyRecapEmail } from "@/lib/reminders";
+import { ensureTablesExist, listReminderRecipients } from "@/lib/db";
+import { mailConfigured } from "@/lib/mailer";
+import { sendDailyRecap } from "@/lib/reminder-run";
 import { addDays, pakistanToday } from "@/lib/expense-parse";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const APP_URL = process.env.APP_URL ?? "https://khata-delta.vercel.app";
-
 // Runs once a day at 23:30 UTC - 4:30am in Pakistan (vercel.json). Emails
-// each user with reminders on a recap of the day that just ended: expenses
+// each user who wants it a recap of the day that just ended: expenses
 // recorded, Udhar Khata entries, subscriptions that were due or marked paid,
-// and a nudge to add anything they forgot. Logged once sent, so a retried run
-// never sends the same day's recap twice.
+// and a nudge to add anything they forgot. Claimed in reminder_log before it
+// is sent, so neither a retried run nor the app's own catch-up can send the
+// same day's recap twice.
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
   if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -32,25 +23,13 @@ export async function GET(req: Request) {
   await ensureTablesExist();
   // At 4:30am the Pakistan date has already moved on: the recap is for the day before.
   const date = addDays(pakistanToday(), -1);
-  const key = `recap:${date}`;
   let emailed = 0;
   const errors: string[] = [];
 
   for (const user of await listReminderRecipients()) {
-    try {
-      if (!user.prefs.dailyRecap) continue;
-      if (!(await unsentReminders(user.id, [key])).has(key)) continue;
-      const recap = await buildRecap(date, {
-        expenses: (from, to) => listExpensesInRange(user.id, from, to),
-        ledger: (from, to) => listLedgerActivity(user.id, from, to),
-        subscriptions: () => listSubscriptions(user.id),
-      });
-      await sendMail({ to: user.email, ...dailyRecapEmail({ name: user.name || user.username, recap, appUrl: APP_URL }) });
-      await markRemindersSent(user.id, [key]);
-      emailed++;
-    } catch (err) {
-      errors.push(`${user.id.slice(0, 8)}: ${(err as Error).message.slice(0, 200)}`);
-    }
+    const result = await sendDailyRecap(user, date);
+    emailed += result.sent;
+    errors.push(...result.errors);
   }
 
   if (errors.length) console.error(JSON.stringify({ evt: "cron_recap", errors }));

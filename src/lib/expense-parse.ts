@@ -66,6 +66,21 @@ export function pakistanToday(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi" }).format(now);
 }
 
+// Minutes since midnight in Pakistan - for deciding whether the time an
+// email belongs to has come.
+export function pakistanMinutes(now = new Date()): number {
+  const [hour, minute] = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Karachi",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .format(now)
+    .split(":")
+    .map(Number);
+  return hour * 60 + minute;
+}
+
 export function cleanString(v: unknown, max: number): string | null {
   if (typeof v !== "string") return null;
   const s = v.replace(/\s+/g, " ").trim();

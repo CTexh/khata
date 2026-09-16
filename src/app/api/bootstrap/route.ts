@@ -1,17 +1,47 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
 import {
   categoryTotals,
   ensureTablesExist,
   findUserById,
+  getReminderRecipient,
   listExpenses,
   listPeople,
   listSubscriptions,
   listUserCategories,
   userHasAi,
 } from "@/lib/db";
+import { mailConfigured } from "@/lib/mailer";
+import { sendAnythingDue } from "@/lib/reminder-run";
 
 export const dynamic = "force-dynamic";
+
+// A cron job on the free plan is a best effort, not a promise: a run that
+// lands while a new deployment is taking over is skipped, and that day's
+// reminder would simply never arrive. So opening the app also sends anything
+// whose time has passed today and that no one has sent yet. The claim in
+// reminder_log makes that safe - whoever writes the row sends, once - and the
+// work happens after the response, so nothing here slows the app down.
+// Checked at most twice an hour per account on a given server.
+const CATCH_UP_EVERY_MS = 30 * 60 * 1000;
+const lastCatchUp = new Map<string, number>();
+
+function catchUpReminders(userId: string) {
+  if (!mailConfigured()) return;
+  const last = lastCatchUp.get(userId) ?? 0;
+  if (Date.now() - last < CATCH_UP_EVERY_MS) return;
+  lastCatchUp.set(userId, Date.now());
+  after(async () => {
+    try {
+      const user = await getReminderRecipient(userId);
+      if (!user) return;
+      const { sent, errors } = await sendAnythingDue(user);
+      if (sent || errors.length) console.log(JSON.stringify({ evt: "reminder_catch_up", sent, errors }));
+    } catch (err) {
+      console.error(JSON.stringify({ evt: "reminder_catch_up", error: (err as Error).message.slice(0, 200) }));
+    }
+  });
+}
 
 // Everything the app shows when it opens, in one request: the pages used to
 // send eight, each paying for its own function start, session check and
@@ -50,6 +80,8 @@ export async function GET(req: Request) {
     total: list.reduce((sum, c) => sum + c.total, 0),
     categories: list,
   });
+
+  catchUpReminders(userId);
 
   return NextResponse.json(
     {

@@ -339,6 +339,32 @@ export async function listReminderRecipients(): Promise<ReminderRecipient[]> {
   }));
 }
 
+// One account's reminder settings, for the catch-up when the app is opened.
+// null when there is nothing to send to: no address, or emails switched off.
+export async function getReminderRecipient(userId: string): Promise<ReminderRecipient | null> {
+  await ensureUserEmailColumns();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT id, username, name, email, remind_subs, remind_udhar, remind_recap, remind_summary
+          FROM users WHERE id = ? AND email IS NOT NULL AND email <> '' AND email_reminders = 1`,
+    args: [userId],
+  });
+  const r = rs.rows[0];
+  if (!r) return null;
+  return {
+    id: r.id as string,
+    username: r.username as string,
+    name: (r.name as string) ?? null,
+    email: r.email as string,
+    prefs: {
+      subscriptions: on(r.remind_subs),
+      udhar: on(r.remind_udhar),
+      dailyRecap: on(r.remind_recap),
+      monthlySummary: on(r.remind_summary),
+    },
+  };
+}
+
 // The reminder keys from `items` that haven't been sent to this user yet.
 export async function unsentReminders(userId: string, items: string[]): Promise<Set<string>> {
   if (!items.length) return new Set();
@@ -350,6 +376,28 @@ export async function unsentReminders(userId: string, items: string[]): Promise<
   });
   const sent = new Set(rs.rows.map((r) => r.item as string));
   return new Set(items.filter((i) => !sent.has(i)));
+}
+
+// Claims one reminder for sending. The insert is the claim: only the caller
+// whose insert created the row sends the email, so a cron run and the app's
+// own catch-up can never both send the same one. Released again if the send
+// fails, so the next attempt can pick it up.
+export async function claimReminder(userId: string, item: string): Promise<boolean> {
+  await ensureUserEmailColumns();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "INSERT OR IGNORE INTO reminder_log (user_id, item, sent_at) VALUES (?, ?, ?)",
+    args: [userId, item, new Date().toISOString()],
+  });
+  return Number(rs.rowsAffected ?? 0) > 0;
+}
+
+export async function releaseReminder(userId: string, item: string): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: "DELETE FROM reminder_log WHERE user_id = ? AND item = ?",
+    args: [userId, item],
+  });
 }
 
 export async function markRemindersSent(userId: string, items: string[]): Promise<void> {
