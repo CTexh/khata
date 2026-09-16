@@ -6,6 +6,7 @@ import { fmtRs, fmtWhen, fmtFull, fmtDateLabel, dueDateInfo, todayLocalYMD } fro
 import { Avatar } from "@/components/Avatar";
 import { Sheet, SheetRow } from "@/components/Sheet";
 import { invalidate, useCached } from "@/lib/swr";
+import { CoinsIcon } from "@/components/CategoryIcon";
 
 /* ---------- small components ---------- */
 
@@ -228,7 +229,7 @@ function TxForm({
           className={`btn ${mode === "lend" ? "btn-primary" : "btn-good"}`}
           disabled={busy}
         >
-          {busy ? "Saving…" : mode === "lend" ? "💸 Add to loan" : "💰 Record payment"}
+          {busy ? "Saving…" : mode === "lend" ? "Add to loan" : "Record payment"}
         </button>
       </div>
     </form>
@@ -580,7 +581,9 @@ export default function UdharKhata() {
 
       {people.length === 0 ? (
         <div className="card p-8 text-center rise">
-          <p className="text-3xl mb-2" aria-hidden>🪙</p>
+          <p className="flex justify-center mb-2" style={{ color: "var(--muted)" }} aria-hidden>
+            <CoinsIcon size={32} />
+          </p>
           <p className="font-bold">No one here yet</p>
           <p className="text-[14px] mt-1" style={{ color: "var(--muted)" }}>
             Add the first person who owes you, or tell the assistant &ldquo;lent Ali 2000&rdquo;.

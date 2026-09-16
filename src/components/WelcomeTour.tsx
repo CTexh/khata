@@ -1,39 +1,41 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { HandshakeIcon, ReceiptIcon, SparkleIcon } from "@/components/icons";
+import { MailIcon, RecurringIcon, WaveIcon } from "@/components/CategoryIcon";
 
-type Step = { emoji: string; title: string; text: string };
+type Step = { Icon: (p: { size?: number }) => React.ReactElement; title: string; text: string };
 
 const STEPS: Step[] = [
   {
-    emoji: "👋",
+    Icon: WaveIcon,
     title: "Welcome to Khata",
     text: "Your spending, loans and subscriptions in one place. On Home, switch between Today, This Week and This Month to see what you spent.",
   },
   {
-    emoji: "🧾",
+    Icon: ReceiptIcon,
     title: "Mera Khata",
     text: "Tap + to log an expense - categories fill in for you. See where your money went, tap a category to filter, and tap any expense to edit it.",
   },
   {
-    emoji: "🤝",
+    Icon: HandshakeIcon,
     title: "Udhar Khata",
     text: "Add people who owe you. Tap a name to record more lent or money paid back, and set a follow-up date so you remember to ask.",
   },
   {
-    emoji: "🔁",
+    Icon: RecurringIcon,
     title: "Subscriptions",
     text: "Every monthly payment in one list. Tap one to mark it paid or pause it - overdue ones are flagged so nothing slips.",
   },
   {
-    emoji: "📧",
+    Icon: MailIcon,
     title: "Email reminders",
     text: "Add your email in Settings, then pick which ones you want: subscriptions and follow-ups due at 6pm, a recap of your day at 4:30am, and a monthly summary. Light or dark mode lives there too.",
   },
 ];
 
 const ASSISTANT_STEP: Step = {
-  emoji: "✨",
+  Icon: SparkleIcon,
   title: "Ask the assistant",
   text: "Tap the middle button and just say it: \"fuel 3000 shell\", \"who owes me?\" or \"what did I spend this week?\". Type, talk or snap a bill.",
 };
@@ -67,8 +69,8 @@ export function WelcomeTour({ withAssistant, onClose }: { withAssistant: boolean
 
         <div key={index} className="rise flex flex-col items-center text-center px-6 pb-2">
           <div className="chat-glow-card !py-10 !rounded-[36px] !max-w-none">
-            <p className="text-[56px] leading-none" aria-hidden>
-              {step.emoji}
+            <p className="flex justify-center" style={{ color: "var(--accent)" }} aria-hidden>
+              <step.Icon size={56} />
             </p>
           </div>
           <h2 id="tour-title" className="text-[24px] font-extrabold mt-6">

@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fmtRs, fmtDateLabel } from "@/lib/format";
-import { categoryEmoji, categoryVars } from "@/lib/category-style";
+import { categoryVars } from "@/lib/category-style";
+import { CategoryIcon, LeafIcon } from "@/components/CategoryIcon";
 import { useCached } from "@/lib/swr";
 import { ArrowUpIcon, HandshakeIcon, RepeatIcon } from "@/components/icons";
 
@@ -276,8 +277,8 @@ export default function Home() {
           </div>
         ) : view.items.length === 0 ? (
           <div className="card p-6 text-center">
-            <p className="text-[28px]" aria-hidden>
-              🌿
+            <p className="flex justify-center" style={{ color: "var(--muted)" }} aria-hidden>
+              <LeafIcon size={30} />
             </p>
             <p className="font-bold mt-1">No expenses {period === "today" ? "today" : period === "week" ? "this week" : "this month"}</p>
             <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>
@@ -293,8 +294,8 @@ export default function Home() {
             const note = e.note.replace(/^(WhatsApp|Assistant):\s*/, "");
             return (
               <Link key={e.id} href="/expenses" className="card p-4 flex items-center gap-3 rise">
-                <span className="icon-tile" style={{ background: colors.bg }} aria-hidden>
-                  {categoryEmoji(e.category)}
+                <span className="icon-tile" style={{ background: colors.bg, color: colors.fg }} aria-hidden>
+                  <CategoryIcon category={e.category} size={22} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[16px] font-extrabold truncate">{e.category || "Uncategorised"}</span>

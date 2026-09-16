@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Expense } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
-import { categoryEmoji, categoryVars } from "@/lib/category-style";
+import { categoryVars } from "@/lib/category-style";
+import { CategoryIcon, DownloadIcon, FolderIcon, LeafIcon, QuestionIcon } from "@/components/CategoryIcon";
+import { SparkleIcon } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/Sheet";
 import { fetchKey, invalidate, isFresh, peek, useCached } from "@/lib/swr";
 
@@ -437,8 +439,8 @@ function DetailModal({
       {mode === "view" ? (
         <>
           <div className="card p-5 flex flex-col items-center text-center">
-            <span className="icon-tile !w-16 !h-16 !text-[30px] !rounded-[22px]" style={{ background: color.bg }} aria-hidden>
-              {categoryEmoji(expense.category)}
+            <span className="icon-tile !w-16 !h-16 !rounded-[22px]" style={{ background: color.bg, color: color.fg }} aria-hidden>
+              <CategoryIcon category={expense.category} size={30} />
             </span>
             <p className="text-[16px] font-bold mt-3 max-w-full truncate">{expense.vendor || note_ || "Expense"}</p>
             <p className="text-[36px] font-extrabold tabular leading-tight">{fmtRs(expense.amount)}</p>
@@ -901,8 +903,8 @@ function ExpenseRow({
         onClick={onView}
         aria-label={`View ${expense.vendor || "expense"}, ${fmtRs(expense.amount)}`}
       >
-        <span className="icon-tile" style={{ background: categoryColor.bg }} aria-hidden>
-          {categoryEmoji(expense.category)}
+        <span className="icon-tile" style={{ background: categoryColor.bg, color: categoryColor.fg }} aria-hidden>
+          <CategoryIcon category={expense.category} size={22} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-[15px] truncate font-bold" style={{ color: "var(--ink)" }}>
@@ -1195,15 +1197,15 @@ function ExpensesView({
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
               <div className="chat-menu rise !left-auto right-0 !bottom-auto top-[64px] !w-[250px]" role="menu">
                 <button type="button" role="menuitem" className="chat-menu-item" onClick={() => { setMenuOpen(false); setManaging(true); }}>
-                  <span className="chat-menu-icon" aria-hidden>🗂️</span>
+                  <span className="chat-menu-icon" aria-hidden><FolderIcon size={20} /></span>
                   Manage categories
                 </button>
                 <button type="button" role="menuitem" className="chat-menu-item" onClick={() => { setMenuOpen(false); onRecategorize(); }}>
-                  <span className="chat-menu-icon" aria-hidden>✨</span>
+                  <span className="chat-menu-icon" aria-hidden><SparkleIcon size={20} /></span>
                   Re-categorise
                 </button>
                 <a role="menuitem" className="chat-menu-item" href={exportHref} download onClick={() => setMenuOpen(false)}>
-                  <span className="chat-menu-icon" aria-hidden>📥</span>
+                  <span className="chat-menu-icon" aria-hidden><DownloadIcon size={20} /></span>
                   Download Excel
                 </a>
               </div>
@@ -1273,8 +1275,12 @@ function ExpensesView({
           onClick={() => pick("Uncategorised")}
           className="card p-4 w-full text-left flex items-center gap-3 rise"
         >
-          <span className="icon-tile !w-11 !h-11" style={{ background: "var(--cat-uncategorised-bg)" }} aria-hidden>
-            ❔
+          <span
+            className="icon-tile !w-11 !h-11"
+            style={{ background: "var(--cat-uncategorised-bg)", color: "var(--cat-uncategorised-fg)" }}
+            aria-hidden
+          >
+            <QuestionIcon size={20} />
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-[15px] font-bold">
@@ -1341,7 +1347,7 @@ function ExpensesView({
                   className="cat-pill shrink-0"
                   data-on={selected === p.category ? "" : undefined}
                 >
-                  <span aria-hidden>{categoryEmoji(p.category)}</span>
+                  <CategoryIcon category={p.category} size={16} />
                   {p.category}
                 </button>
               ))}
@@ -1433,7 +1439,9 @@ function ExpensesView({
         </div>
       ) : data && points.length === 0 ? (
         <div className="card p-8 text-center rise">
-          <p className="text-[32px]" aria-hidden>🌿</p>
+          <p className="flex justify-center" style={{ color: "var(--muted)" }} aria-hidden>
+            <LeafIcon size={32} />
+          </p>
           <p className="font-bold mt-1">No expenses in {periodLabel}</p>
           <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>
             Log one, or tell the assistant what you spent.

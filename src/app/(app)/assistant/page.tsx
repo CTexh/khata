@@ -678,7 +678,9 @@ export default function AssistantPage() {
               </span>
               <div className="ml-auto flex items-center gap-2 shrink-0">
                 <button type="button" className="chat-round !w-11 !h-11" aria-label="Cancel recording" onClick={() => stopRecording(true)}>
-                  ✕
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
                 </button>
                 <button type="button" className="chat-send" aria-label="Send voice note" onClick={() => stopRecording(false)}>
                   <ArrowUpIcon size={22} />

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { fmtRs, hueFor, initials } from "@/lib/format";
 import { Sheet, SheetRow } from "@/components/Sheet";
 import { invalidate, useCached } from "@/lib/swr";
+import { CheckIcon, ClockIcon, RecurringIcon } from "@/components/CategoryIcon";
 
 function Spinner() {
   return (
@@ -211,8 +212,15 @@ function SubscriptionDetail({
     <Sheet title={sub.name} onClose={onClose}>
       <div className="card p-5 flex flex-col items-center text-center">
         <Avatar id={sub.id} name={sub.name} logoUrl={sub.logo_url} size="lg" />
-        <span className="chip mt-3" style={chip.style}>
-          {justPaid ? "✓ Paid" : chip.label}
+        <span className="chip mt-3 inline-flex items-center gap-1" style={chip.style}>
+          {justPaid ? (
+            <>
+              <CheckIcon size={14} />
+              Paid
+            </>
+          ) : (
+            chip.label
+          )}
         </span>
         <p className="mt-2 flex items-baseline gap-1 tabular">
           <span className="text-[36px] font-extrabold leading-tight">{fmtRs(sub.amount)}</span>
@@ -248,7 +256,16 @@ function SubscriptionDetail({
               disabled={actionLoading || sub.paid_this_period}
               className="btn btn-good"
             >
-              {sub.paid_this_period ? "✓ Paid" : actionLoading ? "Saving…" : "Mark paid"}
+              {sub.paid_this_period ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckIcon size={16} />
+                  Paid
+                </span>
+              ) : actionLoading ? (
+                "Saving…"
+              ) : (
+                "Mark paid"
+              )}
             </button>
             <button type="button" onClick={onToggleActive} disabled={actionLoading} className="btn btn-ghost">
               Pause
@@ -286,7 +303,7 @@ function SubscriptionDetail({
                   style={{ borderColor: "var(--hairline)" }}
                 >
                   <span
-                    className="icon-tile !w-10 !h-10 !rounded-xl !text-[15px] font-bold"
+                    className="icon-tile !w-10 !h-10 !rounded-xl"
                     style={
                       h.paid_at
                         ? { background: "var(--good-soft)", color: "var(--good)" }
@@ -294,7 +311,7 @@ function SubscriptionDetail({
                     }
                     aria-hidden
                   >
-                    {h.paid_at ? "✓" : "…"}
+                    {h.paid_at ? <CheckIcon size={18} /> : <ClockIcon size={18} />}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[14px] font-semibold">{fmtPeriod(h.period)}</span>
@@ -534,8 +551,15 @@ export default function Subscriptions() {
           </span>
           <span className="flex flex-col items-end gap-1 shrink-0">
             <span className="text-[15px] font-extrabold tabular">{fmtRs(sub.amount)}</span>
-            <span className="chip" style={chip.style}>
-              {justPaidId === sub.id ? "✓ Paid" : chip.label}
+            <span className="chip inline-flex items-center gap-1" style={chip.style}>
+              {justPaidId === sub.id ? (
+                <>
+                  <CheckIcon size={13} />
+                  Paid
+                </>
+              ) : (
+                chip.label
+              )}
             </span>
           </span>
         </button>
@@ -585,7 +609,9 @@ export default function Subscriptions() {
 
       {subscriptions.length === 0 ? (
         <div className="card p-8 text-center">
-          <p className="text-3xl mb-2" aria-hidden>🔁</p>
+          <p className="flex justify-center mb-2" style={{ color: "var(--muted)" }} aria-hidden>
+            <RecurringIcon size={32} />
+          </p>
           <p className="font-bold">No subscriptions yet</p>
           <p className="text-[14px] mt-1" style={{ color: "var(--muted)" }}>
             Add Netflix, Spotify, your gym - anything you pay every month.
