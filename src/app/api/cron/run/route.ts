@@ -22,8 +22,8 @@ export const maxDuration = 60;
 // That is deliberate. A cron job is a single moment: miss it - a deployment
 // taking over, a delayed trigger, an error - and the reminder is gone for good.
 // Something that can be asked repeatedly turns a missed minute into a few
-// minutes' delay. It is called by GitHub Actions on a schedule, by Vercel's
-// own cron jobs, and as a last resort when the app is opened.
+// minutes' delay. It is called every 15 minutes by cron-job.org, twice a day
+// by Vercel's own cron jobs, and as a last resort when the app is opened.
 //
 // Guarded by CRON_SECRET; the route is excluded from the session check in
 // proxy.ts, as a scheduled caller has no session.
