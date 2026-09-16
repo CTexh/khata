@@ -113,11 +113,6 @@ function ordinal(n: number): string {
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 }
 
-function fmtShortMonth(period: string): string {
-  const [y, m] = period.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "short" });
-}
-
 function monthsBetween(fromPeriod: string, toPeriod: string): number {
   const [fy, fm] = fromPeriod.split("-").map(Number);
   const [ty, tm] = toPeriod.split("-").map(Number);
@@ -207,7 +202,6 @@ function SubscriptionDetail({
     ? nextDueDate(sub.current_period, sub.due_day)
     : sub.current_due_date;
 
-  const timelineNodes = [...sub.history].slice(0, 6).reverse();
   const paidCount = sub.history.filter((h) => h.paid_at).length;
   const totalSpent = paidCount * sub.amount;
   const earliestPeriod = sub.history[sub.history.length - 1]?.period ?? sub.current_period;
@@ -277,24 +271,6 @@ function SubscriptionDetail({
           </span>
         </SheetRow>
       </div>
-
-      {timelineNodes.length > 1 && (
-        <div className="card px-5 pt-5 pb-4">
-          <div className="sub-timeline">
-            {timelineNodes.map((h, i) => (
-              <div key={h.id} className="sub-timeline-seg">
-                <div className="sub-timeline-node">
-                  <div className={`sub-timeline-dot ${h.paid_at ? "paid" : "pending"}`} />
-                  <span className="sub-timeline-label">{fmtShortMonth(h.period)}</span>
-                </div>
-                {i < timelineNodes.length - 1 && (
-                  <div className={`sub-timeline-connector ${timelineNodes[i + 1].paid_at ? "paid" : "pending"}`} />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {sub.history.length > 0 && (
         <div className="flex flex-col gap-2">
