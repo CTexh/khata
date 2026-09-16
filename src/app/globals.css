@@ -972,10 +972,16 @@ body {
   color: #fff;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   box-shadow: 0 6px 16px rgba(74, 108, 240, 0.35);
-  transition: transform 120ms ease, opacity 160ms ease;
+  /* The last button in the app that had its own timings; it presses and
+     releases like every other one now. */
+  transition:
+    transform var(--dur-press) var(--ease-press),
+    opacity var(--dur-quick) ease;
 }
-.chat-send:active {
-  transform: scale(0.94);
+.chat-send:not(:disabled):active {
+  transform: scale(0.92);
+  transition-duration: 110ms;
+  transition-timing-function: ease-out;
 }
 .chat-send:disabled {
   opacity: 0.5;
