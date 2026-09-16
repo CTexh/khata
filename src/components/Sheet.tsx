@@ -8,9 +8,9 @@ import { haptic, reducedMotion, rubberBand, springTo } from "@/lib/motion";
 // sits in the middle on a wide screen. Udhar Khata people and subscriptions
 // both open in it, so every record looks and behaves the same.
 //
-// Two things make it feel like part of the phone rather than a web page: it
-// follows a finger dragged down it (resisting upwards, carrying a flick into
-// the dismissal), and the app behind it sits back while it is open.
+// It follows a finger dragged down it, resisting upwards and carrying a
+// flick into the dismissal, and it leaves the same way however it is closed.
+// The page behind it is dimmed and held still - it does not move.
 //
 // It rises from the bottom edge and stops, with no scale on the way. Scaling a
 // panel full of text re-rasterises every glyph on every frame, which is what
@@ -24,55 +24,22 @@ import { haptic, reducedMotion, rubberBand, springTo } from "@/lib/motion";
 // or restore the wrong position.
 let locks = 0;
 let lockedAt = 0;
-// When the app last started coming forward, and the page release waiting for
-// it to get there.
-let releasedAt = 0;
-let pendingRestore = 0;
-// Matches the #app-canvas return transition in globals.css.
-const RETURN_MS = 260;
 
 function lockPage() {
   if (locks++ > 0) return;
   const body = document.body;
-  if (pendingRestore) {
-    // A sheet reopened before the last one had finished letting go: the body
-    // is still fixed exactly where it was, so keep it. Reading scrollY now
-    // would give 0, because a fixed body does not scroll.
-    window.clearTimeout(pendingRestore);
-    pendingRestore = 0;
-  } else {
-    lockedAt = window.scrollY;
-    body.style.position = "fixed";
-    body.style.top = `-${lockedAt}px`;
-    body.style.left = "0";
-    body.style.right = "0";
-    body.style.width = "100%";
-    body.style.overflow = "hidden";
-  }
-  // The app recedes, about the centre of what the reader is actually looking
-  // at. The canvas is the full height of the page, so without this it would
-  // scale about the document's top and everything on screen would slide.
-  // Deliberately not cleared on unlock: the way back has to pivot about the
-  // same point it pivoted about on the way in.
-  document.documentElement.style.setProperty(
-    "--depth-origin",
-    `${lockedAt + window.innerHeight / 2}px`
-  );
-  document.documentElement.setAttribute("data-depth", "");
+  lockedAt = window.scrollY;
+  body.style.position = "fixed";
+  body.style.top = `-${lockedAt}px`;
+  body.style.left = "0";
+  body.style.right = "0";
+  body.style.width = "100%";
+  body.style.overflow = "hidden";
 }
 
-// Letting the app come forward again. Separate from unlocking the page,
-// because it has to start the moment a sheet is dismissed - the two are one
-// movement - while the body stays fixed until the sheet has actually gone.
-function releaseDepth() {
-  const root = document.documentElement;
-  if (!root.hasAttribute("data-depth")) return;
-  root.removeAttribute("data-depth");
-  releasedAt = performance.now();
-}
-
-function restoreBody() {
-  pendingRestore = 0;
+function unlockPage() {
+  if (--locks > 0) return;
+  locks = 0;
   const body = document.body;
   body.style.position = "";
   body.style.top = "";
@@ -81,19 +48,6 @@ function restoreBody() {
   body.style.width = "";
   body.style.overflow = "";
   window.scrollTo(0, lockedAt);
-}
-
-// Unfixing the body lays the whole page out again. Doing that while the app is
-// still scaling back is what made closing a sheet look broken, so the page is
-// only released once the app has finished coming forward - within 260ms of
-// dismissal, and never noticeably late.
-function unlockPage() {
-  if (--locks > 0) return;
-  locks = 0;
-  releaseDepth();
-  const remaining = RETURN_MS - (performance.now() - releasedAt);
-  if (remaining <= 0) restoreBody();
-  else pendingRestore = window.setTimeout(restoreBody, remaining);
 }
 
 // For a dialog that isn't a Sheet but still needs the page held still behind it.
@@ -152,9 +106,6 @@ export function Sheet({
   const dismiss = useCallback(() => {
     if (closing.current) return;
     closing.current = true;
-    // The app starts coming forward now, with the sheet, rather than when
-    // React gets round to unmounting it a few frames later.
-    releaseDepth();
     const panel = panelRef.current;
     const backdrop = backdropRef.current;
     if (!panel || reducedMotion()) {

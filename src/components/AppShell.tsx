@@ -246,7 +246,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <div id="app-canvas">
       <div
         className="w-full max-w-xl mx-auto px-4 pt-5 sm:pt-8 flex flex-col gap-5"
         style={{
@@ -353,7 +352,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main id="main-content" className="contents page-enter">
           {children}
         </main>
-      </div>
       </div>
 
       <nav className={`tabbar${user?.aiAccess ? "" : " no-fab"}`} aria-label="Primary navigation">

@@ -161,8 +161,6 @@
      A critically damped spring is only 10% along at 30ms, which on a tall
      sheet means the panel is still off-screen and the tap reads as ignored. */
   --ease-sheet: cubic-bezier(0.16, 1, 0.3, 1);
-  /* how far the app behind a sheet recedes */
-  --depth-scale: 0.95;
 }
 
 @supports (animation-timing-function: linear(0 0%, 1 100%)) {
@@ -214,42 +212,12 @@
   transform: scale(0.92);
 }
 
-/* The app itself, while something is in front of it. It sits back rather than
-   disappearing, so a sheet reads as being above the page and not instead of
-   it. */
-#app-canvas {
-  /* Scaled about the middle of what is on screen, not the top of the
-     document. The canvas is the whole page - often several thousand pixels -
-     so scaling it about its own top drags everything below that point
-     upwards: 6% of the scroll distance, which at 800px scrolled is a 48px
-     lurch as a sheet opens and a slap back as it closes. The origin is set
-     in JS when the page is locked, because only then is it known how far
-     down the reader is. */
-  transform-origin: 50% var(--depth-origin, 50%);
-  /* Coming back is quicker than going away, so that by the time the sheet has
-     gone and the page is unfixed - which costs a relayout - the movement is
-     all but over and a dropped frame there cannot be seen. */
-  transition: transform 260ms var(--ease-sheet);
-}
-html[data-depth] #app-canvas {
-  transition-duration: 380ms;
-  /* No translate: pivoting about the middle of the screen is what puts the
-     page behind, and any nudge on top of that is just more movement. */
-  transform: scale(var(--depth-scale));
-  /* Promoted only while a sheet is open. Left on permanently it would keep a
-     layer the size of the whole app in memory for no reason. */
-  will-change: transform;
-}
-html[data-depth] .tabbar {
-  transform: translateX(-50%) translate3d(0, 14px, 0) scale(0.97);
-  opacity: 0.55;
-}
-.tabbar {
-  transition:
-    transform 380ms var(--ease-sheet),
-    opacity 380ms var(--ease-sheet);
-}
-
+/* The page behind a sheet does not move. It used to scale back while a sheet
+   was open, which read well in Chromium but on iPhone Safari jumped to its
+   new size and back instead of animating - a transform on an element the
+   size of the whole page, changing in the same frame as the body is fixed or
+   unfixed. The dimmed backdrop already puts the sheet in front; the page
+   holding perfectly still is better than the page twitching. */
 
 /* A page arriving: its cards come in together, a few milliseconds apart, and
    stop. Capped at six so the last card is never left waiting. */
