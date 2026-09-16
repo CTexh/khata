@@ -1220,6 +1220,92 @@ body {
   box-shadow: 0 0 0 2px var(--surface);
   pointer-events: none;
 }
+/* The notification list: a popover that grows out of the bell. Its transform
+   origin is the bell's centre (set from JS as --bell-origin), so it opens from
+   the icon and folds back into it. Opacity and transform only - it is a small
+   panel on its own, not the page, so it animates everywhere. */
+.bell-pop {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  z-index: 30;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(70vh, 540px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  border-radius: 24px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
+  transform-origin: var(--bell-origin, calc(100% - 24px)) -12px;
+  animation: bell-pop-in 260ms var(--ease-sheet) backwards;
+  outline: none;
+}
+.bell-pop[data-closing] {
+  animation: bell-pop-out 170ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+/* the little point that says which icon this came from */
+.bell-pop::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  right: var(--bell-caret, 17px);
+  width: 14px;
+  height: 14px;
+  background: var(--surface);
+  border-left: 1px solid var(--ring);
+  border-top: 1px solid var(--ring);
+  border-top-left-radius: 3px;
+  transform: rotate(45deg);
+}
+@keyframes bell-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes bell-pop-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+.bell-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 8px 18px;
+}
+.bell-pop-link {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.bell-pop-link:hover {
+  background: var(--surface-2);
+}
+.bell-pop-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 8px 8px;
+}
+.bell-pop-list > li + li {
+  border-top: 1px solid var(--hairline);
+}
+
 .bell-dot {
   flex: none;
   width: 8px;
