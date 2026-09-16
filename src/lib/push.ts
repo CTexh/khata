@@ -7,7 +7,13 @@
 // third party is involved and nothing is paid for. Without the keys in the
 // environment, push is simply off and nothing is delivered.
 import webpush from "web-push";
-import { deletePushSubscription, listPushSubscriptions, type PushSubscriptionRow } from "@/lib/db";
+import {
+  deletePushSubscription,
+  discardNotification,
+  listPushSubscriptions,
+  recordNotification,
+  type PushSubscriptionRow,
+} from "@/lib/db";
 
 // How a notification should read, going by what a phone actually shows: the
 // app's name and icon are already in the header, so the title is the news
@@ -39,11 +45,18 @@ function configure() {
 // Sends to every device this account has registered. A device whose
 // subscription the push service reports as gone (404/410 - the app was
 // deleted, or the browser dropped it) is removed, so it isn't tried again.
+//
+// Each notification is also kept for the bell in the app. It is written
+// before sending, so it is already there when the phone receives the push and
+// the open app refreshes its list, and removed again if no device took it -
+// the bell only ever shows what actually arrived, and a reminder that is
+// retried later is not listed twice.
 export async function sendPush(userId: string, message: PushMessage): Promise<number> {
   if (!pushConfigured()) return 0;
   const devices = await listPushSubscriptions(userId);
   if (!devices.length) return 0;
   configure();
+  const recorded = await recordNotification(userId, message).catch(() => null);
 
   const payload = JSON.stringify(message);
   let delivered = 0;
@@ -68,5 +81,6 @@ export async function sendPush(userId: string, message: PushMessage): Promise<nu
       }
     })
   );
+  if (!delivered && recorded) await discardNotification(recorded).catch(() => {});
   return delivered;
 }

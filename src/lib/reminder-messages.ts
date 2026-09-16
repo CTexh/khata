@@ -52,3 +52,15 @@ export function recapMessage(day: string, spent: number, expenses: number, key: 
     tag: key,
   };
 }
+
+// Which part of the app a notification is about, read from the tag it was
+// sent with - the bell uses it to pick an icon.
+export type NotificationKind = "subscription" | "udhar" | "expenses" | "general";
+
+export function notificationKind(tag: string | null | undefined): NotificationKind {
+  if (!tag) return "general";
+  if (tag.startsWith("sub:")) return "subscription";
+  if (tag.startsWith("udhar:")) return "udhar";
+  if (tag.startsWith("recap:") || tag.startsWith("summary:")) return "expenses";
+  return "general";
+}

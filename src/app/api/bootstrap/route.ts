@@ -6,6 +6,7 @@ import {
   findUserById,
   getNotificationRecipient,
   listExpenses,
+  listNotifications,
   listPeople,
   listSubscriptions,
   listUserCategories,
@@ -62,7 +63,7 @@ export async function GET(req: Request) {
   const userId = session.userId;
 
   await ensureTablesExist();
-  const [user, aiAccess, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories] = await Promise.all([
+  const [user, aiAccess, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories, notifications] = await Promise.all([
     findUserById(userId),
     userHasAi(userId),
     listPeople(userId),
@@ -72,6 +73,7 @@ export async function GET(req: Request) {
     categoryTotals(userId, { year: y, month: m }),
     categoryTotals(userId, { year: py, month: pm }),
     listUserCategories(userId),
+    listNotifications(userId),
   ]);
 
   const totals = (year: number, month: number, list: typeof totalsThis) => ({
@@ -103,6 +105,7 @@ export async function GET(req: Request) {
         [`/api/expenses/categories?year=${y}&month=${m}`]: totals(y, m, totalsThis),
         [`/api/expenses/categories?year=${py}&month=${pm}`]: totals(py, pm, totalsPrev),
         "/api/categories": { categories },
+        "/api/notifications": notifications,
       },
     },
     { headers: { "Cache-Control": "private, no-store" } }

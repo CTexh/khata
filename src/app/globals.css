@@ -1200,6 +1200,35 @@ body {
   white-space: nowrap;
 }
 
+/* the bell beside the profile picture */
+.bell-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  /* a ring in the button's own colour, so the badge sits on the edge cleanly */
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+.bell-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 /* accounts without the assistant: four even tabs, no centre button */
 .tabbar.no-fab {
   grid-template-columns: repeat(4, 1fr);

@@ -22,7 +22,16 @@ self.addEventListener("push", (event) => {
     tag: payload.tag || "khata",
     data: { url: payload.url || "/" },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(title, options),
+      // An app that is open refreshes its bell, rather than waiting to be
+      // reopened before the new one is listed.
+      self.clients
+        .matchAll({ type: "window", includeUncontrolled: true })
+        .then((windows) => windows.forEach((w) => w.postMessage({ type: "khata:notification" }))),
+    ])
+  );
 });
 
 // Tapping a notification brings the app forward on the page it is about,

@@ -22,6 +22,26 @@ export function fmtWhen(iso: string): string {
   });
 }
 
+// How long ago, the way a notification list reads it: "Just now", "5 min
+// ago", "3 hr ago", "Yesterday", a weekday within the week, then the date.
+// `now` is a parameter so it can be tested against a fixed moment.
+export function fmtAgo(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  const secs = (now.getTime() - d.getTime()) / 1000;
+  if (secs < 60) return "Just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOf(now) - startOf(d)) / 86_400_000);
+  if (days === 0) return `${Math.floor(secs / 3600)} hr ago`;
+  if (days === 1) return "Yesterday";
+  if (days < 7) return d.toLocaleDateString("en-PK", { weekday: "long" });
+  return d.toLocaleDateString("en-PK", {
+    day: "numeric",
+    month: "short",
+    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  });
+}
+
 export function fmtFull(iso: string): string {
   return new Date(iso).toLocaleString("en-PK", {
     day: "numeric",

@@ -978,7 +978,7 @@ export async function understandMessage(opts: {
 // step with the app: anything not described here, it says isn't available.
 export const APP_GUIDE = `Khata is a personal finance app for Pakistan. Amounts are in rupees (Rs) and dates follow Pakistan time.
 
-Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The profile picture (top right) opens: Settings, Admin (admins only), Log out. Settings holds your profile name, appearance (Light, Dark or System) and "Manage notifications".
+Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The bell (top right, beside the profile picture) lists every notification that has been sent, newest first, with a badge for unseen ones; tapping one opens what it is about. The profile picture opens: Settings, Admin (admins only), Log out. Settings holds your profile name, appearance (Light, Dark or System) and "Manage notifications".
 
 Home: switch Today / This Week / This Month to see the total spent, the change against the previous period, a compact "Where it went" breakdown of the biggest categories, and that period's expenses. Cards show money owed to you and subscriptions still to pay. The assistant is reached from the button in the middle of the tab bar, where you can type, record a voice note or photograph a bill.
 

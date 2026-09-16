@@ -12,10 +12,12 @@ import {
 } from "../src/lib/reminders.ts";
 import {
   monthlySummaryMessage,
+  notificationKind,
   recapMessage,
   subscriptionMessage,
   udharMessage,
 } from "../src/lib/reminder-messages.ts";
+import { fmtAgo } from "../src/lib/format.ts";
 
 let pass = 0;
 let fail = 0;
@@ -138,6 +140,30 @@ check(
   ),
   false
 );
+
+
+// The bell: which part of the app each notification belongs to, from its tag.
+check("kind: subscription", notificationKind("sub:s1:2026-09-17:before"), "subscription");
+check("kind: udhar", notificationKind("udhar:p1:2026-09-17"), "udhar");
+check("kind: recap", notificationKind("recap:2026-09-16"), "expenses");
+check("kind: monthly summary", notificationKind("summary:2026-08"), "expenses");
+check("kind: the switch-on confirmation", notificationKind("khata-test"), "general");
+check("kind: no tag", notificationKind(null), "general");
+
+// How long ago, against a fixed moment. Local times throughout, so the result
+// does not depend on the machine's time zone.
+{
+  const now = new Date(2026, 8, 16, 15, 0, 0); // Wed 16 Sept 2026, 3pm
+  const at = (y: number, mo: number, d: number, h = 0, mi = 0, s = 0) => new Date(y, mo, d, h, mi, s).toISOString();
+  check("ago: seconds", fmtAgo(at(2026, 8, 16, 14, 59, 30), now), "Just now");
+  check("ago: minutes", fmtAgo(at(2026, 8, 16, 14, 55), now), "5 min ago");
+  check("ago: hours, same day", fmtAgo(at(2026, 8, 16, 12, 0), now), "3 hr ago");
+  check("ago: last night is yesterday, not hours", fmtAgo(at(2026, 8, 15, 23, 0), now), "Yesterday");
+  check("ago: yesterday", fmtAgo(at(2026, 8, 15, 9, 0), now), "Yesterday");
+  check("ago: this week", fmtAgo(at(2026, 8, 13, 9, 0), now), "Sunday");
+  check("ago: older", fmtAgo(at(2026, 8, 2, 9, 0), now), "2 Sept");
+  check("ago: last year", fmtAgo(at(2025, 11, 20, 9, 0), now), "20 Dec 2025");
+}
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

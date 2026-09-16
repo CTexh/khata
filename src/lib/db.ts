@@ -194,7 +194,7 @@ export async function findUserById(id: string): Promise<User | null> {
 // Reminders: which kinds each account wants, which devices to notify, and a
 // log of what has been sent so a retried run never sends the same one twice.
 let reminderTablesEnsured = false;
-const REMINDER_SCHEMA = "4";
+const REMINDER_SCHEMA = "5";
 export async function ensureReminderTables(): Promise<void> {
   if (reminderTablesEnsured) return;
   if (await schemaCurrent("reminders", REMINDER_SCHEMA)) {
@@ -236,6 +236,23 @@ export async function ensureReminderTables(): Promise<void> {
   )`);
   try {
     await c.execute(`CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions (user_id)`);
+  } catch {
+    // Index already exists.
+  }
+  // Every notification that actually reached a device, so the bell in the app
+  // can show what arrived - including anything swiped away on the lock screen.
+  await c.execute(`CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    url TEXT,
+    tag TEXT,
+    created_at TEXT NOT NULL,
+    read_at TEXT
+  )`);
+  try {
+    await c.execute(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, created_at)`);
   } catch {
     // Index already exists.
   }
@@ -408,6 +425,96 @@ export async function deletePushSubscription(endpoint: string, userId?: string):
   });
 }
 
+/* ---------- the notification history behind the bell ---------- */
+
+export type NotificationItem = {
+  id: string;
+  title: string;
+  body: string;
+  url: string | null;
+  tag: string | null;
+  created_at: string;
+  read: boolean;
+};
+
+// Kept for three months. Older ones are dropped as new ones arrive, so the
+// table never grows past what anyone would scroll back through.
+const NOTIFICATION_KEEP_DAYS = 90;
+
+export async function recordNotification(
+  userId: string,
+  message: { title: string; body: string; url?: string; tag?: string }
+): Promise<string> {
+  await ensureReminderTables();
+  const c = await db();
+  const id = randomUUID();
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - NOTIFICATION_KEEP_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  await c.batch(
+    [
+      {
+        sql: `INSERT INTO notifications (id, user_id, title, body, url, tag, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, userId, message.title, message.body, message.url ?? null, message.tag ?? null, now.toISOString()],
+      },
+      { sql: "DELETE FROM notifications WHERE user_id = ? AND created_at < ?", args: [userId, cutoff] },
+    ],
+    "write"
+  );
+  return id;
+}
+
+// For a notification that was recorded but reached no device after all.
+export async function discardNotification(id: string): Promise<void> {
+  await ensureReminderTables();
+  const c = await db();
+  await c.execute({ sql: "DELETE FROM notifications WHERE id = ?", args: [id] });
+}
+
+export async function listNotifications(
+  userId: string,
+  limit = 50
+): Promise<{ items: NotificationItem[]; unread: number }> {
+  await ensureReminderTables();
+  const c = await db();
+  const [rows, count] = await Promise.all([
+    c.execute({
+      sql: `SELECT id, title, body, url, tag, created_at, read_at FROM notifications
+            WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
+      args: [userId, limit],
+    }),
+    c.execute({
+      sql: "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL",
+      args: [userId],
+    }),
+  ]);
+  return {
+    items: rows.rows.map((r) => ({
+      id: r.id as string,
+      title: r.title as string,
+      body: r.body as string,
+      url: (r.url as string | null) ?? null,
+      tag: (r.tag as string | null) ?? null,
+      created_at: r.created_at as string,
+      read: r.read_at != null,
+    })),
+    unread: Number(count.rows[0]?.n ?? 0),
+  };
+}
+
+// `before` is the newest notification the reader was actually shown; anything
+// that arrived after it stays unread until it has been seen too.
+export async function markNotificationsRead(userId: string, before?: string | null): Promise<void> {
+  await ensureReminderTables();
+  const c = await db();
+  await c.execute({
+    sql: before
+      ? "UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL AND created_at <= ?"
+      : "UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
+    args: before ? [new Date().toISOString(), userId, before] : [new Date().toISOString(), userId],
+  });
+}
+
 // The reminder keys from `items` that haven't been sent to this user yet.
 export async function unsentReminders(userId: string, items: string[]): Promise<Set<string>> {
   if (!items.length) return new Set();
@@ -560,6 +667,7 @@ export async function deleteUser(id: string): Promise<void> {
       { sql: "DELETE FROM whatsapp_inbound WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM reminder_log WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM push_subscriptions WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM notifications WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM assistant_feedback WHERE user_id = ?", args: [id] },
       ...(user ? [{ sql: "DELETE FROM login_failures WHERE username = ?", args: [user.username.toLowerCase()] }] : []),
       { sql: "DELETE FROM users WHERE id = ?", args: [id] },

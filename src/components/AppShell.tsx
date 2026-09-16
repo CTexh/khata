@@ -9,6 +9,7 @@ import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
 import { NotificationsNews } from "@/components/NotificationsNews";
+import { NotificationBell } from "@/components/NotificationBell";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
 
@@ -171,6 +172,7 @@ function primeAppData() {
     `/api/expenses/categories?${month(now)}`,
     `/api/expenses/categories?${month(prev)}`,
     "/api/categories",
+    "/api/notifications",
   ]);
 }
 
@@ -282,6 +284,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {user && <NotificationBell onManage={() => setProfileOpen("notifications")} />}
             {user && (
               <div className="relative">
                 <button
