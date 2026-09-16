@@ -1,0 +1,20 @@
+name: Prune old Vercel deployments
+on:
+  schedule:
+    - cron: '0 3 * * 0'      # every Sunday 03:00 UTC
+  workflow_dispatch: {}       # manual "Run workflow" button too
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove non-current deployments in every project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          for p in century-score eymena-transformation-challenge khata invocraft \
+                   rizviz-international-impex calorie-tracker interviews chattha-technologies-prod; do
+            echo "=== $p ==="
+            npx --yes vercel@latest remove "$p" --safe --yes \
+              --scope walli-ullah-s-projects --token "$VERCEL_TOKEN" || true
+          done
