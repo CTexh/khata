@@ -95,7 +95,7 @@ function Switch({
   );
 }
 
-export function NotificationSettings({ isAdmin, onBack }: { isAdmin: boolean; onBack: () => void }) {
+export function NotificationSettings({ onBack }: { onBack: () => void }) {
   const [device, setDevice] = useState<DeviceState>("loading");
   const [publicKey, setPublicKey] = useState("");
   const [prefs, setPrefs] = useState<Prefs>(ALL_ON);
@@ -108,10 +108,6 @@ export function NotificationSettings({ isAdmin, onBack }: { isAdmin: boolean; on
       .catch(() => null);
     if (profile?.prefs) setPrefs({ ...ALL_ON, ...profile.prefs });
 
-    if (!isAdmin) {
-      setDevice("unavailable");
-      return;
-    }
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
       // An iPhone in a Safari tab has no PushManager at all; on the Home
       // Screen it does. Say which it is.
@@ -133,7 +129,7 @@ export function NotificationSettings({ isAdmin, onBack }: { isAdmin: boolean; on
     const registration = await navigator.serviceWorker.getRegistration();
     const existing = await registration?.pushManager.getSubscription();
     setDevice(existing && data.devices > 0 ? "on" : "off");
-  }, [isAdmin]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -252,7 +248,7 @@ export function NotificationSettings({ isAdmin, onBack }: { isAdmin: boolean; on
     loading: "Checking this device…",
     unsupported: "This browser can't show notifications.",
     "needs-install": "On iPhone, add Khata to your Home Screen first (Share → Add to Home Screen), then open it from there.",
-    unavailable: "Notifications aren't available on this account yet.",
+    unavailable: "Notifications aren't switched on for this app yet.",
     blocked: "Notifications are blocked for this site. Allow them in your browser's settings for Khata, then come back.",
     off: "Reminders arrive on this device's lock screen, even when the app is closed.",
     on: "This device is registered. Reminders arrive even when the app is closed.",

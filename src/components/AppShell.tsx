@@ -22,12 +22,10 @@ type CurrentUser = {
 
 function SettingsModal({
   initialName,
-  isAdmin,
   onClose,
   onSaved,
 }: {
   initialName: string;
-  isAdmin: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -67,7 +65,7 @@ function SettingsModal({
 
   // Notifications get a screen of their own: what they are is one decision,
   // which ones you want is another.
-  if (notifications) return <NotificationSettings isAdmin={isAdmin} onBack={() => setNotifications(false)} />;
+  if (notifications) return <NotificationSettings onBack={() => setNotifications(false)} />;
 
   return (
     <Sheet title="Settings" onClose={onClose}>
@@ -370,12 +368,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {tourOpen && user && <WelcomeTour withAssistant={Boolean(user.aiAccess)} onClose={closeTour} />}
 
       {profileOpen && (
-        <SettingsModal
-          initialName={user?.name ?? ""}
-          isAdmin={Boolean(user?.isAdmin)}
-          onClose={closeProfile}
-          onSaved={() => refreshMe()}
-        />
+        <SettingsModal initialName={user?.name ?? ""} onClose={closeProfile} onSaved={() => refreshMe()} />
       )}
     </>
   );

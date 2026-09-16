@@ -12,14 +12,13 @@ const BETWEEN_MS = 4_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Sends samples to the devices this account has registered, so the phone can
-// be checked without waiting for 6pm. `all` sends one of every reminder, each
+// Sends samples to the devices this account has registered - its own devices
+// only - so a phone can be checked without waiting for 6pm. `all` sends one of every reminder, each
 // built by the same code the scheduled job uses - a sample can't look
 // different from the real thing.
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  if (!session.isAdmin) return NextResponse.json({ error: "Not available on this account." }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
   const all = body?.all === true;

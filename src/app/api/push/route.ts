@@ -5,18 +5,18 @@ import { pushConfigured, pushPublicKey } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
-// Notifications are being tried on admin accounts first.
-async function adminSession() {
+// Notifications are how Khata reminds anyone of anything, so every account
+// can register its own devices.
+async function signedIn() {
   const session = await getSession();
   if (!session) return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
-  if (!session.isAdmin) return { error: NextResponse.json({ error: "Not available on this account." }, { status: 403 }) };
   return { session };
 }
 
 // What the page needs to offer the switch: whether the server can send at all,
 // the key a browser needs to subscribe, and how many devices are registered.
 export async function GET() {
-  const { session, error } = await adminSession();
+  const { session, error } = await signedIn();
   if (error) return error;
   const devices = pushConfigured() ? await listPushSubscriptions(session.userId) : [];
   return NextResponse.json(
@@ -32,7 +32,7 @@ export async function GET() {
 // A device subscribing. The endpoint is its address with its own push
 // service; the keys encrypt what we send so only that device can read it.
 export async function POST(req: Request) {
-  const { session, error } = await adminSession();
+  const { session, error } = await signedIn();
   if (error) return error;
   if (!pushConfigured()) {
     return NextResponse.json({ error: "Notifications aren't switched on yet." }, { status: 503 });
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const { session, error } = await adminSession();
+  const { session, error } = await signedIn();
   if (error) return error;
   const endpoint = new URL(req.url).searchParams.get("endpoint") ?? "";
   if (endpoint) await deletePushSubscription(endpoint, session.userId);
