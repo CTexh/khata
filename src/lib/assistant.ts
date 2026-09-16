@@ -118,7 +118,6 @@ import {
   compareReply,
   expensesBatchReply,
   personHistoryReply,
-  remindersReply,
   udharDueReply,
   type ExpenseView,
 } from "@/lib/assistant-replies";
@@ -311,8 +310,6 @@ async function act(
       return answerInsight(input.userId, outcome.insight, people, log);
     case "app_question":
       return answerHelp(outcome.question, log);
-    case "reminders":
-      return setReminders(input, outcome.on, log);
     case "feedback":
       await recordAssistantFeedback(input.userId, "suggestion", outcome.text);
       log.kind = "feedback";
@@ -1062,15 +1059,6 @@ async function answerHelp(question: string, log: AssistantLog): Promise<string> 
     log.outcome = "help_fallback";
     return HELP_REPLY;
   }
-}
-
-async function setReminders(input: AssistantInput, on: boolean, log: AssistantLog): Promise<string> {
-  log.kind = "reminders";
-  const settings = await getProfileSettings(input.userId);
-  await updateUserProfile(input.userId, { emailReminders: on });
-  await attachInboundUndo(input.messageId, [{ op: "set_email_reminders", on: settings?.emailReminders ?? true }]);
-  log.outcome = on ? "reminders_on" : "reminders_off";
-  return remindersReply({ on, email: settings?.email ?? null });
 }
 
 // Runs an action that has already been understood, without calling the model.

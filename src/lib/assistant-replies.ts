@@ -127,8 +127,8 @@ export const HELP_REPLY = join([
   "who has to pay me back this week?",
   "",
   "*The app*",
-  "how do I set up email reminders?",
-  "turn off my email reminders",
+  "how do I turn on notifications?",
+  "when does the daily recap arrive?",
   "I wish the app had budgets",
   "",
   "Reply *UNDO* to reverse the last change.",
@@ -505,8 +505,6 @@ export function undoStepLine(step: UndoStep): string {
       return `Keywords for ${step.name} put back`;
     case "remove_expense":
       return `Expense removed: ${fmtRs(step.amount)}${step.vendor ? ` · ${step.vendor}` : ""}`;
-    case "set_email_reminders":
-      return `Email reminders turned ${step.on ? "on" : "off"} again`;
   }
 }
 
@@ -593,19 +591,6 @@ export function udharDueReply(o: {
   const total = [...o.overdue, ...o.soon].reduce((sum, p) => sum + p.balance, 0);
   out.push("", `Total: ${fmtRs(total)}`);
   return join(out);
-}
-
-export function remindersReply(o: { on: boolean; email: string | null }): string {
-  if (!o.on) return join(["*Email reminders off*", "", "You won't get reminder emails until you turn them back on.", "", "Reply *UNDO* to change it back."]);
-  return join([
-    "*Email reminders on*",
-    "",
-    o.email
-      ? `Reminders go to ${o.email}: subscriptions and follow-ups at 6pm, your daily recap at 4:30am.`
-      : "Add your email address in Settings so the reminders have somewhere to go.",
-    "",
-    "Reply *UNDO* to change it back.",
-  ]);
 }
 
 export const FEEDBACK_REPLY = join([

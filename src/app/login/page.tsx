@@ -30,7 +30,7 @@ export default function LoginPage() {
     }
     // A different account may have used this browser: drop its cached data.
     clearCache();
-    // Back to the page a link pointed at (a reminder email, say). Only paths
+    // Back to the page a link pointed at (a reminder, say). Only paths
     // on this site: "//evil.com" or a full URL is ignored.
     const next = new URLSearchParams(window.location.search).get("next") ?? "";
     router.push(next.startsWith("/") && !next.startsWith("//") ? next : "/");

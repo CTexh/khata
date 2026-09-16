@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ThemePicker } from "@/components/Theme";
-import { PushSettings } from "@/components/PushSettings";
+import { NotificationSettings } from "@/components/NotificationSettings";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
@@ -20,61 +20,6 @@ type CurrentUser = {
   createdAt?: string | null;
 };
 
-type EmailPrefs = {
-  subscriptions: boolean;
-  udhar: boolean;
-  dailyRecap: boolean;
-  monthlySummary: boolean;
-};
-
-const ALL_PREFS: EmailPrefs = { subscriptions: true, udhar: true, dailyRecap: true, monthlySummary: true };
-
-// One line per kind of email, in the order they reach you during a day.
-const EMAIL_KINDS: { key: keyof EmailPrefs; title: string; hint: string }[] = [
-  {
-    key: "subscriptions",
-    title: "Subscriptions due",
-    hint: "6pm the day before, and again on the day if it's still unpaid.",
-  },
-  { key: "udhar", title: "Udhar follow-ups", hint: "6pm on the date you set for someone who owes you." },
-  { key: "dailyRecap", title: "Daily recap", hint: "4:30am, covering the day just gone - and what you may have forgotten." },
-  { key: "monthlySummary", title: "Monthly summary", hint: "On the 1st, what last month cost you." },
-];
-
-function Switch({
-  label,
-  hint,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  hint?: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex items-start justify-between gap-3 min-h-11 cursor-pointer">
-      <span className="min-w-0">
-        <span className="block text-[15px] font-semibold">{label}</span>
-        {hint && (
-          <span className="block text-[12.5px] mt-0.5" style={{ color: "var(--muted)" }}>
-            {hint}
-          </span>
-        )}
-      </span>
-      <input
-        type="checkbox"
-        className="h-6 w-6 mt-0.5 shrink-0 accent-[var(--accent)] cursor-pointer"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-    </label>
-  );
-}
-
 function SettingsModal({
   initialName,
   isAdmin,
@@ -87,61 +32,48 @@ function SettingsModal({
   onSaved: () => void;
 }) {
   const [name, setName] = useState(initialName);
-  const [email, setEmail] = useState("");
-  const [reminders, setReminders] = useState(true);
-  const [prefs, setPrefs] = useState<EmailPrefs>(ALL_PREFS);
-  const [available, setAvailable] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [notifications, setNotifications] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
 
   useEffect(() => {
     fetch("/api/profile")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!d) return;
-        setName(d.name ?? "");
-        setEmail(d.email ?? "");
-        setReminders(d.emailReminders !== false);
-        setPrefs({ ...ALL_PREFS, ...(d.prefs ?? {}) });
-        setAvailable(d.emailAvailable !== false);
+        if (d) setName(d.name ?? "");
       })
       .finally(() => setLoaded(true));
   }, []);
-
-  const persist = async (): Promise<boolean> => {
-    const res = await fetch("/api/profile", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, emailReminders: reminders, prefs }),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setMsg({ text: j.error ?? "Couldn't save — try again.", bad: true });
-      return false;
-    }
-    return true;
-  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setMsg(null);
-    const ok = await persist();
+    const res = await fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
     setSaving(false);
-    if (!ok) return;
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setMsg({ text: j.error ?? "Couldn't save — try again.", bad: true });
+      return;
+    }
     onSaved();
     onClose();
   };
 
-  // Without an address there is nothing to send to, so the switches are shown
-  // but inert until one is typed.
-  const emailable = loaded && Boolean(email.trim());
+  // Notifications get a screen of their own: what they are is one decision,
+  // which ones you want is another.
+  if (notifications) return <NotificationSettings isAdmin={isAdmin} onBack={() => setNotifications(false)} />;
 
   return (
     <Sheet title="Settings" onClose={onClose}>
       <form onSubmit={save} className="flex flex-col gap-3">
         <div className="card p-4 flex flex-col gap-3">
+          <p className="text-[15px] font-bold">Profile</p>
           <label className="flex flex-col gap-1.5">
             <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
               Name
@@ -160,55 +92,21 @@ function SettingsModal({
           <ThemePicker />
         </div>
 
-        {/* Notifications on the phone itself are being tried on admin
-            accounts first; everyone else has the email reminders. */}
-        {isAdmin && <PushSettings />}
-
-        <div className="card p-4 flex flex-col gap-3">
-          <div>
-            <p className="text-[15px] font-bold">Email notifications</p>
-            <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
-              Where reminders are sent. Pick the ones you want below.
-            </p>
-          </div>
-          <input
-            className="field"
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            aria-label="Email address"
-            placeholder="you@example.com"
-            value={email}
-            disabled={!loaded}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <Switch
-            label="Send me emails"
-            hint="Off means none of the below are sent."
-            checked={reminders}
-            disabled={!emailable}
-            onChange={setReminders}
-          />
-          {reminders && (
-            <div className="flex flex-col gap-3 pt-3" style={{ borderTop: "1px solid var(--ring)" }}>
-              {EMAIL_KINDS.map((kind) => (
-                <Switch
-                  key={kind.key}
-                  label={kind.title}
-                  hint={kind.hint}
-                  checked={prefs[kind.key]}
-                  disabled={!emailable}
-                  onChange={(v) => setPrefs((p) => ({ ...p, [kind.key]: v }))}
-                />
-              ))}
-            </div>
-          )}
-          {!available && (
-            <p className="text-[12px]" style={{ color: "var(--muted)" }}>
-              Email sending isn&apos;t switched on yet - your address is saved for when it is.
-            </p>
-          )}
-        </div>
+        <button
+          type="button"
+          className="card p-4 w-full text-left flex items-center gap-3"
+          onClick={() => setNotifications(true)}
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-bold">Manage notifications</span>
+            <span className="block text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
+              Which reminders you get, and on which devices.
+            </span>
+          </span>
+          <span style={{ color: "var(--muted)" }} aria-hidden>
+            ›
+          </span>
+        </button>
 
         {msg && (
           <p className="text-[13px] px-1" style={{ color: msg.bad ? "var(--bad)" : "var(--good)" }} role="status">

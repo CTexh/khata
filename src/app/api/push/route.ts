@@ -5,8 +5,7 @@ import { pushConfigured, pushPublicKey } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
-// Notifications are being tried on admin accounts first. Everyone else uses
-// the email reminders, which are unchanged.
+// Notifications are being tried on admin accounts first.
 async function adminSession() {
   const session = await getSession();
   if (!session) return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };

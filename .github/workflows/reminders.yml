@@ -1,10 +1,16 @@
-# The scheduler for Khata's reminder emails.
+# The scheduler for Khata's reminders.
 #
 # Vercel's own cron jobs are a single moment each: on the free plan a run that
-# lands while a new deployment is taking over is dropped, and that day's email
-# never arrives. This asks the app every ten minutes instead. The endpoint
-# decides what is actually due by the clock in Pakistan and claims each email
-# before sending it, so asking often costs nothing and sends nothing twice.
+# lands while a new deployment is taking over is dropped, and that day's
+# reminder never arrives. This asks the app repeatedly instead. The endpoint
+# decides what is actually due by the clock in Pakistan and claims each
+# reminder before sending it, so asking often costs nothing and sends nothing
+# twice.
+#
+# On the hour and the half hour, rather than every ten minutes: GitHub
+# deprioritises short intervals on free runners - a */10 schedule did not fire
+# once in three hours - and the two times that matter, 6pm and 4:30am in
+# Pakistan, both fall on the half hour.
 #
 # Needs one repository secret, CRON_SECRET, matching the one in Vercel:
 #   gh secret set CRON_SECRET --repo CTexh/khata
@@ -12,11 +18,11 @@
 # GitHub disables scheduled workflows in a repository with no activity for 60
 # days and emails the owner; one click re-enables it. The Vercel cron jobs and
 # the app itself still cover that case.
-name: Reminder emails
+name: Reminders
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "0,30 * * * *"
   workflow_dispatch:
 
 # A slow run should never overlap the next one.

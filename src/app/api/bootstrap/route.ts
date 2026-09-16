@@ -4,36 +4,36 @@ import {
   categoryTotals,
   ensureTablesExist,
   findUserById,
-  getReminderRecipient,
+  getNotificationRecipient,
   listExpenses,
   listPeople,
   listSubscriptions,
   listUserCategories,
   userHasAi,
 } from "@/lib/db";
-import { mailConfigured } from "@/lib/mailer";
+import { pushConfigured } from "@/lib/push";
 import { sendAnythingDue } from "@/lib/reminder-run";
 
 export const dynamic = "force-dynamic";
 
-// A cron job on the free plan is a best effort, not a promise: a run that
-// lands while a new deployment is taking over is skipped, and that day's
-// reminder would simply never arrive. So opening the app also sends anything
-// whose time has passed today and that no one has sent yet. The claim in
-// reminder_log makes that safe - whoever writes the row sends, once - and the
-// work happens after the response, so nothing here slows the app down.
+// A scheduled job is a best effort, not a promise: a run that lands while a
+// new deployment is taking over is skipped, and that day's reminder would
+// simply never arrive. So opening the app also sends anything whose time has
+// passed today and that no one has sent yet. The claim in reminder_log makes
+// that safe - whoever writes the row sends, once - and the work happens after
+// the response, so nothing here slows the app down.
 // Checked at most twice an hour per account on a given server.
 const CATCH_UP_EVERY_MS = 30 * 60 * 1000;
 const lastCatchUp = new Map<string, number>();
 
 function catchUpReminders(userId: string) {
-  if (!mailConfigured()) return;
+  if (!pushConfigured()) return;
   const last = lastCatchUp.get(userId) ?? 0;
   if (Date.now() - last < CATCH_UP_EVERY_MS) return;
   lastCatchUp.set(userId, Date.now());
   after(async () => {
     try {
-      const user = await getReminderRecipient(userId);
+      const user = await getNotificationRecipient(userId);
       if (!user) return;
       const { sent, errors } = await sendAnythingDue(user);
       if (sent || errors.length) console.log(JSON.stringify({ evt: "reminder_catch_up", sent, errors }));

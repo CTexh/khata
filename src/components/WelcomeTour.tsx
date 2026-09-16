@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { HandshakeIcon, ReceiptIcon, SparkleIcon } from "@/components/icons";
-import { MailIcon, RecurringIcon, WaveIcon } from "@/components/CategoryIcon";
+import { BellIcon, RecurringIcon, WaveIcon } from "@/components/CategoryIcon";
 
 type Step = { Icon: (p: { size?: number }) => React.ReactElement; title: string; text: string };
 
@@ -28,9 +28,9 @@ const STEPS: Step[] = [
     text: "Every monthly payment in one list. Tap one to mark it paid or pause it - overdue ones are flagged so nothing slips.",
   },
   {
-    Icon: MailIcon,
-    title: "Email reminders",
-    text: "Add your email in Settings, then pick which ones you want: subscriptions and follow-ups due at 6pm, a recap of your day at 4:30am, and a monthly summary. Light or dark mode lives there too.",
+    Icon: BellIcon,
+    title: "Reminders",
+    text: "Settings → Manage notifications turns them on for your phone and picks which you want: subscriptions and follow-ups at 6pm, a recap of your day at 4:30am, and a monthly summary. Light or dark mode lives in Settings too.",
   },
 ];
 

@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import {
   ensureMonthlySubscriptionsExpense,
   ensureTablesExist,
-  listReminderRecipients,
+  listNotificationRecipients,
   listSubscriptions,
   listUserIds,
 } from "@/lib/db";
-import { mailConfigured } from "@/lib/mailer";
 import { EVENING_HOUR, sendAnythingDue } from "@/lib/reminder-run";
+import { pushConfigured } from "@/lib/push";
 import { addDays, pakistanMinutes, pakistanToday } from "@/lib/expense-parse";
 
 export const dynamic = "force-dynamic";
@@ -16,11 +16,11 @@ export const maxDuration = 60;
 // The scheduled job, in one endpoint that is safe to call as often as anyone
 // likes. It doesn't assume it is being called at a particular minute: it asks
 // what the clock in Pakistan says, and sends whatever today owes and nobody
-// has sent yet. Each email is claimed in reminder_log before it goes out, so
+// has sent yet. Each reminder is claimed in reminder_log before it goes out, so
 // calling this every ten minutes sends each one exactly once.
 //
 // That is deliberate. A cron job is a single moment: miss it - a deployment
-// taking over, a delayed trigger, an error - and the email is gone for good.
+// taking over, a delayed trigger, an error - and the reminder is gone for good.
 // Something that can be asked repeatedly turns a missed minute into a few
 // minutes' delay. It is called by GitHub Actions on a schedule, by Vercel's
 // own cron jobs, and as a last resort when the app is opened.
@@ -56,20 +56,20 @@ export async function GET(req: Request) {
     }
   }
 
-  let emailed = 0;
-  if (mailConfigured()) {
-    for (const user of await listReminderRecipients()) {
+  let notified = 0;
+  if (pushConfigured()) {
+    for (const user of await listNotificationRecipients()) {
       try {
         const result = await sendAnythingDue(user);
-        emailed += result.sent;
+        notified += result.sent;
         errors.push(...result.errors);
       } catch (err) {
-        errors.push(`email ${user.id.slice(0, 8)}: ${(err as Error).message.slice(0, 200)}`);
+        errors.push(`notify ${user.id.slice(0, 8)}: ${(err as Error).message.slice(0, 200)}`);
       }
     }
   }
 
   if (errors.length) console.error(JSON.stringify({ evt: "cron_run", errors }));
-  else if (emailed || added) console.log(JSON.stringify({ evt: "cron_run", today, emailed, added }));
-  return NextResponse.json({ ok: true, today, emailed, added, mailConfigured: mailConfigured(), errors });
+  else if (notified || added) console.log(JSON.stringify({ evt: "cron_run", today, notified, added }));
+  return NextResponse.json({ ok: true, today, notified, added, pushConfigured: pushConfigured(), errors });
 }

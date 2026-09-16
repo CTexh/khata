@@ -205,13 +205,6 @@ check("batch added", [reply.startsWith("*2 expenses added*"), reply.includes("To
 reply = await undo();
 check("batch undone together", [reply.includes("Expense removed: Rs 100 · Tea Stall"), reply.includes("Expense removed: Rs 250 · Metro Bus"), await batchCount()], [true, true, 0]);
 
-await dbm.ensureUserEmailColumns();
-const remindersFlag = async () => Number((await one("SELECT email_reminders FROM users WHERE id = ?", [userId]))?.email_reminders);
-reply = await act({ ok: true, kind: "reminders", on: false });
-check("reminders turned off", [reply.startsWith("*Email reminders off*"), await remindersFlag()], [true, 0]);
-reply = await undo();
-check("reminders undo", [reply.includes("Email reminders turned on again"), await remindersFlag()], [true, 1]);
-
 reply = await act({ ok: true, kind: "feedback", text: "please add budgets" });
 check("suggestion saved", [reply.startsWith("*Thanks - noted*"), (await dbm.listAssistantFeedback()).some((f) => f.text === "please add budgets" && f.kind === "suggestion")], [true, true]);
 await runAction({ userId, messageId: `test-${randomUUID()}`, text: "what's the weather", image: null, audio: null }, { ok: false, reason: "I couldn't tell what to do with that. Try: fuel 3000 shell, who owes me?, mark Netflix paid - or tap What can I say?" });
@@ -292,7 +285,7 @@ check(
 );
 check("other accounts untouched by a delete", await count("SELECT COUNT(*) AS n FROM expenses WHERE user_id = ?", [otherUser]), otherBefore);
 
-/* ---------- reminder emails: claims and per-kind preferences ---------- */
+/* ---------- reminders: who is notified, and the claim ---------- */
 
 const mailUser = randomUUID();
 await c.execute({
@@ -300,19 +293,22 @@ await c.execute({
   args: [mailUser, "reminder-test", now],
 });
 
-check("no address means nothing to send to", await dbm.getReminderRecipient(mailUser), null);
+// An account with no device registered has nowhere to send to.
+check("no device means no recipient", await dbm.getNotificationRecipient(mailUser), null);
+check("and it is not in the list", (await dbm.listNotificationRecipients()).some((u) => u.id === mailUser), false);
 
-await dbm.updateUserProfile(mailUser, { email: "reminder@example.com" });
-const fresh = await dbm.getReminderRecipient(mailUser);
-check("a saved address gets every kind by default", fresh?.prefs, {
+await dbm.savePushSubscription(mailUser, { endpoint: "https://push.example/first", p256dh: "k", auth: "a" });
+const fresh = await dbm.getNotificationRecipient(mailUser);
+check("a registered device gets every kind by default", fresh?.prefs, {
   subscriptions: true,
   udhar: true,
   dailyRecap: true,
   monthlySummary: true,
 });
+check("and is in the list", (await dbm.listNotificationRecipients()).filter((u) => u.id === mailUser).length, 1);
 
 await dbm.updateUserProfile(mailUser, { prefs: { dailyRecap: false } });
-const narrowed = await dbm.getReminderRecipient(mailUser);
+const narrowed = await dbm.getNotificationRecipient(mailUser);
 check("one kind switched off leaves the rest alone", narrowed?.prefs, {
   subscriptions: true,
   udhar: true,
@@ -320,12 +316,8 @@ check("one kind switched off leaves the rest alone", narrowed?.prefs, {
   monthlySummary: true,
 });
 
-await dbm.updateUserProfile(mailUser, { emailReminders: false });
-check("the master switch takes the account out altogether", await dbm.getReminderRecipient(mailUser), null);
-await dbm.updateUserProfile(mailUser, { emailReminders: true });
-
-// The claim is what stops two senders - a cron run and the app's catch-up -
-// sending the same email.
+// The claim is what stops two senders - a scheduled run and the app's
+// catch-up - sending the same reminder.
 const key = "recap:2026-09-15";
 check("first claim wins", await dbm.claimReminder(mailUser, key), true);
 check("second claim finds it taken", await dbm.claimReminder(mailUser, key), false);
@@ -338,15 +330,15 @@ check("a released claim can be taken again", await dbm.claimReminder(mailUser, k
 const device = { endpoint: "https://push.example/abc", p256dh: "key-one", auth: "auth-one" };
 await dbm.savePushSubscription(mailUser, device);
 await dbm.savePushSubscription(mailUser, { ...device, endpoint: "https://push.example/second" });
-check("each device is its own row", (await dbm.listPushSubscriptions(mailUser)).length, 2);
+check("each device is its own row", (await dbm.listPushSubscriptions(mailUser)).length, 3);
 
 // The same phone subscribing again replaces its row rather than adding one.
 await dbm.savePushSubscription(mailUser, { ...device, p256dh: "key-two" });
 const devices = await dbm.listPushSubscriptions(mailUser);
-check("re-subscribing replaces that device", [devices.length, devices.find((d) => d.endpoint === device.endpoint)?.p256dh], [2, "key-two"]);
+check("re-subscribing replaces that device", [devices.length, devices.find((d) => d.endpoint === device.endpoint)?.p256dh], [3, "key-two"]);
 
 await dbm.deletePushSubscription(device.endpoint, mailUser);
-check("a device can be removed", (await dbm.listPushSubscriptions(mailUser)).length, 1);
+check("a device can be removed", (await dbm.listPushSubscriptions(mailUser)).length, 2);
 check("another account sees none of them", (await dbm.listPushSubscriptions(userId)).length, 0);
 
 await dbm.deleteUser(mailUser);

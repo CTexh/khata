@@ -1,78 +1,58 @@
-// Sending the reminder emails, in one place.
+// Sending the reminders, in one place.
 //
-// The two Vercel cron jobs call this - 6pm for what is due, 4:30am for the
-// recap of the day before. The app calls it too, when it is opened after
-// those times, because a cron job on the free plan is not a guarantee: a run
-// that lands while a new deployment is taking over is simply skipped, and a
-// recap that never arrives is worse than one that arrives late.
+// The scheduled job calls this - and the app itself does too when it is
+// opened, because no scheduler is a guarantee: a run that lands while a new
+// deployment is taking over is simply skipped, and a reminder that never
+// arrives is worse than one that arrives late.
 //
 // Sending twice is prevented by the claim rather than by who calls: the row
 // in reminder_log is written first, and only whoever wrote it sends.
 import {
-  categoryTotals,
   claimReminder,
   listExpensesInRange,
   listLedgerActivity,
   listLedgerPeople,
   listSubscriptions,
   releaseReminder,
-  type ReminderRecipient,
+  type NotificationRecipient,
 } from "@/lib/db";
-import { mailConfigured, sendMail } from "@/lib/mailer";
 import { sendPush, type PushMessage } from "@/lib/push";
 import {
   buildRecap,
-  dailyRecapEmail,
-  recapIsEmpty,
   findDue,
-  monthlySummaryEmail,
-  subscriptionReminderEmail,
+  recapIsEmpty,
   summaryMonth,
-  udharReminderEmail,
-  type ReminderEmail,
 } from "@/lib/reminders";
 import { addDays, pakistanMinutes, pakistanToday } from "@/lib/expense-parse";
 import { MONTH_NAMES, fmtDateLabel, fmtRs } from "@/lib/format";
 
-export const APP_URL = process.env.APP_URL ?? "https://khata-delta.vercel.app";
-
-// The hours the emails belong to, in Pakistan time.
+// The hours the reminders belong to, in Pakistan time.
 export const EVENING_HOUR = 18;
 export const RECAP_HOUR = 4;
 export const RECAP_MINUTE = 30;
 
 export type SendResult = { sent: number; errors: string[] };
 
-// The email is what the reminder is; a notification is the same reminder on
-// the phone's lock screen, sent to whichever devices the account registered.
-// A notification that fails is not worth losing the email over, so it never
-// throws - sendPush logs and moves on.
-async function send(
-  user: ReminderRecipient,
-  key: string,
-  build: () => Promise<ReminderEmail>,
-  push?: PushMessage
-): Promise<boolean> {
+// Claims the reminder, then notifies every device the account registered. The
+// claim is released again if nothing could be delivered, so the next run
+// tries again rather than the reminder being lost.
+async function send(user: NotificationRecipient, key: string, message: PushMessage): Promise<boolean> {
   if (!(await claimReminder(user.id, key))) return false;
-  try {
-    await sendMail({ to: user.email, ...(await build()) });
-  } catch (err) {
-    // Not sent after all: let the next run try again.
-    await releaseReminder(user.id, key);
-    throw err;
-  }
-  if (push) await sendPush(user.id, push);
-  return true;
+  const delivered = await sendPush(user.id, message);
+  if (delivered) return true;
+  await releaseReminder(user.id, key);
+  return false;
 }
 
 // Everything that goes out at 6pm: a subscription due tomorrow, one due today
 // and still unpaid, a person to follow up with - and, on the 1st, last
 // month's summary.
-export async function sendEveningReminders(user: ReminderRecipient, today = pakistanToday()): Promise<SendResult> {
+export async function sendEveningReminders(
+  user: NotificationRecipient,
+  today = pakistanToday()
+): Promise<SendResult> {
   const result: SendResult = { sent: 0, errors: [] };
-  if (!mailConfigured()) return result;
 
-  const name = user.name || user.username;
   const [subs, people] = await Promise.all([listSubscriptions(user.id), listLedgerPeople(user.id)]);
   const due = findDue(
     today,
@@ -80,14 +60,12 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
     people
   );
 
-  // Built lazily, so only an email that still needs sending does any work.
-  const pending: { key: string; build: () => Promise<ReminderEmail>; push: PushMessage }[] = [];
+  const pending: { key: string; message: PushMessage }[] = [];
   if (user.prefs.subscriptions) {
     pending.push(
       ...due.subsTomorrow.map((item) => ({
         key: item.key,
-        build: async () => subscriptionReminderEmail({ name, item, stage: "before" as const, appUrl: APP_URL }),
-        push: {
+        message: {
           title: `${item.name} due tomorrow`,
           body: `${fmtRs(item.amount)} on ${fmtDateLabel(item.date)}. Tap to see it.`,
           url: `/subscriptions?open=${encodeURIComponent(item.id)}`,
@@ -96,8 +74,7 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
       })),
       ...due.subsToday.map((item) => ({
         key: item.key,
-        build: async () => subscriptionReminderEmail({ name, item, stage: "due" as const, appUrl: APP_URL }),
-        push: {
+        message: {
           title: `${item.name} due today`,
           body: `${fmtRs(item.amount)}, still unpaid. Tap to mark it paid.`,
           url: `/subscriptions?open=${encodeURIComponent(item.id)}`,
@@ -110,8 +87,7 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
     pending.push(
       ...due.reachOut.map((item) => ({
         key: item.key,
-        build: async () => udharReminderEmail({ name, item, appUrl: APP_URL }),
-        push: {
+        message: {
           title: `${item.name} owes you ${fmtRs(item.amount)}`,
           body: "Today is the follow-up date you set. Tap to see their khata.",
           url: `/udhar-khata?open=${encodeURIComponent(item.id)}`,
@@ -124,33 +100,18 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
   if (summaryFor && user.prefs.monthlySummary) {
     pending.push({
       key: summaryFor.key,
-      push: {
+      message: {
         title: `${MONTH_NAMES[summaryFor.month - 1]} is wrapped up`,
         body: "Tap to see where last month went.",
         url: "/expenses",
         tag: summaryFor.key,
-      },
-      build: async () => {
-        const totals = await categoryTotals(user.id, { year: summaryFor.year, month: summaryFor.month });
-        const owing = people.filter((p) => p.balance >= 0.005);
-        return monthlySummaryEmail({
-          name,
-          summary: {
-            label: `${MONTH_NAMES[summaryFor.month - 1]} ${summaryFor.year}`,
-            total: totals.reduce((sum, c) => sum + c.total, 0),
-            count: totals.reduce((sum, c) => sum + c.count, 0),
-            top: totals.map((c) => ({ category: c.category, total: c.total })),
-          },
-          owed: { total: owing.reduce((sum, p) => sum + p.balance, 0), people: owing.length },
-          appUrl: APP_URL,
-        });
       },
     });
   }
 
   for (const reminder of pending) {
     try {
-      if (await send(user, reminder.key, reminder.build, reminder.push)) result.sent++;
+      if (await send(user, reminder.key, reminder.message)) result.sent++;
     } catch (err) {
       result.errors.push(`${user.id.slice(0, 8)} ${reminder.key.split(":")[0]}: ${(err as Error).message.slice(0, 200)}`);
     }
@@ -159,12 +120,12 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
 }
 
 // The 4:30am recap of the day that just ended - unless the day was empty, in
-// which case there is nothing to recap and no email goes out. The claim is
-// taken first and kept either way, so the day is settled once: neither a
-// second run nor the app's catch-up rebuilds it.
-export async function sendDailyRecap(user: ReminderRecipient, date: string): Promise<SendResult> {
+// which case there is nothing to recap and nothing is sent. The claim is
+// taken first and kept either way, so a quiet day is settled once rather than
+// rebuilt by every run.
+export async function sendDailyRecap(user: NotificationRecipient, date: string): Promise<SendResult> {
   const result: SendResult = { sent: 0, errors: [] };
-  if (!mailConfigured() || !user.prefs.dailyRecap) return result;
+  if (!user.prefs.dailyRecap) return result;
 
   const key = `recap:${date}`;
   if (!(await claimReminder(user.id, key))) return result;
@@ -175,17 +136,13 @@ export async function sendDailyRecap(user: ReminderRecipient, date: string): Pro
       subscriptions: () => listSubscriptions(user.id),
     });
     if (recapIsEmpty(recap)) return result;
-    await sendMail({
-      to: user.email,
-      ...dailyRecapEmail({ name: user.name || user.username, recap, appUrl: APP_URL }),
-    });
-    result.sent++;
+
     const spent = recap.expenses.reduce((sum, e) => sum + e.amount, 0);
     // Sent at 4:30am about the day before, so "Yesterday" is what it is -
     // unless a missed run is being caught up days later, when the date is
     // clearer.
     const day = date === addDays(pakistanToday(), -1) ? "Yesterday" : fmtDateLabel(date);
-    await sendPush(user.id, {
+    const delivered = await sendPush(user.id, {
       title: recap.expenses.length ? `${day}: ${fmtRs(spent)} spent` : `${day}: nothing spent`,
       body: recap.expenses.length
         ? `${recap.expenses.length} ${recap.expenses.length === 1 ? "expense" : "expenses"} recorded. Add anything you missed.`
@@ -193,6 +150,8 @@ export async function sendDailyRecap(user: ReminderRecipient, date: string): Pro
       url: "/expenses",
       tag: key,
     });
+    if (delivered) result.sent++;
+    else await releaseReminder(user.id, key);
   } catch (err) {
     // Not sent after all: let the next run try again.
     await releaseReminder(user.id, key);
@@ -202,9 +161,9 @@ export async function sendDailyRecap(user: ReminderRecipient, date: string): Pro
 }
 
 // What today still owes this account, by the clock in Pakistan. Used when the
-// app is opened, so a cron run that never happened doesn't cost the user
-// their reminder.
-export async function sendAnythingDue(user: ReminderRecipient, now = new Date()): Promise<SendResult> {
+// app is opened, so a run that never happened doesn't cost the user their
+// reminder.
+export async function sendAnythingDue(user: NotificationRecipient, now = new Date()): Promise<SendResult> {
   const minutes = pakistanMinutes(now);
   const today = pakistanToday(now);
   const out: SendResult = { sent: 0, errors: [] };

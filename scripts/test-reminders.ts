@@ -1,17 +1,12 @@
-// Tests for reminder emails: what counts as due, and how each email reads.
+// Tests for the reminders: what counts as due on a day, and what a day's
+// recap contains.
 import {
   buildRecap,
   recapIsEmpty,
-  dailyRecapEmail,
   pakistanDayWindow,
   findDue,
-  longDate,
-  monthlySummaryEmail,
   nextDueAfter,
-  subscriptionReminderEmail,
   summaryMonth,
-  udharReminderEmail,
-  validEmail,
   type ReminderPerson,
   type ReminderSubscription,
 } from "../src/lib/reminders.ts";
@@ -62,37 +57,6 @@ check("next due rolls the year", nextDueAfter("2026-12", 31), "2027-01-31");
 check("next due clamps short months", nextDueAfter("2027-01", 31), "2027-02-28");
 check("summary only on the 1st", [summaryMonth("2026-09-15"), summaryMonth("2026-09-01")?.key], [null, "summary:2026-08"]);
 check("summary on 1 Jan is December", summaryMonth("2027-01-01")?.key, "summary:2026-12");
-check("long date", longDate("2026-09-16"), "Wednesday, 16 September 2026");
-
-/* subscription emails */
-const url = "https://khata.example";
-const item = { key: "k", id: "s 1", name: "Netflix", amount: 1500, date: "2026-09-16" };
-const before = subscriptionReminderEmail({ name: "Walli", item, stage: "before", appUrl: url });
-check("header has the logo and name", [before.html.includes(`src="${url}/icon-192.png"`), before.html.includes(">Khata</span>")], [true, true]);
-check("before subject", before.subject, "Reminder: Netflix payment of Rs 1,500 is due tomorrow");
-check("before links to the record", before.html.includes(`${url}/subscriptions?open=s%201`) && before.text.includes(`${url}/subscriptions?open=s%201`), true);
-check("before body", [before.text.includes("Dear Walli,"), before.text.includes("due tomorrow, Wednesday, 16 September 2026"), before.html.includes("Upcoming")], [true, true, true]);
-const dueToday = subscriptionReminderEmail({ name: "", item, stage: "due", appUrl: url });
-check("due subject", dueToday.subject, "Due today: Netflix payment of Rs 1,500");
-check("due body", [dueToday.text.includes("Hello,"), dueToday.text.includes("has not yet been marked as paid"), dueToday.html.includes("Unpaid")], [true, true, true]);
-
-/* udhar email */
-const udhar = udharReminderEmail({ name: "Walli", item: { key: "k", id: "p1", name: "Ali <b>", amount: 2000, date: today }, appUrl: url });
-check("udhar subject", udhar.subject, "Reminder: Ali <b> owes you Rs 2,000 - follow up today");
-check("udhar amount and link", [udhar.text.includes("Amount due"), udhar.text.includes("Rs 2,000"), udhar.html.includes(`${url}/udhar-khata?open=p1`)], [true, true, true]);
-check("udhar escapes names", [udhar.html.includes("Ali &lt;b&gt;"), udhar.html.includes("Ali <b>")], [true, false]);
-
-/* summary email */
-const summary = monthlySummaryEmail({
-  name: "Walli",
-  summary: { label: "August 2026", total: 37251, count: 7, top: [{ category: "Shopping", total: 15000 }] },
-  owed: { total: 2700, people: 2 },
-  appUrl: url,
-});
-check("summary subject", summary.subject, "Your Khata summary for August 2026");
-check("summary rows", [summary.text.includes("Rs 37,251"), summary.text.includes("Top category: Shopping"), summary.text.includes("Rs 2,700 (2 people)")], [true, true, true]);
-const quiet = monthlySummaryEmail({ name: "", summary: { label: "August 2026", total: 0, count: 0, top: [] }, owed: { total: 0, people: 0 }, appUrl: url });
-check("empty month", [quiet.text.includes("No expenses were recorded in August 2026."), quiet.text.includes("Nothing outstanding")], [true, true]);
 
 /* daily recap */
 check("Pakistan day window", pakistanDayWindow("2026-09-15"), { from: "2026-09-14T19:00:00.000Z", to: "2026-09-15T19:00:00.000Z" });
@@ -113,24 +77,7 @@ const recap = await buildRecap("2026-09-15", {
 });
 check("recap expense labels", recap.expenses.map((e) => e.label), ["Shell · Car", "dinner"]);
 check("recap due and paid", [recap.subsDue, recap.subsPaid.map((s) => s.name)], [[{ name: "Netflix", amount: 1500, paid: false }], ["Spotify"]]);
-const recapMail = dailyRecapEmail({ name: "Walli", recap, appUrl: url });
-check("recap subject", recapMail.subject, "Your Khata recap for Tuesday, 15 September: Rs 4,200 spent");
-check(
-  "recap body",
-  [
-    recapMail.text.includes("Total        Rs 4,200") || recapMail.text.includes("Rs 4,200"),
-    recapMail.text.includes("Lent to Ali"),
-    recapMail.text.includes("Usama paid you back"),
-    recapMail.text.includes("Netflix was due"),
-    recapMail.text.includes("Unpaid"),
-    recapMail.text.includes("Spotify marked paid"),
-    recapMail.text.includes("Please add any expense you missed manually"),
-    recapMail.text.includes("Netflix is still unpaid"),
-    recapMail.html.includes(`${url}/expenses?add=1`),
-  ],
-  [true, true, true, true, true, true, true, true, true]
-);
-// A day on which nothing at all happened is not emailed.
+// A day on which nothing at all happened is not notified.
 check(
   "a day with nothing on it is empty",
   recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [] }),
@@ -156,18 +103,5 @@ check(
   recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [{ name: "Netflix", amount: 1200 }] }),
   false
 );
-// The wording for a quiet day still exists, for a day that had something on
-// it but no expenses.
-const emptyRecap = dailyRecapEmail({ name: "", recap: { date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [] }, appUrl: url });
-check(
-  "quiet day recap",
-  [emptyRecap.subject, emptyRecap.text.includes("No expenses were recorded."), emptyRecap.text.includes("No changes."), emptyRecap.text.includes("None were due.")],
-  ["Your Khata recap for Tuesday, 15 September: no expenses recorded", true, true, true]
-);
-
-/* email addresses */
-check("valid emails", [validEmail("a@b.co"), validEmail("walli.ullah+khata@gmail.com")], [true, true]);
-check("invalid emails", [validEmail("a@b"), validEmail("no at.com"), validEmail("@b.com"), validEmail("a@b.c")], [false, false, false, false]);
-
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -9,7 +9,6 @@ import { clearCache } from "@/lib/swr";
 export default function SignupPage() {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -27,7 +26,7 @@ export default function SignupPage() {
     const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, username, password, email }),
+      body: JSON.stringify({ name, username, password }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -68,16 +67,6 @@ export default function SignupPage() {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           required
-        />
-        <input
-          className="field"
-          aria-label="Email for reminders"
-          placeholder="Email for reminders (optional)"
-          type="email"
-          inputMode="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
         />
         <input
           className="field"

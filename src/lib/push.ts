@@ -1,11 +1,11 @@
-// Push notifications, the same way the emails work: the scheduled job decides
-// what is due, and this delivers it to whichever devices have agreed to
-// receive it.
+// Push notifications: the scheduled job decides what is due, and this
+// delivers it to whichever devices have agreed to receive it. They are how
+// Khata reminds you of anything - there is no email.
 //
 // A notification is sent with VAPID keys, which identify this app to the
 // phone's push service (Apple's for an iPhone, Google's for an Android). No
 // third party is involved and nothing is paid for. Without the keys in the
-// environment, push is simply off - the emails carry on as before.
+// environment, push is simply off and nothing is delivered.
 import webpush from "web-push";
 import { deletePushSubscription, listPushSubscriptions, type PushSubscriptionRow } from "@/lib/db";
 

@@ -73,7 +73,6 @@ export type Action =
   | { ok: true; kind: "expenses_batch"; expenses: ParsedExpense[] }
   | { ok: true; kind: "insight"; insight: Insight }
   | { ok: true; kind: "app_question"; question: string }
-  | { ok: true; kind: "reminders"; on: boolean }
   | { ok: true; kind: "feedback"; text: string };
 
 // Questions answered from the user's records that need more than a single
@@ -344,7 +343,6 @@ export const TOOLS = [
     { question: S("The question, in the user's words") },
     ["question"]
   ),
-  fn("set_email_reminders", "Turn the user's email reminders on or off.", { on: B("true to turn them on, false to turn them off") }, ["on"]),
   fn(
     "send_feedback",
     "The user suggests an improvement, asks for a feature Khata doesn't have, or reports a problem with the app.",
@@ -669,10 +667,6 @@ export function interpretCall(call: FunctionCall | null, ctx: ActionContext): Ac
       const question = cleanString(a.question, 300) ?? cleanString(ctx.text, 300);
       return question ? { ok: true, kind: "app_question", question } : refuse("What would you like to know about the app?");
     }
-    case "set_email_reminders":
-      return typeof a.on === "boolean"
-        ? { ok: true, kind: "reminders", on: a.on }
-        : refuse("Should I turn email reminders on or off?");
     case "send_feedback": {
       const text = cleanString(a.text, 500) ?? cleanString(ctx.text, 500);
       return text ? { ok: true, kind: "feedback", text } : refuse("What should I pass on?");
@@ -984,7 +978,7 @@ export async function understandMessage(opts: {
 // step with the app: anything not described here, it says isn't available.
 export const APP_GUIDE = `Khata is a personal finance app for Pakistan. Amounts are in rupees (Rs) and dates follow Pakistan time.
 
-Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The profile picture (top right) opens: Settings, Welcome tour, Admin (admins only), Log out. Settings holds your name, appearance (Light, Dark or System) and email notifications.
+Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The profile picture (top right) opens: Settings, Welcome tour, Admin (admins only), Log out. Settings holds your profile name, appearance (Light, Dark or System) and "Manage notifications".
 
 Home: switch Today / This Week / This Month to see the total spent, the change against the previous period, a compact "Where it went" breakdown of the biggest categories, and that period's expenses. Cards show money owed to you and subscriptions still to pay. The assistant is reached from the button in the middle of the tab bar, where you can type, record a voice note or photograph a bill.
 
@@ -996,9 +990,9 @@ Subscriptions: tap + to add one (name, monthly amount, first due date; a logo is
 
 Push notifications (admin accounts, for now): Settings has a "Notify this device" switch - it registers that phone or computer, so reminders also arrive as notifications, and a test button to check it. On an iPhone the app must be on the Home Screen first; Apple does not allow notifications from a Safari tab.
 
-Email reminders: in Settings, add an email address and keep "Send me emails" on. Each kind has its own switch there - subscriptions due, Udhar follow-ups, the daily recap and the monthly summary - so you can keep only the ones you want. Emails come from the app's Gmail. At 6pm: a subscription the day before it is due and on the due day if still unpaid, and a person on their follow-up date. At 4:30am: a recap of the previous day (expenses, Udhar Khata changes, subscriptions due or paid, and a nudge to add anything missed). On the 1st: last month's summary. Each email links to the exact record. Turning the switch off stops them.
+Reminders: Settings > Manage notifications. "Notify this device" registers the phone or computer you are on - each device is switched on separately, and on an iPhone the app has to be on the Home Screen first, as Apple does not allow notifications from a Safari tab. Under "What to send", each kind has its own switch: subscriptions due, Udhar follow-ups, the daily recap and the monthly summary. At 6pm: a subscription the day before it is due and on the due day if still unpaid, and a person on their follow-up date. At 4:30am: a recap of the previous day (expenses, Udhar Khata changes, subscriptions due or paid, and a nudge to add anything missed) - skipped when nothing happened. On the 1st: last month's summary. Each notification opens the record it is about, and they arrive with the app closed. Khata sends no email at all.
 
-Assistant (admins, and accounts an admin has given assistant access in Admin): add expenses by typing, voice note or bill photo; lend money or record paybacks; set follow-up dates; edit or delete expenses; manage subscriptions and categories; answer questions about spending, balances and subscriptions; compare periods; show a person's history; turn email reminders on or off; take suggestions. The + menu has Camera, Photos, Undo last change and What can I say?. UNDO reverses the assistant's last change from the past 24 hours.
+Assistant (admins, and accounts an admin has given assistant access in Admin): add expenses by typing, voice note or bill photo; lend money or record paybacks; set follow-up dates; edit or delete expenses; manage subscriptions and categories; answer questions about spending, balances and subscriptions; compare periods; show a person's history; take suggestions. The + menu has Camera, Photos, Undo last change and What can I say?. UNDO reverses the assistant's last change from the past 24 hours.
 
 Accounts and security: sign up with a username and password, or an admin creates the account. After 10 wrong passwords an account is locked for 15 minutes. Admins can create users, reset passwords, turn assistant access on or off for each account, delete users and read assistant feedback. Data shown in the app is kept on the device for speed and cleared on logout. New accounts see a short welcome tour, which can be replayed from the profile menu.
 

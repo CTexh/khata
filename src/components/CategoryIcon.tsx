@@ -223,10 +223,10 @@ export const CoinsIcon = icon(
   </>
 );
 
-export const MailIcon = icon(
+export const BellIcon = icon(
   <>
-    <rect {...base} x="3" y="5.5" width="18" height="13" rx="2" />
-    <path {...base} d="m3.8 7 7.2 5.4a1.7 1.7 0 0 0 2 0L20.2 7" />
+    <path {...base} d="M18 16.5V11a6 6 0 1 0-12 0v5.5L4.5 18.5h15z" />
+    <path {...base} d="M10 20.5a2.2 2.2 0 0 0 4 0" />
   </>
 );
 

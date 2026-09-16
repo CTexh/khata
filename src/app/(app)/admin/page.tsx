@@ -13,7 +13,6 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -24,7 +23,7 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
     const res = await fetch("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, name, email }),
+      body: JSON.stringify({ username, password, name }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -53,16 +52,6 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
         autoComplete="off"
         value={name}
         onChange={(e) => setName(e.target.value)}
-      />
-      <input
-        className="field"
-        aria-label="Email for reminders"
-        placeholder="Email for reminders (optional)"
-        type="email"
-        inputMode="email"
-        autoComplete="off"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
       />
       <input
         className="field"

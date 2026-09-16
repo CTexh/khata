@@ -485,7 +485,7 @@ export default function UdharKhata() {
 
   const load = useCallback(() => invalidate("/api/people"), []);
 
-  // A reminder email links to /udhar-khata?open=<id>: open that person.
+  // A reminder links to /udhar-khata?open=<id>: open that person.
   useEffect(() => {
     if (!peopleData) return;
     const id = new URLSearchParams(window.location.search).get("open");

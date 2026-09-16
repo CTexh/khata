@@ -191,24 +191,21 @@ export async function findUserById(id: string): Promise<User | null> {
   };
 }
 
-// Email reminders: where to send them, whether they're on, and a log of what
-// has been sent so a retried daily job never sends the same reminder twice.
-let emailColumnsEnsured = false;
-const EMAIL_SCHEMA = "3";
-export async function ensureUserEmailColumns(): Promise<void> {
-  if (emailColumnsEnsured) return;
-  if (await schemaCurrent("user_email", EMAIL_SCHEMA)) {
-    emailColumnsEnsured = true;
+// Reminders: which kinds each account wants, which devices to notify, and a
+// log of what has been sent so a retried run never sends the same one twice.
+let reminderTablesEnsured = false;
+const REMINDER_SCHEMA = "4";
+export async function ensureReminderTables(): Promise<void> {
+  if (reminderTablesEnsured) return;
+  if (await schemaCurrent("reminders", REMINDER_SCHEMA)) {
+    reminderTablesEnsured = true;
     return;
   }
   await ensureUserNameColumn();
   const c = await db();
   for (const sql of [
-    `ALTER TABLE users ADD COLUMN email TEXT`,
-    // The master switch, and then one switch per kind of email, so someone can
-    // keep the ones they want. All on by default: existing accounts keep
-    // getting what they already agreed to.
-    `ALTER TABLE users ADD COLUMN email_reminders INTEGER NOT NULL DEFAULT 1`,
+    // One switch per kind of reminder, so someone can keep the ones they want.
+    // All on by default.
     `ALTER TABLE users ADD COLUMN remind_subs INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE users ADD COLUMN remind_udhar INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE users ADD COLUMN remind_recap INTEGER NOT NULL DEFAULT 1`,
@@ -242,13 +239,12 @@ export async function ensureUserEmailColumns(): Promise<void> {
   } catch {
     // Index already exists.
   }
-  await markSchema("user_email", EMAIL_SCHEMA);
-  emailColumnsEnsured = true;
+  await markSchema("reminders", REMINDER_SCHEMA);
+  reminderTablesEnsured = true;
 }
 
-// Which kinds of email an account wants. `emailReminders` is the master
-// switch: off means none of them are sent.
-export type EmailPrefs = {
+// Which kinds of reminder an account wants notified.
+export type NotificationPrefs = {
   subscriptions: boolean;
   udhar: boolean;
   dailyRecap: boolean;
@@ -257,12 +253,12 @@ export type EmailPrefs = {
 
 export type ProfileSettings = {
   name: string;
-  email: string | null;
-  emailReminders: boolean;
-  prefs: EmailPrefs;
+  prefs: NotificationPrefs;
 };
 
-export const EMAIL_PREF_COLUMNS = {
+// The columns predate notifications, when these were email reminders; the
+// meaning is the same, so they were left alone rather than migrated.
+export const NOTIFICATION_PREF_COLUMNS = {
   subscriptions: "remind_subs",
   udhar: "remind_udhar",
   dailyRecap: "remind_recap",
@@ -272,19 +268,16 @@ export const EMAIL_PREF_COLUMNS = {
 const on = (v: unknown) => Number(v ?? 1) === 1;
 
 export async function getProfileSettings(userId: string): Promise<ProfileSettings | null> {
-  await ensureUserEmailColumns();
+  await ensureReminderTables();
   const c = await db();
   const rs = await c.execute({
-    sql: `SELECT name, email, email_reminders, remind_subs, remind_udhar, remind_recap, remind_summary
-          FROM users WHERE id = ?`,
+    sql: `SELECT name, remind_subs, remind_udhar, remind_recap, remind_summary FROM users WHERE id = ?`,
     args: [userId],
   });
   const r = rs.rows[0];
   if (!r) return null;
   return {
     name: (r.name as string) ?? "",
-    email: (r.email as string) ?? null,
-    emailReminders: on(r.email_reminders),
     prefs: {
       subscriptions: on(r.remind_subs),
       udhar: on(r.remind_udhar),
@@ -296,25 +289,17 @@ export async function getProfileSettings(userId: string): Promise<ProfileSetting
 
 export async function updateUserProfile(
   userId: string,
-  fields: { name?: string; email?: string | null; emailReminders?: boolean; prefs?: Partial<EmailPrefs> }
+  fields: { name?: string; prefs?: Partial<NotificationPrefs> }
 ): Promise<void> {
-  await ensureUserEmailColumns();
+  await ensureReminderTables();
   const sets: string[] = [];
   const args: (string | number | null)[] = [];
   if (fields.name !== undefined) {
     sets.push("name = ?");
     args.push(fields.name || null);
   }
-  if (fields.email !== undefined) {
-    sets.push("email = ?");
-    args.push(fields.email || null);
-  }
-  if (fields.emailReminders !== undefined) {
-    sets.push("email_reminders = ?");
-    args.push(fields.emailReminders ? 1 : 0);
-  }
-  for (const [key, column] of Object.entries(EMAIL_PREF_COLUMNS)) {
-    const value = fields.prefs?.[key as keyof EmailPrefs];
+  for (const [key, column] of Object.entries(NOTIFICATION_PREF_COLUMNS)) {
+    const value = fields.prefs?.[key as keyof NotificationPrefs];
     if (value === undefined) continue;
     sets.push(`${column} = ?`);
     args.push(value ? 1 : 0);
@@ -324,28 +309,26 @@ export async function updateUserProfile(
   await c.execute({ sql: `UPDATE users SET ${sets.join(", ")} WHERE id = ?`, args: [...args, userId] });
 }
 
-export type ReminderRecipient = {
+// Everyone with at least one device registered for notifications, with the
+// kinds they want, so each run only sends what was asked for.
+export type NotificationRecipient = {
   id: string;
   username: string;
   name: string | null;
-  email: string;
-  prefs: EmailPrefs;
+  prefs: NotificationPrefs;
 };
 
-// Everyone with an address and the master switch on, with the kinds of email
-// they want, so each job only sends what was asked for.
-export async function listReminderRecipients(): Promise<ReminderRecipient[]> {
-  await ensureUserEmailColumns();
+export async function listNotificationRecipients(): Promise<NotificationRecipient[]> {
+  await ensureReminderTables();
   const c = await db();
   const rs = await c.execute(
-    `SELECT id, username, name, email, remind_subs, remind_udhar, remind_recap, remind_summary
-     FROM users WHERE email IS NOT NULL AND email <> '' AND email_reminders = 1`
+    `SELECT DISTINCT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary
+     FROM users u JOIN push_subscriptions p ON p.user_id = u.id`
   );
   return rs.rows.map((r) => ({
     id: r.id as string,
     username: r.username as string,
     name: (r.name as string) ?? null,
-    email: r.email as string,
     prefs: {
       subscriptions: on(r.remind_subs),
       udhar: on(r.remind_udhar),
@@ -355,14 +338,14 @@ export async function listReminderRecipients(): Promise<ReminderRecipient[]> {
   }));
 }
 
-// One account's reminder settings, for the catch-up when the app is opened.
-// null when there is nothing to send to: no address, or emails switched off.
-export async function getReminderRecipient(userId: string): Promise<ReminderRecipient | null> {
-  await ensureUserEmailColumns();
+// One account's settings, for the catch-up when the app is opened. null when
+// there is no device to notify.
+export async function getNotificationRecipient(userId: string): Promise<NotificationRecipient | null> {
+  await ensureReminderTables();
   const c = await db();
   const rs = await c.execute({
-    sql: `SELECT id, username, name, email, remind_subs, remind_udhar, remind_recap, remind_summary
-          FROM users WHERE id = ? AND email IS NOT NULL AND email <> '' AND email_reminders = 1`,
+    sql: `SELECT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary
+          FROM users u WHERE u.id = ? AND EXISTS (SELECT 1 FROM push_subscriptions p WHERE p.user_id = u.id)`,
     args: [userId],
   });
   const r = rs.rows[0];
@@ -371,7 +354,6 @@ export async function getReminderRecipient(userId: string): Promise<ReminderReci
     id: r.id as string,
     username: r.username as string,
     name: (r.name as string) ?? null,
-    email: r.email as string,
     prefs: {
       subscriptions: on(r.remind_subs),
       udhar: on(r.remind_udhar),
@@ -389,7 +371,7 @@ export async function savePushSubscription(
   userId: string,
   sub: PushSubscriptionRow
 ): Promise<void> {
-  await ensureUserEmailColumns();
+  await ensureReminderTables();
   const c = await db();
   await c.execute({
     sql: `INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, created_at)
@@ -400,7 +382,7 @@ export async function savePushSubscription(
 }
 
 export async function listPushSubscriptions(userId: string): Promise<PushSubscriptionRow[]> {
-  await ensureUserEmailColumns();
+  await ensureReminderTables();
   const c = await db();
   const rs = await c.execute({
     sql: "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
@@ -416,7 +398,7 @@ export async function listPushSubscriptions(userId: string): Promise<PushSubscri
 // Used when a device unsubscribes, and when its push service reports the
 // subscription as gone - a phone that reinstalled the app, say.
 export async function deletePushSubscription(endpoint: string, userId?: string): Promise<void> {
-  await ensureUserEmailColumns();
+  await ensureReminderTables();
   const c = await db();
   await c.execute({
     sql: userId
@@ -429,7 +411,7 @@ export async function deletePushSubscription(endpoint: string, userId?: string):
 // The reminder keys from `items` that haven't been sent to this user yet.
 export async function unsentReminders(userId: string, items: string[]): Promise<Set<string>> {
   if (!items.length) return new Set();
-  await ensureUserEmailColumns();
+  await ensureReminderTables();
   const c = await db();
   const rs = await c.execute({
     sql: `SELECT item FROM reminder_log WHERE user_id = ? AND item IN (${items.map(() => "?").join(",")})`,
@@ -440,11 +422,11 @@ export async function unsentReminders(userId: string, items: string[]): Promise<
 }
 
 // Claims one reminder for sending. The insert is the claim: only the caller
-// whose insert created the row sends the email, so a cron run and the app's
+// whose insert created the row sends it, so a scheduled run and the app's
 // own catch-up can never both send the same one. Released again if the send
 // fails, so the next attempt can pick it up.
 export async function claimReminder(userId: string, item: string): Promise<boolean> {
-  await ensureUserEmailColumns();
+  await ensureReminderTables();
   const c = await db();
   const rs = await c.execute({
     sql: "INSERT OR IGNORE INTO reminder_log (user_id, item, sent_at) VALUES (?, ?, ?)",
@@ -554,7 +536,7 @@ export async function deleteUser(id: string): Promise<void> {
   await Promise.all([
     ensureTablesExist(),
     ensureCategoryTables(),
-    ensureUserEmailColumns(),
+    ensureReminderTables(),
     ensureFeedbackTable(),
     ensureLoginAttemptsTable(),
   ]);
@@ -1649,8 +1631,7 @@ export type UndoStep =
   | { op: "rename_category"; from: string; to: string }
   | { op: "restore_category"; category: CategoryRow; expenseIds: string[]; rules: RuleRow[] }
   | { op: "set_category_keywords"; name: string; keywords: string | null }
-  | { op: "remove_expense"; id: string; amount: number; vendor: string | null }
-  | { op: "set_email_reminders"; on: boolean };
+  | { op: "remove_expense"; id: string; amount: number; vendor: string | null };
 
 const UNDO_OPS = new Set<string>([
   "set_due_date",
@@ -1667,7 +1648,6 @@ const UNDO_OPS = new Set<string>([
   "restore_category",
   "set_category_keywords",
   "remove_expense",
-  "set_email_reminders",
 ]);
 
 // Undo steps are written only by this app, so a known op is trusted as shaped.
@@ -1982,7 +1962,7 @@ export async function saveModelHealth(updates: HealthUpdate[]): Promise<void> {
 /* ---------- reads and small writes for assistant questions ---------- */
 
 // Udhar Khata entries made in a time window (ISO timestamps, end exclusive),
-// oldest first, with the person's name - for the daily recap email.
+// oldest first, with the person's name - for the daily recap.
 export async function listLedgerActivity(
   userId: string,
   fromIso: string,
@@ -2247,10 +2227,6 @@ export function undoStatements(userId: string, steps: UndoStep[]): Statement[] {
 
       case "remove_expense":
         out.push({ sql: "DELETE FROM expenses WHERE id = ? AND user_id = ?", args: [step.id, userId] });
-        break;
-
-      case "set_email_reminders":
-        out.push({ sql: "UPDATE users SET email_reminders = ? WHERE id = ?", args: [step.on ? 1 : 0, userId] });
         break;
     }
   }

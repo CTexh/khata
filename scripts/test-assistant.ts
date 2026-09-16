@@ -166,9 +166,9 @@ check("compare in a category", call("compare_spending", { category: "food" }).in
 check("compare an unknown category", call("compare_spending", { category: "furniture" }).ok, false);
 check("who is due", [call("udhar_due").insight, call("udhar_due", { days: 400 }).insight?.days], [{ type: "udhar_due", days: 7 }, 90]);
 check("app question", call("app_help", { question: "how do I add a subscription?" }), { ok: true, kind: "app_question", question: "how do I add a subscription?" });
-check("reminders on and off", [call("set_email_reminders", { on: false }), call("set_email_reminders", {}).ok], [{ ok: true, kind: "reminders", on: false }, false]);
 check("feedback", call("send_feedback", { text: "add budgets" }), { ok: true, kind: "feedback", text: "add budgets" });
-check("app guide covers every tab", ["Mera Khata", "Udhar Khata", "Subscriptions", "Email reminders", "Welcome tour"].every((w) => APP_GUIDE.includes(w)), true);
+check("app guide covers every tab", ["Mera Khata", "Udhar Khata", "Subscriptions", "Manage notifications", "Welcome tour"].every((w) => APP_GUIDE.includes(w)), true);
+check("the app guide says there is no email", APP_GUIDE.includes("Khata sends no email at all."), true);
 check("subscriptions due", call("subscriptions_due").query?.type, "subscriptions_due");
 check("commands", [call("undo_last").command, call("show_help").command, call("list_categories").command], ["undo", "help", "list_categories"]);
 check("not understood", call("not_understood").reason, NOT_UNDERSTOOD);

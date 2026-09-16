@@ -374,7 +374,7 @@ export default function Subscriptions() {
     await refreshSubs();
   }, [refreshSubs]);
 
-  // A reminder email links to /subscriptions?open=<id>: open that record.
+  // A reminder links to /subscriptions?open=<id>: open that record.
   useEffect(() => {
     if (!subsData) return;
     const id = new URLSearchParams(window.location.search).get("open");
