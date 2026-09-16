@@ -35,10 +35,10 @@ const ALL_ON: Prefs = { subscriptions: true, udhar: true, dailyRecap: true, mont
 
 // In the order they reach you during a day.
 const KINDS: { key: keyof Prefs; title: string; hint: string }[] = [
-  { key: "subscriptions", title: "Subscriptions due", hint: "6pm the day before, and again on the day if it's still unpaid." },
-  { key: "udhar", title: "Udhar follow-ups", hint: "6pm on the date you set for someone who owes you." },
-  { key: "dailyRecap", title: "Daily recap", hint: "4:30am, covering the day just gone - skipped when nothing happened." },
-  { key: "monthlySummary", title: "Monthly summary", hint: "On the 1st, what last month came to." },
+  { key: "subscriptions", title: "Subscriptions due", hint: "The evening before, and on the day if unpaid." },
+  { key: "udhar", title: "Udhar follow-ups", hint: "On the follow-up date you set." },
+  { key: "dailyRecap", title: "Daily recap", hint: "4:30am, on days with activity." },
+  { key: "monthlySummary", title: "Monthly summary", hint: "On the 1st, for the month just gone." },
 ];
 
 const isIos = () =>
@@ -165,9 +165,9 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
       // One notification straight away, so switching it on proves itself
       // rather than leaving you to wonder until 6pm.
       await fetch("/api/push/test", { method: "POST" }).catch(() => null);
-      setNote("Sent one to this device - reminders will arrive like that, even with the app closed.");
+      setNote("Sent one now - that is how reminders will look.");
     } catch {
-      setNote("Couldn't turn notifications on. Try again, or check this site's settings in your browser.");
+      setNote("Couldn't turn them on. Try again, or check this site's settings.");
     } finally {
       setBusy(false);
     }
@@ -200,18 +200,18 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
     }).catch(() => null);
     if (!res?.ok) {
       setPrefs(prefs);
-      setNote("Couldn't save that. Check your connection and try again.");
+      setNote("Couldn't save that. Try again.");
     }
   };
 
   const hint = {
-    loading: "Checking this device…",
+    loading: "Checking…",
     unsupported: "This browser can't show notifications.",
-    "needs-install": "On iPhone, add Khata to your Home Screen first (Share → Add to Home Screen), then open it from there.",
-    unavailable: "Notifications aren't switched on for this app yet.",
-    blocked: "Notifications are blocked for this site. Allow them in your browser's settings for Khata, then come back.",
-    off: "Reminders arrive on this device's lock screen, even when the app is closed.",
-    on: "This device is registered. Reminders arrive even when the app is closed.",
+    "needs-install": "Add Khata to your Home Screen first, then open it from there.",
+    unavailable: "Not available on this account yet.",
+    blocked: "Blocked in your browser settings. Allow Khata, then come back.",
+    off: "Reminders arrive on the lock screen, even with the app closed.",
+    on: "Registered. Reminders arrive even with the app closed.",
   }[device];
 
   const switchable = device === "on" || device === "off";
@@ -243,12 +243,7 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="card p-4 flex flex-col gap-3">
-        <div>
-          <p className="text-[15px] font-bold">What to send</p>
-          <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
-            Saved as you switch them, and used on every device you register.
-          </p>
-        </div>
+        <p className="text-[15px] font-bold">What to send</p>
         {KINDS.map((kind) => (
           <Switch
             key={kind.key}

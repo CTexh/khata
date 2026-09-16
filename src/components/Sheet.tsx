@@ -39,6 +39,14 @@ function unlockPage() {
   window.scrollTo(0, lockedAt);
 }
 
+// For a dialog that isn't a Sheet but still needs the page held still behind it.
+export function usePageLock() {
+  useEffect(() => {
+    lockPage();
+    return unlockPage;
+  }, []);
+}
+
 export function Sheet({
   title,
   onClose,

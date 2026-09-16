@@ -978,7 +978,7 @@ export async function understandMessage(opts: {
 // step with the app: anything not described here, it says isn't available.
 export const APP_GUIDE = `Khata is a personal finance app for Pakistan. Amounts are in rupees (Rs) and dates follow Pakistan time.
 
-Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The profile picture (top right) opens: Settings, Welcome tour, Admin (admins only), Log out. Settings holds your profile name, appearance (Light, Dark or System) and "Manage notifications".
+Tabs (bottom bar): Home, Khata (Mera Khata), Udhar (Udhar Khata), Subs (Subscriptions). Accounts with assistant access also have the assistant button in the middle. The profile picture (top right) opens: Settings, Admin (admins only), Log out. Settings holds your profile name, appearance (Light, Dark or System) and "Manage notifications".
 
 Home: switch Today / This Week / This Month to see the total spent, the change against the previous period, a compact "Where it went" breakdown of the biggest categories, and that period's expenses. Cards show money owed to you and subscriptions still to pay. The assistant is reached from the button in the middle of the tab bar, where you can type, record a voice note or photograph a bill.
 
@@ -994,7 +994,7 @@ Reminders (every account): Settings > Manage notifications. "Notify this device"
 
 Assistant (admins, and accounts an admin has given assistant access in Admin): add expenses by typing, voice note or bill photo; lend money or record paybacks; set follow-up dates; edit or delete expenses; manage subscriptions and categories; answer questions about spending, balances and subscriptions; compare periods; show a person's history; take suggestions. The + menu has Camera, Photos, Undo last change and What can I say?. UNDO reverses the assistant's last change from the past 24 hours.
 
-Accounts and security: sign up with a username and password, or an admin creates the account. After 10 wrong passwords an account is locked for 15 minutes. Admins can create users, reset passwords, turn assistant access on or off for each account, delete users and read assistant feedback. Data shown in the app is kept on the device for speed and cleared on logout. New accounts see a short welcome tour, which can be replayed from the profile menu.
+Accounts and security: sign up with a username and password, or an admin creates the account. After 10 wrong passwords an account is locked for 15 minutes. Admins can create users, reset passwords, turn assistant access on or off for each account, delete users and read assistant feedback. Data shown in the app is kept on the device for speed and cleared on logout. New accounts see a short welcome tour once, on first open.
 
 Not available: budgets, multiple currencies, bank syncing inside the app, shared/family accounts, exporting Udhar Khata, recurring expenses other than subscriptions.`;
 

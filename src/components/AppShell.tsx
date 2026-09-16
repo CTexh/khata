@@ -8,6 +8,7 @@ import { NotificationSettings } from "@/components/NotificationSettings";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
+import { NotificationsNews } from "@/components/NotificationsNews";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
 
@@ -22,17 +23,19 @@ type CurrentUser = {
 
 function SettingsModal({
   initialName,
+  startOnNotifications,
   onClose,
   onSaved,
 }: {
   initialName: string;
+  startOnNotifications?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [name, setName] = useState(initialName);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [notifications, setNotifications] = useState(false);
+  const [notifications, setNotifications] = useState(Boolean(startOnNotifications));
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
 
   useEffect(() => {
@@ -65,7 +68,8 @@ function SettingsModal({
 
   // Notifications get a screen of their own: what they are is one decision,
   // which ones you want is another.
-  if (notifications) return <NotificationSettings onBack={() => setNotifications(false)} />;
+  if (notifications)
+    return <NotificationSettings onBack={() => (startOnNotifications ? onClose() : setNotifications(false))} />;
 
   return (
     <Sheet title="Settings" onClose={onClose}>
@@ -175,7 +179,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: me, refresh: refreshMe } = useCached<{ user: CurrentUser | null }>("/api/auth/me");
   const user = me?.user ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState<false | "settings" | "notifications">(false);
   const pathname = usePathname();
 
 
@@ -191,17 +195,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const closeProfile = useCallback(() => setProfileOpen(false), []);
 
   // A new account (made in the last two weeks) sees the welcome tour once on
-  // this device. It can be skipped, and replayed from the account menu.
+  // this device, and nowhere else - it is for someone opening the app for the
+  // first time, not a page to go back to.
+  //
+  // Everyone else gets the one-off note that reminders exist, once per device.
+  // The tour already covers them, so whoever sees the tour has the note marked
+  // as read and never meets both.
   const [tourOpen, setTourOpen] = useState(false);
+  const [newsOpen, setNewsOpen] = useState(false);
   const tourKey = user ? `khata-tour-done:${user.id}` : null;
-  useEffect(() => {
-    if (!user || !tourKey) return;
-    const created = user.createdAt ? Date.parse(user.createdAt) : NaN;
-    if (!Number.isFinite(created) || Date.now() - created > 14 * 24 * 60 * 60 * 1000) return;
+  const newsKey = user ? `khata-news-reminders:${user.id}` : null;
+  const markNewsSeen = useCallback(() => {
+    setNewsOpen(false);
     try {
-      if (!localStorage.getItem(tourKey)) setTourOpen(true);
+      if (newsKey) localStorage.setItem(newsKey, "1");
     } catch {}
-  }, [user, tourKey]);
+  }, [newsKey]);
+  useEffect(() => {
+    if (!user || !tourKey || !newsKey) return;
+    const created = user.createdAt ? Date.parse(user.createdAt) : NaN;
+    const isNew = Number.isFinite(created) && Date.now() - created <= 14 * 24 * 60 * 60 * 1000;
+    try {
+      if (isNew && !localStorage.getItem(tourKey)) {
+        setTourOpen(true);
+        localStorage.setItem(newsKey, "1");
+        return;
+      }
+      if (!localStorage.getItem(newsKey)) setNewsOpen(true);
+    } catch {}
+  }, [user, tourKey, newsKey]);
   const closeTour = useCallback(() => {
     setTourOpen(false);
     try {
@@ -291,22 +313,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         role="menuitem"
                         onClick={() => {
                           setMenuOpen(false);
-                          setProfileOpen(true);
+                          setProfileOpen("settings");
                         }}
                         className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-xl text-[14px] cursor-pointer hover:bg-[var(--surface-2)]"
                       >
                         Settings
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          setTourOpen(true);
-                        }}
-                        className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-xl text-[14px] cursor-pointer hover:bg-[var(--surface-2)]"
-                      >
-                        Welcome tour
                       </button>
                       {user.isAdmin && (
                         <Link
@@ -367,8 +378,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {tourOpen && user && <WelcomeTour withAssistant={Boolean(user.aiAccess)} onClose={closeTour} />}
 
+      {newsOpen && user && !tourOpen && (
+        <NotificationsNews
+          onClose={markNewsSeen}
+          onSetUp={() => {
+            markNewsSeen();
+            setProfileOpen("notifications");
+          }}
+        />
+      )}
+
       {profileOpen && (
-        <SettingsModal initialName={user?.name ?? ""} onClose={closeProfile} onSaved={() => refreshMe()} />
+        <SettingsModal
+          initialName={user?.name ?? ""}
+          startOnNotifications={profileOpen === "notifications"}
+          onClose={closeProfile}
+          onSaved={() => refreshMe()}
+        />
       )}
     </>
   );

@@ -10,48 +10,40 @@ const STEPS: Step[] = [
   {
     Icon: WaveIcon,
     title: "Welcome to Khata",
-    text: "Your spending, loans and subscriptions in one place. On Home, switch between Today, This Week and This Month to see what you spent. Your picture, top right, opens Settings - your name, and light or dark mode.",
+    text: "Spending, loans and subscriptions in one place. On Home, switch between Today, This Week and This Month.",
   },
   {
     Icon: ReceiptIcon,
     title: "Mera Khata",
-    text: "Tap + to log an expense - categories fill in for you. See where your money went, tap a category to filter, and tap any expense to edit it.",
+    text: "Tap + to log an expense - the category fills in for you. Tap a category to filter, or any expense to edit it.",
   },
   {
     Icon: HandshakeIcon,
     title: "Udhar Khata",
-    text: "Add people who owe you. Tap a name to record more lent or money paid back, and set a follow-up date so you remember to ask.",
+    text: "Track who owes you. Record what comes back, and set a follow-up date so you remember to ask.",
   },
   {
     Icon: RecurringIcon,
     title: "Subscriptions",
-    text: "Every monthly payment in one list. Tap one to mark it paid or pause it - overdue ones are flagged so nothing slips.",
+    text: "Every monthly payment in one list. Mark one paid, pause it, or see what is overdue.",
   },
   {
     Icon: BellIcon,
-    title: "Turn on reminders",
-    text: "On iPhone, add Khata to your Home Screen first (Share → Add to Home Screen) and open it from there - Apple only allows notifications from the installed app. Then: Settings → Manage notifications → Notify this device, and allow the prompt.",
+    title: "Reminders",
+    text: "Subscriptions due, udhar follow-ups and your daily recap, on your lock screen with the app closed. Turn them on in Settings \u2192 Manage notifications. On iPhone, add Khata to your Home Screen first.",
   },
 ];
-
-const REMINDER_KINDS_STEP: Step = {
-  Icon: BellIcon,
-  title: "What you'll be reminded of",
-  text: "A subscription the evening before it's due, and again on the day if it's unpaid. Someone who owes you, on the follow-up date you set. A recap of your day at 4:30am, and a summary on the 1st. Each has its own switch, and they arrive with the app closed.",
-};
 
 const ASSISTANT_STEP: Step = {
   Icon: SparkleIcon,
   title: "Ask the assistant",
-  text: "Tap the middle button and just say it: \"fuel 3000 shell\", \"who owes me?\" or \"what did I spend this week?\". Type, talk or snap a bill.",
+  text: "Tap the middle button and just say it: \"fuel 3000 shell\" or \"who owes me?\". Type, talk or snap a bill.",
 };
 
 // A few cards that introduce the app. Skippable at any point; finishing or
 // skipping both mark it as seen.
 export function WelcomeTour({ withAssistant, onClose }: { withAssistant: boolean; onClose: () => void }) {
-  const steps = withAssistant
-    ? [...STEPS, REMINDER_KINDS_STEP, ASSISTANT_STEP]
-    : [...STEPS, REMINDER_KINDS_STEP];
+  const steps = withAssistant ? [...STEPS, ASSISTANT_STEP] : STEPS;
   const [index, setIndex] = useState(0);
   const step = steps[index];
   const last = index === steps.length - 1;
