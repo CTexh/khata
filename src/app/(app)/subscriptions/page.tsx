@@ -90,6 +90,15 @@ function Avatar({
       <img
         src={src}
         alt={name}
+        width={size === "sm" ? 40 : 64}
+        height={size === "sm" ? 40 : 64}
+        // Logos below the fold are not fetched until they are scrolled to, and
+        // decoding happens off the critical path. no-referrer keeps the app's
+        // URL out of the logo service's logs - it only needs the domain that
+        // is already in the request path.
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
         className={`${dim} rounded-full object-cover shrink-0 bg-white`}
         onError={() => setSrcIndex((i) => i + 1)}
       />
