@@ -23,8 +23,14 @@ import {
   recapIsEmpty,
   summaryMonth,
 } from "@/lib/reminders";
+import {
+  monthlySummaryMessage,
+  recapMessage,
+  subscriptionMessage,
+  udharMessage,
+} from "@/lib/reminder-messages";
 import { addDays, pakistanMinutes, pakistanToday } from "@/lib/expense-parse";
-import { MONTH_NAMES, fmtDateLabel, fmtRs } from "@/lib/format";
+import { fmtDateLabel } from "@/lib/format";
 
 // The hours the reminders belong to, in Pakistan time.
 export const EVENING_HOUR = 18;
@@ -63,50 +69,18 @@ export async function sendEveningReminders(
   const pending: { key: string; message: PushMessage }[] = [];
   if (user.prefs.subscriptions) {
     pending.push(
-      ...due.subsTomorrow.map((item) => ({
-        key: item.key,
-        message: {
-          title: `${item.name} due tomorrow`,
-          body: `${fmtRs(item.amount)} on ${fmtDateLabel(item.date)}. Tap to see it.`,
-          url: `/subscriptions?open=${encodeURIComponent(item.id)}`,
-          tag: item.key,
-        },
-      })),
-      ...due.subsToday.map((item) => ({
-        key: item.key,
-        message: {
-          title: `${item.name} due today`,
-          body: `${fmtRs(item.amount)}, still unpaid. Tap to mark it paid.`,
-          url: `/subscriptions?open=${encodeURIComponent(item.id)}`,
-          tag: item.key,
-        },
-      }))
+      ...due.subsTomorrow.map((item) => ({ key: item.key, message: subscriptionMessage(item, "before") })),
+      ...due.subsToday.map((item) => ({ key: item.key, message: subscriptionMessage(item, "due") }))
     );
   }
   if (user.prefs.udhar) {
     pending.push(
-      ...due.reachOut.map((item) => ({
-        key: item.key,
-        message: {
-          title: `${item.name} owes you ${fmtRs(item.amount)}`,
-          body: "Today is the follow-up date you set. Tap to see their khata.",
-          url: `/udhar-khata?open=${encodeURIComponent(item.id)}`,
-          tag: item.key,
-        },
-      }))
+      ...due.reachOut.map((item) => ({ key: item.key, message: udharMessage(item) }))
     );
   }
   const summaryFor = summaryMonth(today);
   if (summaryFor && user.prefs.monthlySummary) {
-    pending.push({
-      key: summaryFor.key,
-      message: {
-        title: `${MONTH_NAMES[summaryFor.month - 1]} is wrapped up`,
-        body: "Tap to see where last month went.",
-        url: "/expenses",
-        tag: summaryFor.key,
-      },
-    });
+    pending.push({ key: summaryFor.key, message: monthlySummaryMessage(summaryFor.month, summaryFor.key) });
   }
 
   for (const reminder of pending) {
@@ -142,14 +116,7 @@ export async function sendDailyRecap(user: NotificationRecipient, date: string):
     // unless a missed run is being caught up days later, when the date is
     // clearer.
     const day = date === addDays(pakistanToday(), -1) ? "Yesterday" : fmtDateLabel(date);
-    const delivered = await sendPush(user.id, {
-      title: recap.expenses.length ? `${day}: ${fmtRs(spent)} spent` : `${day}: nothing spent`,
-      body: recap.expenses.length
-        ? `${recap.expenses.length} ${recap.expenses.length === 1 ? "expense" : "expenses"} recorded. Add anything you missed.`
-        : "Add anything you forgot to record.",
-      url: "/expenses",
-      tag: key,
-    });
+    const delivered = await sendPush(user.id, recapMessage(day, spent, recap.expenses.length, key));
     if (delivered) result.sent++;
     else await releaseReminder(user.id, key);
   } catch (err) {

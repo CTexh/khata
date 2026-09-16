@@ -10,6 +10,13 @@ import {
   type ReminderPerson,
   type ReminderSubscription,
 } from "../src/lib/reminders.ts";
+import {
+  monthlySummaryMessage,
+  recapMessage,
+  sampleMessages,
+  subscriptionMessage,
+  udharMessage,
+} from "../src/lib/reminder-messages.ts";
 
 let pass = 0;
 let fail = 0;
@@ -103,5 +110,31 @@ check(
   recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [{ name: "Netflix", amount: 1200 }] }),
   false
 );
+/* ---------- the words on each notification ---------- */
+
+const item = { key: "sub:s1:2026-09-17:before", id: "s 1", name: "Netflix", amount: 1200, date: "2026-09-17" };
+check("a subscription due tomorrow", subscriptionMessage(item, "before"), {
+  title: "Netflix due tomorrow",
+  body: "Rs 1,200 on 17 Sept 2026. Tap to see it.",
+  url: "/subscriptions?open=s%201",
+  tag: item.key,
+});
+check("one due today", subscriptionMessage(item, "due").body, "Rs 1,200, still unpaid. Tap to mark it paid.");
+check("a follow-up", udharMessage({ ...item, name: "Ali", amount: 700 }).title, "Ali owes you Rs 700");
+check("a recap", recapMessage("Yesterday", 3700, 2, "k"), {
+  title: "Yesterday: Rs 3,700 spent",
+  body: "2 expenses recorded. Add anything you missed.",
+  url: "/expenses",
+  tag: "k",
+});
+check("a recap of a day with nothing on it", recapMessage("Yesterday", 0, 0, "k").title, "Yesterday: nothing spent");
+check("a month wrapped up", monthlySummaryMessage(8, "k").title, "August is wrapped up");
+
+// The previews in Settings must be the real messages, not lookalikes.
+const samples = sampleMessages();
+check("one sample of every kind", samples.length, 5);
+check("no sample can claim a real reminder's key", samples.every((m) => m.tag?.startsWith("sample:")), true);
+check("no sample says Khata in its title", samples.some((m) => m.title.includes("Khata")), false);
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
