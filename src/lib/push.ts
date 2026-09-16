@@ -9,6 +9,10 @@
 import webpush from "web-push";
 import { deletePushSubscription, listPushSubscriptions, type PushSubscriptionRow } from "@/lib/db";
 
+// How a notification should read, going by what a phone actually shows: the
+// app's name and icon are already in the header, so the title is the news
+// itself - short, specific, no "Khata" - and the body carries the figures.
+// Both are kept well inside what a lock screen shows before it truncates.
 export type PushMessage = { title: string; body: string; url?: string; tag?: string };
 
 const PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY ?? "";

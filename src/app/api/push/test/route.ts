@@ -13,8 +13,10 @@ export async function POST() {
   if (!session.isAdmin) return NextResponse.json({ error: "Not available on this account." }, { status: 403 });
 
   const delivered = await sendPush(session.userId, {
-    title: "Khata",
-    body: "Notifications are working. This is what a reminder will look like.",
+    // The phone already shows the app's name and icon, so the title is the
+    // message itself - never "Khata".
+    title: "Notifications are on",
+    body: "Reminders will arrive here, like this one.",
     url: "/",
     tag: "khata-test",
   });
