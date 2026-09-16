@@ -184,37 +184,6 @@ export default function Home() {
         </div>
       </section>
 
-      {view && view.total > 0 && (
-        // Where it went, at a glance: one bar for the shape of the period and
-        // the biggest few named underneath. The full breakdown, and filtering
-        // by category, live in Mera Khata.
-        <Link href="/expenses" className="card p-4 rise block" aria-label="Where your money went - open Mera Khata">
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-[15px] font-extrabold">Where it went</h2>
-            <span className="text-[12px]" style={{ color: "var(--muted)" }}>
-              {view.categories} {view.categories === 1 ? "category" : "categories"}
-            </span>
-          </div>
-          <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full gap-[2px]" style={{ background: "var(--hairline)" }} aria-hidden>
-            {view.breakdown.map((b) => (
-              <span
-                key={b.category}
-                style={{ width: `${(b.amount / view.total) * 100}%`, background: categoryVars(b.category).fg, minWidth: 3 }}
-              />
-            ))}
-          </div>
-          <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
-            {view.breakdown.map((b) => (
-              <li key={b.category} className="flex items-center gap-2 min-w-0">
-                <span className="h-2 w-2 rounded-full shrink-0" style={{ background: categoryVars(b.category).fg }} aria-hidden />
-                <span className="text-[13px] font-semibold truncate">{b.category}</span>
-                <span className="text-[13px] font-extrabold tabular ml-auto shrink-0">{fmtRs(b.amount)}</span>
-              </li>
-            ))}
-          </ul>
-        </Link>
-      )}
-
       <section className="grid grid-cols-2 gap-3">
         <Link href="/udhar-khata" className="card p-4 rise flex flex-col gap-3">
           <span className="icon-tile !w-10 !h-10 !rounded-xl" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
@@ -249,6 +218,37 @@ export default function Home() {
           </span>
         </Link>
       </section>
+
+      {view && view.total > 0 && (
+        // Where it went, at a glance: one bar for the shape of the period and
+        // the biggest few named underneath. The full breakdown, and filtering
+        // by category, live in Mera Khata.
+        <Link href="/expenses" className="card p-4 rise block" aria-label="Where your money went - open Mera Khata">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-[15px] font-extrabold">Where it went</h2>
+            <span className="text-[12px]" style={{ color: "var(--muted)" }}>
+              {view.categories} {view.categories === 1 ? "category" : "categories"}
+            </span>
+          </div>
+          <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full gap-[2px]" style={{ background: "var(--hairline)" }} aria-hidden>
+            {view.breakdown.map((b) => (
+              <span
+                key={b.category}
+                style={{ width: `${(b.amount / view.total) * 100}%`, background: categoryVars(b.category).fg, minWidth: 3 }}
+              />
+            ))}
+          </div>
+          <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
+            {view.breakdown.map((b) => (
+              <li key={b.category} className="flex items-center gap-2 min-w-0">
+                <span className="h-2 w-2 rounded-full shrink-0" style={{ background: categoryVars(b.category).fg }} aria-hidden />
+                <span className="text-[13px] font-semibold truncate">{b.category}</span>
+                <span className="text-[13px] font-extrabold tabular ml-auto shrink-0">{fmtRs(b.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </Link>
+      )}
 
       <section className="flex flex-col gap-3" aria-labelledby="recent-title">
         <div className="section-head">

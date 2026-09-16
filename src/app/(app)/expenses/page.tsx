@@ -1009,25 +1009,6 @@ function ReviewRow({
   );
 }
 
-// Where the money went, at a glance: one bar split by category, then only
-// the biggest few with their amounts. The full list is one tap away instead of
-// every category being thrown at the reader up front.
-
-function ShareBar({ points }: { points: CategoryPoint[] }) {
-  const grand = points.reduce((s, p) => s + p.total, 0);
-  if (grand <= 0) return null;
-  return (
-    <div className="mt-5 flex h-2.5 w-full overflow-hidden rounded-full gap-[2px]" style={{ background: "rgba(255,255,255,0.12)" }} aria-hidden>
-      {points.map((p) => (
-        <span key={p.category} style={{ width: `${(p.total / grand) * 100}%`, background: categoryVars(p.category).fg, minWidth: 3 }} />
-      ))}
-    </div>
-  );
-}
-
-// Category pills shown before "+N more" takes over.
-const PILLS_SHOWN = 6;
-
 function dayHeading(ymd: string): string {
   const d = new Date();
   const local = (x: Date) =>
@@ -1064,7 +1045,6 @@ function ExpensesView({
   const [searching, setSearching] = useState(false);
   const { categories, setCategories } = useCategories();
   const [managing, setManaging] = useState(false);
-  const [showAllPills, setShowAllPills] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const monthParam = scope === "month" ? `&month=${month}` : "";
@@ -1285,7 +1265,6 @@ function ExpensesView({
             </span>
           )}
         </div>
-        <ShareBar points={points} />
       </section>
 
       {needsReview && selected !== "Uncategorised" && (
@@ -1339,38 +1318,34 @@ function ExpensesView({
             </div>
           </div>
 
-          {/* Selectable category pills. They wrap onto as many lines as they
-              need rather than running off the side of the screen, and past a
-              handful the rest stay behind "+N more" so the list never buries
-              the expenses. */}
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by category">
-            <button type="button" onClick={() => pick(null)} aria-pressed={!selected} className="cat-pill" data-on={!selected ? "" : undefined}>
+          {/* "All" stays put; the categories scroll sideways beside it, so a
+              long list neither wraps into a wall of pills nor hides anything -
+              it just keeps going past the edge. */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => pick(null)}
+              aria-pressed={!selected}
+              className="cat-pill shrink-0"
+              data-on={!selected ? "" : undefined}
+            >
               All
             </button>
-            {(showAllPills ? points : points.slice(0, PILLS_SHOWN)).map((p) => (
-              <button
-                key={p.category}
-                type="button"
-                onClick={() => pick(p.category)}
-                aria-pressed={selected === p.category}
-                className="cat-pill"
-                data-on={selected === p.category ? "" : undefined}
-              >
-                <span aria-hidden>{categoryEmoji(p.category)}</span>
-                <span className="truncate">{p.category}</span>
-              </button>
-            ))}
-            {points.length > PILLS_SHOWN && (
-              <button
-                type="button"
-                onClick={() => setShowAllPills((v) => !v)}
-                aria-expanded={showAllPills}
-                className="cat-pill"
-                style={{ color: "var(--accent)" }}
-              >
-                {showAllPills ? "Less" : `+${points.length - PILLS_SHOWN} more`}
-              </button>
-            )}
+            <div className="nav-scroll flex gap-2 overflow-x-auto flex-1 -mr-4 pr-4 py-0.5" role="group" aria-label="Filter by category">
+              {points.map((p) => (
+                <button
+                  key={p.category}
+                  type="button"
+                  onClick={() => pick(p.category)}
+                  aria-pressed={selected === p.category}
+                  className="cat-pill shrink-0"
+                  data-on={selected === p.category ? "" : undefined}
+                >
+                  <span aria-hidden>{categoryEmoji(p.category)}</span>
+                  {p.category}
+                </button>
+              ))}
+            </div>
           </div>
 
           {searching && (
