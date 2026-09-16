@@ -13,7 +13,6 @@ import {
 import {
   monthlySummaryMessage,
   recapMessage,
-  sampleMessages,
   subscriptionMessage,
   udharMessage,
 } from "../src/lib/reminder-messages.ts";
@@ -130,11 +129,15 @@ check("a recap", recapMessage("Yesterday", 3700, 2, "k"), {
 check("a recap of a day with nothing on it", recapMessage("Yesterday", 0, 0, "k").title, "Yesterday: nothing spent");
 check("a month wrapped up", monthlySummaryMessage(8, "k").title, "August is wrapped up");
 
-// The previews in Settings must be the real messages, not lookalikes.
-const samples = sampleMessages();
-check("one sample of every kind", samples.length, 5);
-check("no sample can claim a real reminder's key", samples.every((m) => m.tag?.startsWith("sample:")), true);
-check("no sample says Khata in its title", samples.some((m) => m.title.includes("Khata")), false);
+// The phone already shows the app's name: a title that repeats it wastes the
+// only line anyone reads.
+check(
+  "no notification says Khata in its title",
+  [subscriptionMessage(item, "due"), udharMessage(item), recapMessage("Yesterday", 1, 1, "k"), monthlySummaryMessage(8, "k")].some(
+    (m) => m.title.includes("Khata")
+  ),
+  false
+);
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

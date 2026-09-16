@@ -52,28 +52,3 @@ export function recapMessage(day: string, spent: number, expenses: number, key: 
     tag: key,
   };
 }
-
-// One of each, with stand-in figures, for checking how they look on a phone.
-// The keys are marked as samples so they can never collide with a real
-// reminder's claim.
-export function sampleMessages(): PushMessage[] {
-  const today = new Date();
-  const tomorrow = new Date(today.getTime() + 86_400_000);
-  const ymd = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const month = today.getMonth() === 0 ? 12 : today.getMonth();
-
-  return [
-    subscriptionMessage(
-      { key: "sample:sub-before", id: "sample", name: "Netflix", amount: 1200, date: ymd(tomorrow) },
-      "before"
-    ),
-    subscriptionMessage(
-      { key: "sample:sub-due", id: "sample", name: "Spotify", amount: 900, date: ymd(today) },
-      "due"
-    ),
-    udharMessage({ key: "sample:udhar", id: "sample", name: "Ali", amount: 700, date: ymd(today) }),
-    recapMessage("Yesterday", 3700, 2, "sample:recap"),
-    monthlySummaryMessage(month, "sample:summary"),
-  ];
-}

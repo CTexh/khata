@@ -162,7 +162,10 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
       });
       if (!res.ok) throw new Error("save failed");
       setDevice("on");
-      setNote("This device will get reminders, even with the app closed.");
+      // One notification straight away, so switching it on proves itself
+      // rather than leaving you to wonder until 6pm.
+      await fetch("/api/push/test", { method: "POST" }).catch(() => null);
+      setNote("Sent one to this device - reminders will arrive like that, even with the app closed.");
     } catch {
       setNote("Couldn't turn notifications on. Try again, or check this site's settings in your browser.");
     } finally {
@@ -201,49 +204,6 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const test = async () => {
-    setBusy(true);
-    setNote("");
-    try {
-      const res = await fetch("/api/push/test", { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      setNote(
-        data.delivered
-          ? `Sent to ${data.delivered} ${data.delivered === 1 ? "device" : "devices"}. It should appear in a moment.`
-          : "No device is registered yet - turn this device on first."
-      );
-    } catch {
-      setNote("Couldn't send that. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // One of every reminder, spaced out, so they can be seen on the lock screen
-  // the way they will actually arrive.
-  const preview = async () => {
-    setBusy(true);
-    setNote("");
-    try {
-      const res = await fetch("/api/push/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ all: true }),
-      });
-      const data = await res.json().catch(() => ({}));
-      const seconds = Math.round(((data.startsInMs ?? 0) + (data.samples - 1) * (data.everyMs ?? 0)) / 1000);
-      setNote(
-        data.samples
-          ? `Lock your phone now - ${data.samples} samples arrive over the next ${seconds} seconds, one at a time.`
-          : "Couldn't send those. Try again."
-      );
-    } catch {
-      setNote("Couldn't send those. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const hint = {
     loading: "Checking this device…",
     unsupported: "This browser can't show notifications.",
@@ -273,21 +233,6 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
             disabled={busy}
             onChange={(v) => (v ? enable() : disable())}
           />
-        )}
-
-        {device === "on" && (
-          <>
-            <button type="button" className="btn btn-ghost" onClick={test} disabled={busy}>
-              {busy ? "Sending…" : "Send a test notification"}
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={preview} disabled={busy}>
-              Preview every reminder
-            </button>
-            <p className="text-[12.5px]" style={{ color: "var(--muted)" }}>
-              Sends one of each - a subscription due tomorrow and one due today, an Udhar follow-up, a daily recap and a
-              monthly summary - a few seconds apart, so you can lock the phone and see them arrive.
-            </p>
-          </>
         )}
 
         {note && (
