@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ENTER_MS, haptic, morphFrom, reducedMotion, rubberBand, takeOrigin, watchOrigins } from "@/lib/motion";
+import { ENTER_MS, haptic, morphFrom, reducedMotion, rubberBand, springTo, takeOrigin, watchOrigins } from "@/lib/motion";
 
 // One detail view for the whole app: slides up from the bottom on a phone,
 // sits in the middle on a wide screen. Udhar Khata people and subscriptions
@@ -86,6 +86,12 @@ export function Sheet({
   const backdropRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const closing = useRef(false);
+  // True while the entrance is still playing, so nothing else writes to the
+  // transform underneath it.
+  const entering = useRef(true);
+  // The one animation currently driving the panel's transform, so a drag can
+  // take it off the browser cleanly rather than fighting it.
+  const running = useRef<Animation | null>(null);
   const mounted = usePortal();
 
   // Leaves the way it was dragged: down and out, then unmounted. Every route
@@ -100,6 +106,8 @@ export function Sheet({
       onClose();
       return;
     }
+    running.current?.cancel();
+    running.current = null;
     const travel = panel.getBoundingClientRect().height + 24;
     panel.style.transition = `transform ${EXIT_MS}ms var(--ease-settle)`;
     panel.style.transform = `translate3d(0, ${travel}px, 0)`;
@@ -135,18 +143,58 @@ export function Sheet({
     if (!origin || origin.width < 24) return;
 
     const rect = panel.getBoundingClientRect();
+    // The CSS entrance is for sheets with nothing to grow from; this one has.
     panel.style.animation = "none";
     panel.style.transformOrigin = "50% 0%";
-    panel.style.transition = "none";
-    panel.style.transform = morphFrom(rect, origin);
-    panel.style.opacity = "0.35";
+    running.current?.cancel();
+    running.current = springTo(
+      panel,
+      { transform: morphFrom(rect, origin), opacity: 0.35 },
+      { transform: "translate3d(0, 0, 0)", opacity: 1 },
+      ENTER_MS
+    );
+    return () => running.current?.cancel();
+  }, [mounted]);
 
-    const id = requestAnimationFrame(() => {
-      panel.style.transition = `transform ${ENTER_MS}ms var(--ease-enter), opacity 220ms ease-out`;
-      panel.style.transform = "translate3d(0, 0, 0)";
-      panel.style.opacity = "1";
+  // A sheet opens before it knows everything it will contain - a person's
+  // history, a subscription's payments - and that content arrives a moment
+  // later. Left alone the sheet jumps to its new height; this catches the
+  // change, holds the sheet where it was and lets it spring to the new size.
+  // Only the transform moves, so growing costs no more than sliding.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || reducedMotion() || typeof ResizeObserver === "undefined") return;
+
+    const settle = window.setTimeout(() => (entering.current = false), ENTER_MS);
+    let last = panel.getBoundingClientRect().height;
+
+    const observer = new ResizeObserver(() => {
+      const next = panel.getBoundingClientRect().height;
+      const delta = next - last;
+      last = next;
+      // A drag owns the transform; an entrance and an exit own it too.
+      if (entering.current || closing.current || drag.current) return;
+      if (Math.abs(delta) < 6) return;
+      // On a phone the sheet is anchored to the bottom, so all of the change
+      // happens at the top edge; centred on a wide screen, half of it does.
+      const centred = window.matchMedia("(min-width: 640px)").matches;
+      const hold = centred ? delta / 2 : delta;
+
+      running.current?.cancel();
+      running.current = springTo(
+        panel,
+        { transform: `translate3d(0, ${hold.toFixed(1)}px, 0)` },
+        { transform: "translate3d(0, 0, 0)" },
+        ENTER_MS
+      );
     });
-    return () => cancelAnimationFrame(id);
+
+    observer.observe(panel);
+    return () => {
+      observer.disconnect();
+      running.current?.cancel();
+      window.clearTimeout(settle);
+    };
   }, [mounted]);
 
   // The drag. Pointer events cover touch, pen and mouse in one path; the sheet
@@ -162,6 +210,8 @@ export function Sheet({
     const panel = panelRef.current;
     if (!panel || !drag.current) return;
     drag.current.armed = false;
+    running.current?.cancel();
+    running.current = null;
     try {
       panel.setPointerCapture(e.pointerId);
     } catch {}

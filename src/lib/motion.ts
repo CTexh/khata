@@ -79,3 +79,40 @@ export function morphFrom(panel: DOMRect, from: DOMRect): string {
   const dy = from.top + from.height / 2 - (panel.top + panel.height / 2);
   return `translate3d(${dx.toFixed(1)}px, ${dy.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`;
 }
+
+// Reading an easing token out of the stylesheet, so JS-driven motion uses the
+// exact same spring as CSS-driven motion. Falls back to a bezier if the
+// browser cannot parse linear() - the Web Animations API throws on an easing
+// it does not understand, and a sheet that cannot animate must still open.
+export function ease(token: "enter" | "settle" | "press" | "page"): string {
+  if (typeof window === "undefined") return "ease-out";
+  const value = getComputedStyle(document.documentElement).getPropertyValue(`--ease-${token}`).trim();
+  return value || "cubic-bezier(0.22, 1, 0.36, 1)";
+}
+
+// One spring, run by the browser rather than by us.
+//
+// This used to be "set the start, wait a frame, set the end", which is fine
+// until frames stop coming - a backgrounded tab, a phone that has locked -
+// and then the element is left stranded at the start of a movement that never
+// ran. An animation object cannot be stranded: it knows where it should be
+// whenever the page is shown again, and it hands the element back to the
+// stylesheet when it finishes.
+export function springTo(
+  el: HTMLElement,
+  from: Keyframe,
+  to: Keyframe,
+  ms: number,
+  token: "enter" | "settle" | "press" | "page" = "enter"
+): Animation | null {
+  if (typeof el.animate !== "function") return null;
+  try {
+    return el.animate([from, to], { duration: ms, easing: ease(token), fill: "none" });
+  } catch {
+    try {
+      return el.animate([from, to], { duration: ms, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "none" });
+    } catch {
+      return null;
+    }
+  }
+}

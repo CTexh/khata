@@ -25,7 +25,7 @@
   --bad-soft: rgba(208, 59, 59, 0.1);
   --hero-1: #121833;
   --hero-2: #1f2a5c;
-  --tabbar: rgba(255, 255, 255, 0.92);
+  --tabbar: rgba(255, 255, 255, 0.97);
   --inset-hl: rgba(255, 255, 255, 0.45);
   /* category palette - one hue per category, referenced as
   var(--cat-<slug>-bg/fg) so nothing has to detect the theme in JS */
@@ -69,7 +69,7 @@
   --bad-soft: rgba(230, 103, 103, 0.14);
   --hero-1: #161c3a;
   --hero-2: #26306a;
-  --tabbar: rgba(21, 24, 35, 0.94);
+  --tabbar: rgba(21, 24, 35, 0.97);
   --inset-hl: rgba(255, 255, 255, 0.08);
   --cat-default-bg: #3a3f46;         --cat-default-fg: #c9cdd6;
   --cat-uncategorised-bg: #7c2d12;   --cat-uncategorised-fg: #fdba74;
@@ -112,7 +112,7 @@
     --bad-soft: rgba(230, 103, 103, 0.14);
     --hero-1: #161c3a;
     --hero-2: #26306a;
-    --tabbar: rgba(21, 24, 35, 0.94);
+    --tabbar: rgba(21, 24, 35, 0.97);
     --inset-hl: rgba(255, 255, 255, 0.08);
     --cat-default-bg: #3a3f46;         --cat-default-fg: #c9cdd6;
     --cat-uncategorised-bg: #7c2d12;   --cat-uncategorised-fg: #fdba74;
@@ -149,9 +149,13 @@
   --dur-settle: 450ms;
   --dur-press: 360ms;
   --dur-quick: 180ms;
+  /* Pages and small items arrive faster than sheets do: a screen you asked
+     for should already be there, not on its way. */
+  --dur-page: 420ms;
   --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-settle: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-press: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-page: cubic-bezier(0.25, 1, 0.35, 1);
   /* how far the app behind a sheet recedes */
   --depth-scale: 0.95;
   --depth-blur: 2px;
@@ -161,6 +165,7 @@
   :root {
     --ease-enter: linear(0.0000 0.0%, 0.0536 4.2%, 0.1770 8.3%, 0.3280 12.5%, 0.4801 16.7%, 0.6177 20.8%, 0.7337 25.0%, 0.8259 29.2%, 0.8956 33.3%, 0.9455 37.5%, 0.9793 41.7%, 1.0005 45.8%, 1.0126 50.0%, 1.0182 54.2%, 1.0195 58.3%, 1.0184 62.5%, 1.0159 66.7%, 1.0128 70.8%, 1.0098 75.0%, 1.0071 79.2%, 1.0048 83.3%, 1.0030 87.5%, 1.0016 91.7%, 1.0007 95.8%, 1.0000 100.0%);
     --ease-settle: linear(0.0000 0.0%, 0.0455 4.2%, 0.1470 8.3%, 0.2686 12.5%, 0.3906 16.7%, 0.5029 20.8%, 0.6010 25.0%, 0.6838 29.2%, 0.7521 33.3%, 0.8075 37.5%, 0.8517 41.7%, 0.8865 45.8%, 0.9138 50.0%, 0.9350 54.2%, 0.9514 58.3%, 0.9639 62.5%, 0.9735 66.7%, 0.9808 70.8%, 0.9863 75.0%, 0.9904 79.2%, 0.9936 83.3%, 0.9959 87.5%, 0.9977 91.7%, 0.9990 95.8%, 1.0000 100.0%);
+    --ease-page: linear(0.0000 0.0%, 0.0661 5.0%, 0.2067 10.0%, 0.3657 15.0%, 0.5146 20.0%, 0.6413 25.0%, 0.7427 30.0%, 0.8203 35.0%, 0.8777 40.0%, 0.9189 45.0%, 0.9476 50.0%, 0.9672 55.0%, 0.9801 60.0%, 0.9884 65.0%, 0.9936 70.0%, 0.9967 75.0%, 0.9985 80.0%, 0.9994 85.0%, 0.9999 90.0%, 1.0000 95.0%, 1.0000 100.0%);
     --ease-press: linear(0.0000 0.0%, 0.0467 4.2%, 0.1544 8.3%, 0.2872 12.5%, 0.4229 16.7%, 0.5487 20.8%, 0.6580 25.0%, 0.7488 29.2%, 0.8213 33.3%, 0.8773 37.5%, 0.9193 41.7%, 0.9497 45.8%, 0.9709 50.0%, 0.9853 54.2%, 0.9944 58.3%, 0.9999 62.5%, 1.0029 66.7%, 1.0041 70.8%, 1.0043 75.0%, 1.0039 79.2%, 1.0031 83.3%, 1.0023 87.5%, 1.0014 91.7%, 1.0007 95.8%, 1.0000 100.0%);
   }
 }
@@ -210,9 +215,7 @@
    it. */
 #app-canvas {
   transform-origin: 50% 0%;
-  transition:
-    transform var(--dur-enter) var(--ease-enter),
-    filter var(--dur-settle) var(--ease-settle);
+  transition: transform var(--dur-enter) var(--ease-enter);
 }
 html[data-depth] #app-canvas {
   transform: scale(var(--depth-scale)) translate3d(0, 6px, 0);
@@ -241,18 +244,18 @@ html[data-depth] .tabbar {
    themselves; the arriving thing is whichever of those holds the cards. */
 .page-enter > *:not(:only-child),
 .page-enter > :only-child > * {
-  animation: page-in var(--dur-enter) var(--ease-enter) both;
+  animation: page-in var(--dur-page) var(--ease-page) both;
 }
 .page-enter > *:not(:only-child):nth-child(2),
-.page-enter > :only-child > *:nth-child(2) { animation-delay: 24ms; }
+.page-enter > :only-child > *:nth-child(2) { animation-delay: 16ms; }
 .page-enter > *:not(:only-child):nth-child(3),
-.page-enter > :only-child > *:nth-child(3) { animation-delay: 48ms; }
+.page-enter > :only-child > *:nth-child(3) { animation-delay: 32ms; }
 .page-enter > *:not(:only-child):nth-child(4),
-.page-enter > :only-child > *:nth-child(4) { animation-delay: 72ms; }
+.page-enter > :only-child > *:nth-child(4) { animation-delay: 48ms; }
 .page-enter > *:not(:only-child):nth-child(5),
-.page-enter > :only-child > *:nth-child(5) { animation-delay: 96ms; }
+.page-enter > :only-child > *:nth-child(5) { animation-delay: 64ms; }
 .page-enter > *:not(:only-child):nth-child(n + 6),
-.page-enter > :only-child > *:nth-child(n + 6) { animation-delay: 110ms; }
+.page-enter > :only-child > *:nth-child(n + 6) { animation-delay: 76ms; }
 @keyframes page-in {
   from {
     opacity: 0.55;
@@ -548,8 +551,6 @@ body {
   background: var(--tabbar);
   border: 1px solid var(--ring);
   box-shadow: 0 10px 30px rgba(31, 45, 90, 0.14);
-  backdrop-filter: saturate(160%) blur(12px);
-  -webkit-backdrop-filter: saturate(160%) blur(12px);
 }
 .tab {
   display: flex;
@@ -618,23 +619,31 @@ body {
   }
 }
 .rise {
-  animation: rise var(--dur-enter) var(--ease-enter) both;
+  animation: rise var(--dur-page) var(--ease-page) both;
 }
 
-@keyframes shimmer-bg {
+@keyframes shimmer {
   from {
-    background-position: -200px 0;
+    transform: translateX(-100%);
   }
   to {
-    background-position: 200px 0;
+    transform: translateX(100%);
   }
 }
 .skeleton {
+  position: relative;
   display: inline-block;
+  overflow: hidden;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--surface-2), var(--hairline), var(--surface-2));
-  background-size: 400px 100%;
-  animation: shimmer-bg 1.2s linear infinite;
+  background: var(--surface-2);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--hairline), transparent);
+  transform: translateX(-100%);
+  animation: shimmer 1.3s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

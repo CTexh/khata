@@ -395,9 +395,24 @@ function PersonSheet({
         </h3>
         <div className="card px-3 py-1">
           {txs === null ? (
-            <p className="text-[13px] py-3" style={{ color: "var(--muted)" }} role="status">
-              Loading…
-            </p>
+            // Shaped like the rows it is waiting for, so the sheet is already
+            // the size it will be when they arrive.
+            <ul role="status" aria-label="Loading history">
+              {[0, 1, 2].map((i) => (
+                <li
+                  key={i}
+                  className="flex items-center gap-3 py-3 border-b last:border-b-0"
+                  style={{ borderColor: "var(--hairline)" }}
+                >
+                  <span className="skeleton !rounded-xl" style={{ width: 40, height: 40 }} />
+                  <span className="min-w-0 flex-1 flex flex-col gap-2">
+                    <span className="skeleton" style={{ width: "50%", height: 13 }} />
+                    <span className="skeleton" style={{ width: "32%", height: 11 }} />
+                  </span>
+                  <span className="skeleton shrink-0" style={{ width: 62, height: 15 }} />
+                </li>
+              ))}
+            </ul>
           ) : txs.length === 0 ? (
             <p className="text-[13px] py-3" style={{ color: "var(--muted)" }}>
               No entries yet.
