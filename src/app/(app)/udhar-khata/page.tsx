@@ -24,13 +24,11 @@ function Spinner() {
 /* ---------- summary ---------- */
 
 function Dashboard({ people }: { people: Person[] }) {
-  const owing = people.filter((p) => p.balance > 0);
-  const total = owing.reduce((s, p) => s + p.balance, 0);
-  const received = people.reduce((s, p) => s + p.received, 0);
-  const lent = people.reduce((s, p) => s + p.lent, 0);
-  const overdue = owing.filter((p) => dueDateInfo(p.due_date)?.status === "overdue").length;
-  const recovered = lent > 0 ? Math.round((received / lent) * 100) : 0;
+  const total = people.filter((p) => p.balance > 0).reduce((sum, p) => sum + p.balance, 0);
 
+  // The one number that matters. Who owes it, how overdue they are and how
+  // much has come back are all in the list below, per person, where they can
+  // be acted on.
   return (
     <section className="hero-panel p-6 rise">
       <p className="hero-muted text-[14px] font-semibold">Owed to you</p>
@@ -39,26 +37,6 @@ function Dashboard({ people }: { people: Person[] }) {
         <span className="text-[42px] font-extrabold leading-none tracking-tight">
           {fmtRs(total).replace(/^−?Rs\s/, "")}
         </span>
-      </p>
-      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[14px]">
-        <span>
-          <span className="font-extrabold">{owing.length}</span>{" "}
-          <span className="hero-muted">{owing.length === 1 ? "person" : "people"}</span>
-        </span>
-        {overdue > 0 && (
-          <span className="font-extrabold" style={{ color: "#ffb4a8" }}>
-            {overdue} overdue
-          </span>
-        )}
-        <span>
-          <span className="hero-muted">Paid back</span> <span className="font-extrabold">{recovered}%</span>
-        </span>
-      </div>
-      <div className="mt-5 h-2.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.14)" }} aria-hidden>
-        <div className="h-full rounded-full" style={{ width: `${recovered}%`, background: "#7ee2a8" }} />
-      </div>
-      <p className="hero-muted text-[12px] mt-2">
-        {fmtRs(received)} returned of {fmtRs(lent)} lent
       </p>
     </section>
   );
