@@ -98,17 +98,25 @@ export function ease(token: "enter" | "settle" | "press" | "page"): string {
 // ran. An animation object cannot be stranded: it knows where it should be
 // whenever the page is shown again, and it hands the element back to the
 // stylesheet when it finishes.
+// `additive` stacks this movement on top of whatever is already moving the
+// element rather than replacing it - a sheet that grows while it is still
+// opening does both at once, instead of one cancelling the other.
 export function springTo(
   el: HTMLElement,
   from: Keyframe,
   to: Keyframe,
   ms: number,
-  token: "enter" | "settle" | "press" | "page" = "enter"
+  token: "enter" | "settle" | "press" | "page" = "enter",
+  additive = false
 ): Animation | null {
   if (typeof el.animate !== "function") return null;
+  const options: KeyframeAnimationOptions = { duration: ms, easing: ease(token), fill: "none" };
+  if (additive) options.composite = "add";
   try {
-    return el.animate([from, to], { duration: ms, easing: ease(token), fill: "none" });
+    return el.animate([from, to], options);
   } catch {
+    // Either the easing or additive composition was refused; drop both rather
+    // than the animation.
     try {
       return el.animate([from, to], { duration: ms, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "none" });
     } catch {

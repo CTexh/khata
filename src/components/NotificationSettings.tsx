@@ -215,6 +215,10 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
   }[device];
 
   const switchable = device === "on" || device === "off";
+  // The switch is in place from the first frame, disabled until we know what
+  // to show. Revealing it a moment later would change the panel's height just
+  // as it finishes opening.
+  const showSwitch = switchable || device === "loading";
 
   return (
     <Sheet title="Notifications" onClose={onBack}>
@@ -226,11 +230,11 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
           </p>
         </div>
 
-        {switchable && (
+        {showSwitch && (
           <Switch
             label="Notify this device"
             checked={device === "on"}
-            disabled={busy}
+            disabled={busy || !switchable}
             onChange={(v) => (v ? enable() : disable())}
           />
         )}

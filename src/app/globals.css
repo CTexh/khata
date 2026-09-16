@@ -244,7 +244,7 @@ html[data-depth] .tabbar {
    themselves; the arriving thing is whichever of those holds the cards. */
 .page-enter > *:not(:only-child),
 .page-enter > :only-child > * {
-  animation: page-in var(--dur-page) var(--ease-page) both;
+  animation: page-in var(--dur-page) var(--ease-page) backwards;
 }
 .page-enter > *:not(:only-child):nth-child(2),
 .page-enter > :only-child > *:nth-child(2) { animation-delay: 16ms; }
@@ -619,7 +619,7 @@ body {
   }
 }
 .rise {
-  animation: rise var(--dur-page) var(--ease-page) both;
+  animation: rise var(--dur-page) var(--ease-page) backwards;
 }
 
 @keyframes shimmer {
@@ -684,6 +684,51 @@ body {
   background: var(--ink);
   border-color: transparent;
   color: var(--page);
+}
+
+/* Opening the assistant. The composer rises from the bottom of the screen -
+   which is where the button that opened it sits - the bar settles down from
+   the top, and the conversation fades up between them.
+
+   Deliberately no transform on .chat-body: the chat scrolls itself to the
+   newest message the moment it mounts, and a transform on the scrolling area
+   would move the ground under that. Opacity moves nothing. */
+.chat-topbar {
+  animation: chat-top var(--dur-page) var(--ease-page) backwards;
+}
+.chat-body {
+  animation: chat-fade 280ms ease-out backwards;
+}
+.chat-composer {
+  animation: chat-rise var(--dur-enter) var(--ease-enter) 40ms backwards;
+}
+@keyframes chat-top {
+  from {
+    opacity: 0.4;
+    transform: translate3d(0, -10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes chat-fade {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes chat-rise {
+  from {
+    opacity: 0.4;
+    transform: translate3d(0, 26px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---- assistant: full-screen chat ---- */

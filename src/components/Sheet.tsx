@@ -89,10 +89,15 @@ export function Sheet({
   // True while the entrance is still playing, so nothing else writes to the
   // transform underneath it.
   const entering = useRef(true);
-  // The one animation currently driving the panel's transform, so a drag can
-  // take it off the browser cleanly rather than fighting it.
-  const running = useRef<Animation | null>(null);
+  // Everything currently moving the panel. A sheet can be opening and growing
+  // at the same time, so this is a list, and a drag or an exit clears the lot.
+  const running = useRef<Animation[]>([]);
   const mounted = usePortal();
+
+  const stop = useCallback(() => {
+    running.current.forEach((animation) => animation.cancel());
+    running.current = [];
+  }, []);
 
   // Leaves the way it was dragged: down and out, then unmounted. Every route
   // out of the sheet comes through here, so the close button, the backdrop,
@@ -106,8 +111,7 @@ export function Sheet({
       onClose();
       return;
     }
-    running.current?.cancel();
-    running.current = null;
+    stop();
     const travel = panel.getBoundingClientRect().height + 24;
     panel.style.transition = `transform ${EXIT_MS}ms var(--ease-settle)`;
     panel.style.transform = `translate3d(0, ${travel}px, 0)`;
@@ -116,7 +120,7 @@ export function Sheet({
       backdrop.style.opacity = "0";
     }
     window.setTimeout(onClose, EXIT_MS - 40);
-  }, [onClose]);
+  }, [onClose, stop]);
 
   useEffect(() => {
     watchOrigins();
@@ -146,14 +150,15 @@ export function Sheet({
     // The CSS entrance is for sheets with nothing to grow from; this one has.
     panel.style.animation = "none";
     panel.style.transformOrigin = "50% 0%";
-    running.current?.cancel();
-    running.current = springTo(
+    stop();
+    const entrance = springTo(
       panel,
       { transform: morphFrom(rect, origin), opacity: 0.35 },
       { transform: "translate3d(0, 0, 0)", opacity: 1 },
       ENTER_MS
     );
-    return () => running.current?.cancel();
+    if (entrance) running.current.push(entrance);
+    return stop;
   }, [mounted]);
 
   // A sheet opens before it knows everything it will contain - a person's
@@ -172,27 +177,33 @@ export function Sheet({
       const next = panel.getBoundingClientRect().height;
       const delta = next - last;
       last = next;
-      // A drag owns the transform; an entrance and an exit own it too.
-      if (entering.current || closing.current || drag.current) return;
+      // A drag owns the transform outright, and there is nothing to catch up
+      // to once the sheet is on its way out.
+      if (closing.current || drag.current) return;
       if (Math.abs(delta) < 6) return;
       // On a phone the sheet is anchored to the bottom, so all of the change
       // happens at the top edge; centred on a wide screen, half of it does.
       const centred = window.matchMedia("(min-width: 640px)").matches;
       const hold = centred ? delta / 2 : delta;
 
-      running.current?.cancel();
-      running.current = springTo(
+      // Mid-entrance the sheet is already moving, so this rides on top of it;
+      // afterwards it is the only thing moving and replaces the last one.
+      if (!entering.current) stop();
+      const grow = springTo(
         panel,
         { transform: `translate3d(0, ${hold.toFixed(1)}px, 0)` },
         { transform: "translate3d(0, 0, 0)" },
-        ENTER_MS
+        ENTER_MS,
+        "enter",
+        entering.current
       );
+      if (grow) running.current.push(grow);
     });
 
     observer.observe(panel);
     return () => {
       observer.disconnect();
-      running.current?.cancel();
+      stop();
       window.clearTimeout(settle);
     };
   }, [mounted]);
@@ -210,8 +221,7 @@ export function Sheet({
     const panel = panelRef.current;
     if (!panel || !drag.current) return;
     drag.current.armed = false;
-    running.current?.cancel();
-    running.current = null;
+    stop();
     try {
       panel.setPointerCapture(e.pointerId);
     } catch {}
