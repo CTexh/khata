@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { HandshakeIcon, ReceiptIcon, SparkleIcon } from "@/components/icons";
 import { BellIcon, RecurringIcon, WaveIcon } from "@/components/CategoryIcon";
+import { usePageLock } from "@/components/Sheet";
 
 type Step = { Icon: (p: { size?: number }) => React.ReactElement; title: string; text: string };
 
@@ -45,8 +47,12 @@ const ASSISTANT_STEP: Step = {
 export function WelcomeTour({ withAssistant, onClose }: { withAssistant: boolean; onClose: () => void }) {
   const steps = withAssistant ? [...STEPS, ASSISTANT_STEP] : STEPS;
   const [index, setIndex] = useState(0);
+  const [mounted, setMounted] = useState(false);
   const step = steps[index];
   const last = index === steps.length - 1;
+
+  usePageLock();
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -58,7 +64,9 @@ export function WelcomeTour({ withAssistant, onClose }: { withAssistant: boolean
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, steps.length]);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-labelledby="tour-title">
       <div className="sheet-panel">
         <div className="flex justify-end px-4 pt-3">
@@ -109,6 +117,7 @@ export function WelcomeTour({ withAssistant, onClose }: { withAssistant: boolean
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

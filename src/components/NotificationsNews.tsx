@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePageLock } from "@/components/Sheet";
 import { BellIcon } from "@/components/CategoryIcon";
 
@@ -24,6 +25,8 @@ const isStandalone = () =>
 
 export function NotificationsNews({ onSetUp, onClose }: { onSetUp: () => void; onClose: () => void }) {
   usePageLock();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -39,7 +42,9 @@ export function NotificationsNews({ onSetUp, onClose }: { onSetUp: () => void; o
     "Switch on Notify this device, and allow the prompt.",
   ];
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-labelledby="news-title">
       <div className="pop-panel">
         <div className="flex flex-col items-center text-center px-6 pt-8">
@@ -75,6 +80,7 @@ export function NotificationsNews({ onSetUp, onClose }: { onSetUp: () => void; o
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -8,6 +8,7 @@ import { NotificationSettings } from "@/components/NotificationSettings";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
+import { watchOrigins } from "@/lib/motion";
 import { NotificationsNews } from "@/components/NotificationsNews";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
@@ -176,6 +177,7 @@ function primeAppData() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   primeAppData();
+  useEffect(() => watchOrigins(), []);
   const { data: me, refresh: refreshMe } = useCached<{ user: CurrentUser | null }>("/api/auth/me");
   const user = me?.user ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -246,6 +248,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
+      <div id="app-canvas">
       <div
         className="w-full max-w-xl mx-auto px-4 pt-5 sm:pt-8 flex flex-col gap-5"
         style={{
@@ -345,7 +348,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main id="main-content" className="contents">{children}</main>
+        {/* Keyed on the route so each page plays its arrival once, and
+            display:contents so wrapping it changes no layout. */}
+        <main id="main-content" key={pathname} className="contents page-enter">
+          {children}
+        </main>
+      </div>
       </div>
 
       <nav className={`tabbar${user?.aiAccess ? "" : " no-fab"}`} aria-label="Primary navigation">

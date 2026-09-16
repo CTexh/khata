@@ -133,6 +133,137 @@
   }
 }
 
+/* ---- motion ----
+   One set of curves for the whole app. They are damped springs sampled into
+   linear() easings, not hand-picked beziers: an entrance carries a little
+   overshoot and settles, a dismissal has none, and a press releases with the
+   weight of the thing it moved. Browsers without linear() keep the bezier
+   approximation above, which is close enough that nobody will know.
+
+   - enter:  response 0.40s, damping 0.78 - arrivals, sheets, dialogs
+   - settle: response 0.35s, damping 1.00 - exits and anything that must not
+             wobble past its mark
+   - press:  response 0.28s, damping 0.85 - release from a tap or a drag */
+:root {
+  --dur-enter: 550ms;
+  --dur-settle: 450ms;
+  --dur-press: 360ms;
+  --dur-quick: 180ms;
+  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-settle: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-press: cubic-bezier(0.22, 1, 0.36, 1);
+  /* how far the app behind a sheet recedes */
+  --depth-scale: 0.95;
+  --depth-blur: 2px;
+}
+
+@supports (animation-timing-function: linear(0 0%, 1 100%)) {
+  :root {
+    --ease-enter: linear(0.0000 0.0%, 0.0536 4.2%, 0.1770 8.3%, 0.3280 12.5%, 0.4801 16.7%, 0.6177 20.8%, 0.7337 25.0%, 0.8259 29.2%, 0.8956 33.3%, 0.9455 37.5%, 0.9793 41.7%, 1.0005 45.8%, 1.0126 50.0%, 1.0182 54.2%, 1.0195 58.3%, 1.0184 62.5%, 1.0159 66.7%, 1.0128 70.8%, 1.0098 75.0%, 1.0071 79.2%, 1.0048 83.3%, 1.0030 87.5%, 1.0016 91.7%, 1.0007 95.8%, 1.0000 100.0%);
+    --ease-settle: linear(0.0000 0.0%, 0.0455 4.2%, 0.1470 8.3%, 0.2686 12.5%, 0.3906 16.7%, 0.5029 20.8%, 0.6010 25.0%, 0.6838 29.2%, 0.7521 33.3%, 0.8075 37.5%, 0.8517 41.7%, 0.8865 45.8%, 0.9138 50.0%, 0.9350 54.2%, 0.9514 58.3%, 0.9639 62.5%, 0.9735 66.7%, 0.9808 70.8%, 0.9863 75.0%, 0.9904 79.2%, 0.9936 83.3%, 0.9959 87.5%, 0.9977 91.7%, 0.9990 95.8%, 1.0000 100.0%);
+    --ease-press: linear(0.0000 0.0%, 0.0467 4.2%, 0.1544 8.3%, 0.2872 12.5%, 0.4229 16.7%, 0.5487 20.8%, 0.6580 25.0%, 0.7488 29.2%, 0.8213 33.3%, 0.8773 37.5%, 0.9193 41.7%, 0.9497 45.8%, 0.9709 50.0%, 0.9853 54.2%, 0.9944 58.3%, 0.9999 62.5%, 1.0029 66.7%, 1.0041 70.8%, 1.0043 75.0%, 1.0039 79.2%, 1.0031 83.3%, 1.0023 87.5%, 1.0014 91.7%, 1.0007 95.8%, 1.0000 100.0%);
+  }
+}
+
+/* Everything that answers a finger does it the same way: down is immediate,
+   release springs back. Nothing here paints - transform and opacity only, so
+   it stays on the compositor. */
+.btn,
+.chat-round,
+.tab-fab,
+.cat-pill,
+.tab,
+.segmented button,
+.list-row,
+[data-press] {
+  touch-action: manipulation;
+  transition:
+    transform var(--dur-press) var(--ease-press),
+    background-color var(--dur-quick) ease,
+    color var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease,
+    opacity var(--dur-quick) ease;
+}
+.btn:active,
+.chat-round:not(:disabled):active,
+.tab-fab:active,
+.cat-pill:active,
+.tab:active,
+.segmented button:active,
+.list-row:active,
+[data-press]:active {
+  /* Pressing in is quick and linear; only the release carries the spring. */
+  transition-duration: 110ms;
+  transition-timing-function: ease-out;
+}
+.list-row:active,
+.cat-pill:active,
+.segmented button:active {
+  transform: scale(0.975);
+}
+.tab:active {
+  transform: scale(0.92);
+}
+
+/* The app itself, while something is in front of it. It sits back rather than
+   disappearing, so a sheet reads as being above the page and not instead of
+   it. */
+#app-canvas {
+  transform-origin: 50% 0%;
+  transition:
+    transform var(--dur-enter) var(--ease-enter),
+    filter var(--dur-settle) var(--ease-settle);
+}
+html[data-depth] #app-canvas {
+  transform: scale(var(--depth-scale)) translate3d(0, 6px, 0);
+  filter: blur(var(--depth-blur));
+}
+html[data-depth] .tabbar {
+  transform: translateX(-50%) translate3d(0, 14px, 0) scale(0.97);
+  opacity: 0.55;
+}
+.tabbar {
+  transition:
+    transform var(--dur-enter) var(--ease-enter),
+    opacity var(--dur-settle) var(--ease-settle);
+}
+/* Blur is the one expensive part, and the only part worth dropping on a
+   phone that has asked for less. */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-depth] #app-canvas {
+    filter: none;
+  }
+}
+
+/* A page arriving: its cards come in together, a few milliseconds apart, and
+   stop. Capped at six so the last card is never left waiting. */
+/* Most pages are one column wrapping their sections, a few are the sections
+   themselves; the arriving thing is whichever of those holds the cards. */
+.page-enter > *:not(:only-child),
+.page-enter > :only-child > * {
+  animation: page-in var(--dur-enter) var(--ease-enter) both;
+}
+.page-enter > *:not(:only-child):nth-child(2),
+.page-enter > :only-child > *:nth-child(2) { animation-delay: 24ms; }
+.page-enter > *:not(:only-child):nth-child(3),
+.page-enter > :only-child > *:nth-child(3) { animation-delay: 48ms; }
+.page-enter > *:not(:only-child):nth-child(4),
+.page-enter > :only-child > *:nth-child(4) { animation-delay: 72ms; }
+.page-enter > *:not(:only-child):nth-child(5),
+.page-enter > :only-child > *:nth-child(5) { animation-delay: 96ms; }
+.page-enter > *:not(:only-child):nth-child(n + 6),
+.page-enter > :only-child > *:nth-child(n + 6) { animation-delay: 110ms; }
+@keyframes page-in {
+  from {
+    opacity: 0.55;
+    transform: translate3d(0, 10px, 0) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @theme inline {
   --font-sans: var(--font-app);
 }
@@ -252,7 +383,6 @@ body {
   font-size: 14px;
   font-weight: 700;
   color: var(--muted);
-  transition: background-color 160ms ease, color 160ms ease;
   cursor: pointer;
 }
 .segmented button[aria-pressed="true"] {
@@ -277,7 +407,7 @@ body {
   font-size: 16px;
   color: var(--ink);
   outline: none;
-  transition: border-color 150ms, box-shadow 150ms;
+  transition: border-color var(--dur-quick) ease, box-shadow var(--dur-quick) ease;
 }
 
 .field[type="date"],
@@ -322,7 +452,6 @@ body {
   user-select: none;
   min-width: 48px;
   min-height: 48px;
-  transition: transform 120ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
 
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
@@ -459,10 +588,9 @@ body {
   color: #fff;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   box-shadow: 0 0 0 6px var(--page), 0 10px 24px rgba(74, 108, 240, 0.45);
-  transition: transform 140ms ease;
 }
 .tab-fab:active {
-  transform: scale(0.94);
+  transform: scale(0.92);
 }
 
 /* ---- wordmark ---- */
@@ -490,7 +618,7 @@ body {
   }
 }
 .rise {
-  animation: rise 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rise var(--dur-enter) var(--ease-enter) both;
 }
 
 @keyframes shimmer-bg {
@@ -595,10 +723,9 @@ body {
   border: 1px solid var(--ring);
   color: var(--ink);
   box-shadow: var(--glass-shadow);
-  transition: transform 120ms ease, opacity 160ms ease;
 }
-.chat-round:active {
-  transform: scale(0.94);
+.chat-round:not(:disabled):active {
+  transform: scale(0.92);
 }
 .chat-round:disabled {
   opacity: 0.45;
@@ -870,7 +997,7 @@ body {
   align-items: flex-end;
   justify-content: center;
   background: rgba(5, 8, 20, 0.55);
-  animation: sheet-fade 160ms ease both;
+  animation: sheet-fade var(--dur-quick) ease both;
   /* A scroll that runs out inside the sheet stops there instead of carrying
      on down the page behind it. */
   overscroll-behavior: contain;
@@ -885,7 +1012,10 @@ body {
   border-radius: 30px 30px 0 0;
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.25);
   padding-bottom: env(safe-area-inset-bottom);
-  animation: sheet-up 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sheet-up var(--dur-enter) var(--ease-enter) both;
+  /* The drag writes translate3d here; keeping it on its own line means a
+     gesture never fights the entrance animation for the transform. */
+  will-change: transform;
 }
 @media (min-width: 640px) {
   .sheet-backdrop {
@@ -898,6 +1028,10 @@ body {
   .sheet-grip {
     display: none;
   }
+}
+.sheet-grip,
+.sheet-head {
+  touch-action: none;
 }
 .sheet-grip {
   width: 40px;
@@ -923,7 +1057,7 @@ body {
 }
 @keyframes sheet-up {
   from {
-    transform: translateY(40px);
+    transform: translate3d(0, 40px, 0);
   }
   to {
     transform: translateY(0);
@@ -941,7 +1075,7 @@ body {
   border: 1px solid var(--ring);
   border-radius: 28px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-  animation: pop-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: pop-in var(--dur-enter) var(--ease-enter) both;
 }
 @media (max-width: 639px) {
   .sheet-backdrop > .pop-panel {
@@ -1003,7 +1137,6 @@ body {
   padding: 12px 6px;
   text-align: left;
   border-radius: 18px;
-  transition: background-color 140ms ease;
 }
 .list-row:hover {
   background: var(--surface-2);
