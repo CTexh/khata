@@ -1,6 +1,7 @@
 // Tests for reminder emails: what counts as due, and how each email reads.
 import {
   buildRecap,
+  recapIsEmpty,
   dailyRecapEmail,
   pakistanDayWindow,
   findDue,
@@ -129,6 +130,34 @@ check(
   ],
   [true, true, true, true, true, true, true, true, true]
 );
+// A day on which nothing at all happened is not emailed.
+check(
+  "a day with nothing on it is empty",
+  recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [] }),
+  true
+);
+check(
+  "one expense is enough to be worth sending",
+  recapIsEmpty({ date: "2026-09-15", expenses: [{ label: "Shell", amount: 3000 }], ledger: [], subsDue: [], subsPaid: [] }),
+  false
+);
+check(
+  "an Udhar Khata entry on its own counts",
+  recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [{ name: "Ali", amount: 700 }], subsDue: [], subsPaid: [] }),
+  false
+);
+check(
+  "a subscription falling due counts",
+  recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [{ name: "Netflix", amount: 1200, paid: false }], subsPaid: [] }),
+  false
+);
+check(
+  "a subscription marked paid counts",
+  recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [{ name: "Netflix", amount: 1200 }] }),
+  false
+);
+// The wording for a quiet day still exists, for a day that had something on
+// it but no expenses.
 const emptyRecap = dailyRecapEmail({ name: "", recap: { date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [] }, appUrl: url });
 check(
   "quiet day recap",

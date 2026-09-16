@@ -311,6 +311,18 @@ export type RecapData = {
   subsPaid: { name: string; amount: number }[]; // marked paid that day
 };
 
+// A day on which nothing at all was recorded - no expense, no Udhar Khata
+// entry, no subscription due or paid - has nothing worth an email. The nudge
+// to add what you forgot only means something when something happened.
+export function recapIsEmpty(recap: RecapData): boolean {
+  return (
+    recap.expenses.length === 0 &&
+    recap.ledger.length === 0 &&
+    recap.subsDue.length === 0 &&
+    recap.subsPaid.length === 0
+  );
+}
+
 // Sent early the next morning: what was recorded on a day, and a nudge to add
 // anything that was missed.
 export function dailyRecapEmail(o: { name: string; recap: RecapData; appUrl: string }): ReminderEmail {

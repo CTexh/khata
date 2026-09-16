@@ -22,6 +22,7 @@ import { mailConfigured, sendMail } from "@/lib/mailer";
 import {
   buildRecap,
   dailyRecapEmail,
+  recapIsEmpty,
   findDue,
   monthlySummaryEmail,
   subscriptionReminderEmail,
@@ -122,23 +123,31 @@ export async function sendEveningReminders(user: ReminderRecipient, today = paki
   return result;
 }
 
-// The 4:30am recap of the day that just ended.
+// The 4:30am recap of the day that just ended - unless the day was empty, in
+// which case there is nothing to recap and no email goes out. The claim is
+// taken first and kept either way, so the day is settled once: neither a
+// second run nor the app's catch-up rebuilds it.
 export async function sendDailyRecap(user: ReminderRecipient, date: string): Promise<SendResult> {
   const result: SendResult = { sent: 0, errors: [] };
   if (!mailConfigured() || !user.prefs.dailyRecap) return result;
 
   const key = `recap:${date}`;
+  if (!(await claimReminder(user.id, key))) return result;
   try {
-    const sent = await send(user, key, async () => {
-      const recap = await buildRecap(date, {
-        expenses: (from, to) => listExpensesInRange(user.id, from, to),
-        ledger: (from, to) => listLedgerActivity(user.id, from, to),
-        subscriptions: () => listSubscriptions(user.id),
-      });
-      return dailyRecapEmail({ name: user.name || user.username, recap, appUrl: APP_URL });
+    const recap = await buildRecap(date, {
+      expenses: (from, to) => listExpensesInRange(user.id, from, to),
+      ledger: (from, to) => listLedgerActivity(user.id, from, to),
+      subscriptions: () => listSubscriptions(user.id),
     });
-    if (sent) result.sent++;
+    if (recapIsEmpty(recap)) return result;
+    await sendMail({
+      to: user.email,
+      ...dailyRecapEmail({ name: user.name || user.username, recap, appUrl: APP_URL }),
+    });
+    result.sent++;
   } catch (err) {
+    // Not sent after all: let the next run try again.
+    await releaseReminder(user.id, key);
     result.errors.push(`${user.id.slice(0, 8)} recap: ${(err as Error).message.slice(0, 200)}`);
   }
   return result;
