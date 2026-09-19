@@ -9,10 +9,11 @@ const PUBLIC_PATHS = ["/login", "/signup", "/privacy"];
 // login form, but may well want to read the privacy policy.
 const AUTH_PAGES = ["/login", "/signup"];
 
-// Only this exact path may authenticate via x-routine-secret. Scoping it here
-// (rather than a blanket bypass) means a leaked/guessed secret can never skip
-// login for admin pages or any other route — it only ever unlocks this one.
-const ROUTINE_AUTH_PATH = "/api/expenses";
+// Only these exact paths may authenticate via x-routine-secret. Scoping it
+// here (rather than a blanket bypass) means a leaked/guessed secret can never
+// skip login for admin pages or any other route - it only ever unlocks the
+// email routine's own endpoints.
+const ROUTINE_AUTH_PATHS = new Set(["/api/expenses", "/api/routine/unseen", "/api/routine/ingest"]);
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -22,7 +23,7 @@ export function proxy(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.includes(pathname);
 
   const hasValidRoutineSecret =
-    pathname === ROUTINE_AUTH_PATH &&
+    ROUTINE_AUTH_PATHS.has(pathname) &&
     verifyRoutineSecret(request.headers.get("x-routine-secret"));
 
   if (!session && !isPublic && !hasValidRoutineSecret) {

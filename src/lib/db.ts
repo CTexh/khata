@@ -644,6 +644,7 @@ export async function deleteUser(id: string): Promise<void> {
     ensureTablesExist(),
     ensureCategoryTables(),
     ensureReminderTables(),
+    ensureRoutineTables(),
     ensureFeedbackTable(),
     ensureLoginAttemptsTable(),
   ]);
@@ -668,6 +669,7 @@ export async function deleteUser(id: string): Promise<void> {
       { sql: "DELETE FROM reminder_log WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM push_subscriptions WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM notifications WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM routine_seen WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM assistant_feedback WHERE user_id = ?", args: [id] },
       ...(user ? [{ sql: "DELETE FROM login_failures WHERE username = ?", args: [user.username.toLowerCase()] }] : []),
       { sql: "DELETE FROM users WHERE id = ?", args: [id] },
@@ -1622,25 +1624,143 @@ export async function insertExpense(opts: {
   vendor: string | null;
   category: string | null;
   vendorKey: string | null;
+  // The Gmail message an imported expense came from. Only the email routine
+  // sets it, and only after ensureRoutineTables has added the column.
+  sourceId?: string | null;
 }): Promise<string> {
   const c = await db();
   const id = randomUUID();
-  await c.execute({
-    sql: "INSERT INTO expenses (id, user_id, amount, note, expense_date, expense_datetime, created_at, vendor, category, vendor_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    args: [
-      id,
-      opts.userId,
-      opts.amount,
-      opts.note,
-      opts.expenseDateTime.substring(0, 10),
-      opts.expenseDateTime,
-      new Date().toISOString(),
-      opts.vendor,
-      opts.category,
-      opts.vendorKey || null,
-    ],
-  });
+  const base = [
+    id,
+    opts.userId,
+    opts.amount,
+    opts.note,
+    opts.expenseDateTime.substring(0, 10),
+    opts.expenseDateTime,
+    new Date().toISOString(),
+    opts.vendor,
+    opts.category,
+    opts.vendorKey || null,
+  ];
+  await c.execute(
+    opts.sourceId
+      ? {
+          sql: "INSERT INTO expenses (id, user_id, amount, note, expense_date, expense_datetime, created_at, vendor, category, vendor_key, source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          args: [...base, opts.sourceId],
+        }
+      : {
+          sql: "INSERT INTO expenses (id, user_id, amount, note, expense_date, expense_datetime, created_at, vendor, category, vendor_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          args: base,
+        }
+  );
   return id;
+}
+
+/* ---------- the email routine's memory ---------- */
+
+// The routine that copies bank emails into Khata used to remember nothing:
+// every run re-read the emails its window overlapped and re-decided them, and
+// downloaded the whole month's expenses to check for duplicates. Now each
+// email it deals with is recorded here by its Gmail message id - posted,
+// found to be a duplicate, or deliberately skipped - so a later run asks
+// which of its ids are new and reads only those.
+let routineTablesEnsured = false;
+const ROUTINE_SCHEMA = "1";
+export async function ensureRoutineTables(): Promise<void> {
+  if (routineTablesEnsured) return;
+  if (await schemaCurrent("routine", ROUTINE_SCHEMA)) {
+    routineTablesEnsured = true;
+    return;
+  }
+  // The column goes on expenses, so that table has to exist first - on a new
+  // database the ALTER would otherwise fail quietly and the schema still be
+  // marked done.
+  await ensureTablesExist();
+  const c = await db();
+  try {
+    await c.execute(`ALTER TABLE expenses ADD COLUMN source_id TEXT`);
+  } catch {
+    // Column already exists.
+  }
+  // One expense per email, enforced by the database: two runs racing over the
+  // same message cannot both insert it.
+  try {
+    await c.execute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_source ON expenses (user_id, source_id) WHERE source_id IS NOT NULL`
+    );
+  } catch {
+    // Index already exists.
+  }
+  await c.execute(`CREATE TABLE IF NOT EXISTS routine_seen (
+    user_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    detail TEXT,
+    expense_id TEXT,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, message_id)
+  )`);
+  await markSchema("routine", ROUTINE_SCHEMA);
+  routineTablesEnsured = true;
+}
+
+// Of these Gmail message ids, the ones the routine has never dealt with.
+export async function unseenMessageIds(userId: string, ids: string[]): Promise<string[]> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return [];
+  await ensureRoutineTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT message_id FROM routine_seen WHERE user_id = ? AND message_id IN (${unique.map(() => "?").join(",")})`,
+    args: [userId, ...unique],
+  });
+  const seen = new Set(rs.rows.map((r) => r.message_id as string));
+  return unique.filter((id) => !seen.has(id));
+}
+
+export type RoutineOutcome = "posted" | "duplicate" | "skipped";
+
+export async function recordRoutineSeen(
+  userId: string,
+  messageId: string,
+  outcome: RoutineOutcome,
+  detail: string | null,
+  expenseId: string | null
+): Promise<void> {
+  await ensureRoutineTables();
+  const c = await db();
+  await c.execute({
+    sql: `INSERT INTO routine_seen (user_id, message_id, outcome, detail, expense_id, seen_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(user_id, message_id) DO NOTHING`,
+    args: [userId, messageId, outcome, detail, expenseId, new Date().toISOString()],
+  });
+}
+
+// Expenses on a given day, for a given amount, that did not come from an
+// email the routine recorded - typed in, sent over WhatsApp, added by the
+// assistant, or imported before the routine kept a record. These are what an
+// imported email could be a second copy of. A row that did come from a
+// recorded email is a separate bank transaction by definition, so two real
+// Rs 160 fuel stops on one day are never merged.
+export async function untrackedSameDay(
+  userId: string,
+  date: string,
+  amount: number
+): Promise<{ id: string; amount: number; vendor: string | null; date: string }[]> {
+  await ensureRoutineTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT id, amount, vendor, expense_date FROM expenses
+          WHERE user_id = ? AND expense_date = ? AND source_id IS NULL AND ABS(amount - ?) < 0.005`,
+    args: [userId, date, amount],
+  });
+  return rs.rows.map((r) => ({
+    id: r.id as string,
+    amount: Number(r.amount),
+    vendor: (r.vendor as string | null) ?? null,
+    date: r.expense_date as string,
+  }));
 }
 
 /* ---------- assistant messages ---------- */
