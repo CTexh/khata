@@ -194,7 +194,7 @@ export async function findUserById(id: string): Promise<User | null> {
 // Reminders: which kinds each account wants, which devices to notify, and a
 // log of what has been sent so a retried run never sends the same one twice.
 let reminderTablesEnsured = false;
-const REMINDER_SCHEMA = "5";
+const REMINDER_SCHEMA = "6";
 export async function ensureReminderTables(): Promise<void> {
   if (reminderTablesEnsured) return;
   if (await schemaCurrent("reminders", REMINDER_SCHEMA)) {
@@ -210,6 +210,8 @@ export async function ensureReminderTables(): Promise<void> {
     `ALTER TABLE users ADD COLUMN remind_udhar INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE users ADD COLUMN remind_recap INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE users ADD COLUMN remind_summary INTEGER NOT NULL DEFAULT 1`,
+    // Expenses the email routine added from a bank alert.
+    `ALTER TABLE users ADD COLUMN remind_imports INTEGER NOT NULL DEFAULT 1`,
   ]) {
     try {
       await c.execute(sql);
@@ -266,6 +268,7 @@ export type NotificationPrefs = {
   udhar: boolean;
   dailyRecap: boolean;
   monthlySummary: boolean;
+  importedExpenses: boolean;
 };
 
 export type ProfileSettings = {
@@ -280,6 +283,7 @@ export const NOTIFICATION_PREF_COLUMNS = {
   udhar: "remind_udhar",
   dailyRecap: "remind_recap",
   monthlySummary: "remind_summary",
+  importedExpenses: "remind_imports",
 } as const;
 
 const on = (v: unknown) => Number(v ?? 1) === 1;
@@ -288,7 +292,7 @@ export async function getProfileSettings(userId: string): Promise<ProfileSetting
   await ensureReminderTables();
   const c = await db();
   const rs = await c.execute({
-    sql: `SELECT name, remind_subs, remind_udhar, remind_recap, remind_summary FROM users WHERE id = ?`,
+    sql: `SELECT name, remind_subs, remind_udhar, remind_recap, remind_summary, remind_imports FROM users WHERE id = ?`,
     args: [userId],
   });
   const r = rs.rows[0];
@@ -300,6 +304,7 @@ export async function getProfileSettings(userId: string): Promise<ProfileSetting
       udhar: on(r.remind_udhar),
       dailyRecap: on(r.remind_recap),
       monthlySummary: on(r.remind_summary),
+      importedExpenses: on(r.remind_imports),
     },
   };
 }
@@ -339,7 +344,7 @@ export async function listNotificationRecipients(): Promise<NotificationRecipien
   await ensureReminderTables();
   const c = await db();
   const rs = await c.execute(
-    `SELECT DISTINCT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary
+    `SELECT DISTINCT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary, u.remind_imports
      FROM users u JOIN push_subscriptions p ON p.user_id = u.id`
   );
   return rs.rows.map((r) => ({
@@ -351,6 +356,7 @@ export async function listNotificationRecipients(): Promise<NotificationRecipien
       udhar: on(r.remind_udhar),
       dailyRecap: on(r.remind_recap),
       monthlySummary: on(r.remind_summary),
+      importedExpenses: on(r.remind_imports),
     },
   }));
 }
@@ -361,7 +367,7 @@ export async function getNotificationRecipient(userId: string): Promise<Notifica
   await ensureReminderTables();
   const c = await db();
   const rs = await c.execute({
-    sql: `SELECT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary
+    sql: `SELECT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary, u.remind_imports
           FROM users u WHERE u.id = ? AND EXISTS (SELECT 1 FROM push_subscriptions p WHERE p.user_id = u.id)`,
     args: [userId],
   });
@@ -376,6 +382,7 @@ export async function getNotificationRecipient(userId: string): Promise<Notifica
       udhar: on(r.remind_udhar),
       dailyRecap: on(r.remind_recap),
       monthlySummary: on(r.remind_summary),
+      importedExpenses: on(r.remind_imports),
     },
   };
 }
@@ -670,6 +677,7 @@ export async function deleteUser(id: string): Promise<void> {
       { sql: "DELETE FROM push_subscriptions WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM notifications WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM routine_seen WHERE user_id = ?", args: [id] },
+      { sql: "DELETE FROM expense_tombstones WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM assistant_feedback WHERE user_id = ?", args: [id] },
       ...(user ? [{ sql: "DELETE FROM login_failures WHERE username = ?", args: [user.username.toLowerCase()] }] : []),
       { sql: "DELETE FROM users WHERE id = ?", args: [id] },
@@ -1665,7 +1673,7 @@ export async function insertExpense(opts: {
 // found to be a duplicate, or deliberately skipped - so a later run asks
 // which of its ids are new and reads only those.
 let routineTablesEnsured = false;
-const ROUTINE_SCHEMA = "1";
+const ROUTINE_SCHEMA = "2";
 export async function ensureRoutineTables(): Promise<void> {
   if (routineTablesEnsured) return;
   if (await schemaCurrent("routine", ROUTINE_SCHEMA)) {
@@ -1700,6 +1708,20 @@ export async function ensureRoutineTables(): Promise<void> {
     seen_at TEXT NOT NULL,
     PRIMARY KEY (user_id, message_id)
   )`);
+  // What was deleted by hand, so it stays deleted: see rememberDeletion.
+  await c.execute(`CREATE TABLE IF NOT EXISTS expense_tombstones (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    expense_date TEXT NOT NULL,
+    vendor TEXT,
+    deleted_at TEXT NOT NULL
+  )`);
+  try {
+    await c.execute(`CREATE INDEX IF NOT EXISTS idx_tombstones_user_date ON expense_tombstones (user_id, expense_date)`);
+  } catch {
+    // Index already exists.
+  }
   await markSchema("routine", ROUTINE_SCHEMA);
   routineTablesEnsured = true;
 }
@@ -1735,6 +1757,68 @@ export async function recordRoutineSeen(
           ON CONFLICT(user_id, message_id) DO NOTHING`,
     args: [userId, messageId, outcome, detail, expenseId, new Date().toISOString()],
   });
+}
+
+// A deletion is final. Deleting an expense - in the app, or by telling the
+// assistant to - means it should not be there, and the email routine must not
+// bring it back. For an expense that came from a recorded email that is
+// already true: the email is remembered and never read again. For any other
+// expense - typed in, sent over WhatsApp, or imported before the routine kept
+// a record - the payment itself is remembered here, by amount, day and payee,
+// and a bank email for the same payment is skipped as "you deleted this".
+//
+// Undoing an add is deliberately not a deletion: it means the add was a
+// mistake, not that the payment did not happen, so a bank email for it later
+// is still welcome.
+//
+// Kept for 90 days, far longer than any bank takes to send an alert.
+const TOMBSTONE_KEEP_DAYS = 90;
+
+export async function rememberDeletion(userId: string, expenseId: string): Promise<void> {
+  await ensureRoutineTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT amount, expense_date, vendor, source_id FROM expenses WHERE id = ? AND user_id = ?",
+    args: [expenseId, userId],
+  });
+  const r = rs.rows[0];
+  // Gone already, or tied to a recorded email - which is enough on its own,
+  // and a tombstone for it could only get in the way of a second, genuinely
+  // separate payment of the same amount at the same place that day.
+  if (!r || r.source_id) return;
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - TOMBSTONE_KEEP_DAYS * 86_400_000).toISOString();
+  await c.batch(
+    [
+      {
+        sql: `INSERT INTO expense_tombstones (id, user_id, amount, expense_date, vendor, deleted_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [randomUUID(), userId, Number(r.amount), r.expense_date as string, (r.vendor as string | null) ?? null, now.toISOString()],
+      },
+      { sql: "DELETE FROM expense_tombstones WHERE user_id = ? AND deleted_at < ?", args: [userId, cutoff] },
+    ],
+    "write"
+  );
+}
+
+export async function deletedSameDay(
+  userId: string,
+  date: string,
+  amount: number
+): Promise<{ id: string; amount: number; vendor: string | null; date: string; deletedAt: string }[]> {
+  await ensureRoutineTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: `SELECT id, amount, vendor, expense_date, deleted_at FROM expense_tombstones
+          WHERE user_id = ? AND expense_date = ? AND ABS(amount - ?) < 0.005`,
+    args: [userId, date, amount],
+  });
+  return rs.rows.map((r) => ({
+    id: r.id as string,
+    amount: Number(r.amount),
+    vendor: (r.vendor as string | null) ?? null,
+    date: r.expense_date as string,
+    deletedAt: r.deleted_at as string,
+  }));
 }
 
 // Expenses on a given day, for a given amount, that did not come from an
@@ -2562,6 +2646,8 @@ export async function editExpenseRow(
 export async function deleteExpenseRow(userId: string, id: string): Promise<ExpenseRow | null> {
   const before = await getExpenseRow(userId, id);
   if (!before) return null;
+  // Told to delete it: it stays deleted, even when its bank email arrives.
+  await rememberDeletion(userId, id);
   const c = await db();
   await c.execute({ sql: "DELETE FROM expenses WHERE id = ? AND user_id = ?", args: [id, userId] });
   return before;

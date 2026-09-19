@@ -5,6 +5,7 @@ import {
   ensureCategoryTables,
   resolveExpenseCategory,
   upsertVendorRule,
+  rememberDeletion,
 } from "@/lib/db";
 import { canonicalCategory } from "@/lib/categorize";
 import { getSession } from "@/lib/auth";
@@ -83,6 +84,8 @@ export async function DELETE(_req: Request, { params }: Params) {
   const existing = await getExpense(id, session.userId);
   if (!existing) return NextResponse.json({ error: "Expense not found" }, { status: 404 });
 
+  // A deletion is final: the email routine will not bring it back.
+  await rememberDeletion(session.userId, id);
   const c = await db();
   await c.execute({
     sql: "DELETE FROM expenses WHERE id = ? AND user_id = ?",

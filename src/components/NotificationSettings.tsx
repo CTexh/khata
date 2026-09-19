@@ -29,9 +29,16 @@ type Prefs = {
   udhar: boolean;
   dailyRecap: boolean;
   monthlySummary: boolean;
+  importedExpenses: boolean;
 };
 
-const ALL_ON: Prefs = { subscriptions: true, udhar: true, dailyRecap: true, monthlySummary: true };
+const ALL_ON: Prefs = {
+  subscriptions: true,
+  udhar: true,
+  dailyRecap: true,
+  monthlySummary: true,
+  importedExpenses: true,
+};
 
 // In the order they reach you during a day.
 const KINDS: { key: keyof Prefs; title: string; hint: string }[] = [
@@ -39,6 +46,7 @@ const KINDS: { key: keyof Prefs; title: string; hint: string }[] = [
   { key: "udhar", title: "Udhar follow-ups", hint: "On the follow-up date you set." },
   { key: "dailyRecap", title: "Daily recap", hint: "4:30am, on days with activity." },
   { key: "monthlySummary", title: "Monthly summary", hint: "On the 1st, for the month just gone." },
+  { key: "importedExpenses", title: "New expenses from your bank", hint: "When one is added from a bank alert." },
 ];
 
 const isIos = () =>

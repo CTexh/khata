@@ -5,7 +5,7 @@ import { pushConfigured } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
-const KINDS = ["subscriptions", "udhar", "dailyRecap", "monthlySummary"] as const;
+const KINDS = ["subscriptions", "udhar", "dailyRecap", "monthlySummary", "importedExpenses"] as const;
 
 export async function GET() {
   const session = await getSession();
@@ -14,7 +14,7 @@ export async function GET() {
   const settings = await getProfileSettings(session.userId);
   return NextResponse.json({
     name: settings?.name ?? "",
-    prefs: settings?.prefs ?? { subscriptions: true, udhar: true, dailyRecap: true, monthlySummary: true },
+    prefs: settings?.prefs ?? { subscriptions: true, udhar: true, dailyRecap: true, monthlySummary: true, importedExpenses: true },
     // Whether this deployment can send notifications at all.
     notificationsAvailable: pushConfigured(),
   });

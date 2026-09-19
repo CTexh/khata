@@ -1,6 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import {
+  deletedSameDay,
   ensureCategoryTables,
+  getNotificationRecipient,
   insertExpense,
   recordRoutineSeen,
   resolveExpenseCategory,
@@ -9,6 +11,8 @@ import {
 } from "@/lib/db";
 import { routineUserId } from "@/lib/routine-auth";
 import { isMessageId, isSameExpense } from "@/lib/routine-match";
+import { sendPush } from "@/lib/push";
+import { importedExpensesMessage } from "@/lib/reminder-messages";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +59,7 @@ export async function POST(req: Request) {
   const posted: { source_id: string; id: string; amount: number; vendor: string | null; date: string; category: string | null }[] = [];
   const duplicates: { source_id: string; amount: number; vendor: string | null; date: string; matched_id: string }[] = [];
   const already: string[] = [];
+  const deletedByYou: { source_id: string; amount: number; vendor: string | null; date: string; deleted_on: string }[] = [];
   const recordedSkips: string[] = [];
   const invalid: { source_id: unknown; error: string }[] = [];
 
@@ -96,6 +101,18 @@ export async function POST(req: Request) {
       await recordRoutineSeen(userId, sourceId, "duplicate", `matches ${match.id}`, match.id);
       fresh.delete(sourceId);
       duplicates.push({ source_id: sourceId, amount, vendor, date, matched_id: match.id });
+      continue;
+    }
+
+    // Deleted by hand: it stays deleted. See rememberDeletion.
+    const tombstone = (await deletedSameDay(userId, date, amount)).find((t) =>
+      isSameExpense({ amount, date, vendor }, t)
+    );
+    if (tombstone) {
+      const deletedOn = tombstone.deletedAt.slice(0, 10);
+      await recordRoutineSeen(userId, sourceId, "skipped", `you deleted this expense on ${deletedOn}`, null);
+      fresh.delete(sourceId);
+      deletedByYou.push({ source_id: sourceId, amount, vendor, date, deleted_on: deletedOn });
       continue;
     }
 
@@ -150,5 +167,33 @@ export async function POST(req: Request) {
     recordedSkips.push(s.source_id);
   }
 
-  return NextResponse.json({ posted, duplicates, already, skipped: recordedSkips, invalid });
+  // One notification for what this run added - after the response, so the
+  // routine is never kept waiting on a phone's push service. Only for someone
+  // who has a device registered and has not switched this kind off.
+  if (posted.length) {
+    after(async () => {
+      try {
+        const recipient = await getNotificationRecipient(userId);
+        if (!recipient?.prefs.importedExpenses) return;
+        await sendPush(
+          userId,
+          importedExpensesMessage(
+            posted.map((p) => ({ amount: p.amount, vendor: p.vendor, category: p.category })),
+            posted[0].source_id
+          )
+        );
+      } catch (err) {
+        console.error(JSON.stringify({ evt: "import_notify", error: (err as Error).message.slice(0, 200) }));
+      }
+    });
+  }
+
+  return NextResponse.json({
+    posted,
+    duplicates,
+    deleted_by_you: deletedByYou,
+    already,
+    skipped: recordedSkips,
+    invalid,
+  });
 }

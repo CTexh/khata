@@ -11,6 +11,7 @@ import {
   type ReminderSubscription,
 } from "../src/lib/reminders.ts";
 import {
+  importedExpensesMessage,
   monthlySummaryMessage,
   notificationKind,
   recapMessage,
@@ -164,6 +165,56 @@ check("kind: no tag", notificationKind(null), "general");
   check("ago: older", fmtAgo(at(2026, 8, 2, 9, 0), now), "2 Sept");
   check("ago: last year", fmtAgo(at(2025, 11, 20, 9, 0), now), "20 Dec 2025");
 }
+
+
+// Expenses the email routine added: one notification per run.
+check("one import", importedExpensesMessage([{ amount: 4324, vendor: "Euro Food Town", category: "Groceries" }], "m1"), {
+  title: "Rs 4,324 at Euro Food Town",
+  body: "Added from your bank alert under Groceries. Tap to review it.",
+  url: "/expenses",
+  tag: "import:m1",
+});
+check(
+  "one import without a category asks for one",
+  importedExpensesMessage([{ amount: 160, vendor: "PSO LAHORE", category: null }], "m2").body,
+  "Added from your bank alert. Tap to give it a category."
+);
+check(
+  "two imports",
+  importedExpensesMessage(
+    [
+      { amount: 5020, vendor: "White Gold Fill", category: "Car" },
+      { amount: 4324, vendor: "Euro Food Town", category: "Groceries" },
+    ],
+    "m3"
+  ),
+  {
+    title: "2 expenses added from your bank",
+    body: "Rs 9,344 in all: White Gold Fill and Euro Food Town. Tap to review.",
+    url: "/expenses",
+    tag: "import:m3",
+  }
+);
+check(
+  "four imports, one uncategorised",
+  importedExpensesMessage(
+    [
+      { amount: 100, vendor: "A", category: "Car" },
+      { amount: 200, vendor: "B", category: null },
+      { amount: 300, vendor: "C", category: "Car" },
+      { amount: 400, vendor: "D", category: "Car" },
+    ],
+    "m4"
+  ).body,
+  "Rs 1,000 in all: A, B and 2 more. One needs a category. Tap to review."
+);
+check("an import with no payee", importedExpensesMessage([{ amount: 50, vendor: null, category: "Car" }], "m5").title, "Rs 50 at an unnamed payee");
+check("kind: an import", notificationKind("import:m1"), "expenses");
+check(
+  "no import title says Khata",
+  importedExpensesMessage([{ amount: 1, vendor: "X", category: null }], "k").title.includes("Khata"),
+  false
+);
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

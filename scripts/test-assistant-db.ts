@@ -304,6 +304,7 @@ check("a registered device gets every kind by default", fresh?.prefs, {
   udhar: true,
   dailyRecap: true,
   monthlySummary: true,
+  importedExpenses: true,
 });
 check("and is in the list", (await dbm.listNotificationRecipients()).filter((u) => u.id === mailUser).length, 1);
 
@@ -314,6 +315,7 @@ check("one kind switched off leaves the rest alone", narrowed?.prefs, {
   udhar: true,
   dailyRecap: false,
   monthlySummary: true,
+  importedExpenses: true,
 });
 
 // The claim is what stops two senders - a scheduled run and the app's
