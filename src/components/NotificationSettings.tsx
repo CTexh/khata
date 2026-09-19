@@ -2,6 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Sheet } from "@/components/Sheet";
+import { fmtAgo } from "@/lib/format";
+import {
+  ensureRegistered,
+  isIos,
+  isStandalone,
+  pushSupported,
+  reconnect,
+  rememberPushOff,
+  toBytes,
+} from "@/lib/push-client";
 
 // Everything about reminders in one place: whether this device gets them, and
 // which ones you want.
@@ -27,7 +37,7 @@ type DeviceState =
 type Prefs = {
   subscriptions: boolean;
   udhar: boolean;
-  dailyRecap: boolean;
+  missedExpenses: boolean;
   monthlySummary: boolean;
   importedExpenses: boolean;
 };
@@ -35,38 +45,39 @@ type Prefs = {
 const ALL_ON: Prefs = {
   subscriptions: true,
   udhar: true,
-  dailyRecap: true,
+  missedExpenses: true,
   monthlySummary: true,
   importedExpenses: true,
 };
 
 // In the order they reach you during a day.
 const KINDS: { key: keyof Prefs; title: string; hint: string }[] = [
+  { key: "missedExpenses", title: "Missed-expense reminder", hint: "4am, to add anything you forgot yesterday." },
+  {
+    key: "importedExpenses",
+    title: "New expenses from your bank",
+    hint: "When one is added from a bank alert, and when one needs a category.",
+  },
   { key: "subscriptions", title: "Subscriptions due", hint: "The evening before, and on the day if unpaid." },
   { key: "udhar", title: "Udhar follow-ups", hint: "On the follow-up date you set." },
-  { key: "dailyRecap", title: "Daily recap", hint: "4:30am, on days with activity." },
   { key: "monthlySummary", title: "Monthly summary", hint: "On the 1st, for the month just gone." },
-  { key: "importedExpenses", title: "New expenses from your bank", hint: "When one is added from a bank alert." },
 ];
 
-const isIos = () =>
-  typeof navigator !== "undefined" &&
-  (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    // iPadOS reports itself as a Mac, but has a touchscreen.
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+// How delivery to this device has been going, from the server's side.
+type Health = { lastDeliveredAt: string | null; lastError: string | null; lastErrorAt: string | null };
 
-const isStandalone = () =>
-  typeof window !== "undefined" &&
-  (window.matchMedia("(display-mode: standalone)").matches ||
-    (window.navigator as { standalone?: boolean }).standalone === true);
+// "5 min ago", "yesterday", "on Monday", "on 2 Sept".
+function whenText(iso: string): string {
+  const ago = fmtAgo(iso);
+  if (ago === "Just now" || ago === "Yesterday") return ago.toLowerCase();
+  return /ago$/.test(ago) ? ago : `on ${ago}`;
+}
 
-// The key arrives base64url-encoded; the browser wants the raw bytes.
-function toBytes(base64url: string): Uint8Array<ArrayBuffer> {
-  const padded = (base64url + "=".repeat((4 - (base64url.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(padded);
-  const bytes = new Uint8Array(new ArrayBuffer(raw.length));
-  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-  return bytes;
+async function deviceHealth(endpoint: string): Promise<(Health & { registered: boolean }) | null> {
+  const data = await fetch(`/api/push?endpoint=${encodeURIComponent(endpoint)}`, { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  return data?.thisDevice ?? null;
 }
 
 function Switch({
@@ -109,6 +120,7 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
   const [prefs, setPrefs] = useState<Prefs>(ALL_ON);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const [health, setHealth] = useState<Health | null>(null);
 
   const load = useCallback(async () => {
     const profile = await fetch("/api/profile", { cache: "no-store" })
@@ -116,7 +128,7 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
       .catch(() => null);
     if (profile?.prefs) setPrefs({ ...ALL_ON, ...profile.prefs });
 
-    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    if (!pushSupported()) {
       // An iPhone in a Safari tab has no PushManager at all; on the Home
       // Screen it does. Say which it is.
       setDevice(isIos() && !isStandalone() ? "needs-install" : "unsupported");
@@ -135,8 +147,21 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
       return;
     }
     const registration = await navigator.serviceWorker.getRegistration();
-    const existing = await registration?.pushManager.getSubscription();
-    setDevice(existing && data.devices > 0 ? "on" : "off");
+    let existing = await registration?.pushManager.getSubscription();
+    if (!existing) {
+      setDevice("off");
+      return;
+    }
+    // The browser still has a subscription; does the server? If iOS or the
+    // push service dropped it, register it again now rather than showing a
+    // switch that says "on" while nothing arrives.
+    let status = await deviceHealth(existing.endpoint);
+    if (status && !status.registered && (await ensureRegistered(true)) === "ok") {
+      existing = await registration?.pushManager.getSubscription();
+      status = existing ? await deviceHealth(existing.endpoint) : null;
+    }
+    setDevice(status?.registered ? "on" : "off");
+    setHealth(status?.registered ? status : null);
   }, []);
 
   useEffect(() => {
@@ -169,6 +194,7 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
         body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
       });
       if (!res.ok) throw new Error("save failed");
+      rememberPushOff(false);
       setDevice("on");
       // One notification straight away, so switching it on proves itself
       // rather than leaving you to wonder until 6pm.
@@ -191,7 +217,27 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
         await fetch(`/api/push?endpoint=${encodeURIComponent(subscription.endpoint)}`, { method: "DELETE" });
         await subscription.unsubscribe();
       }
+      // Off means off: the app will not quietly register this device again.
+      rememberPushOff(true);
       setDevice("off");
+      setHealth(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A new registration with the push service, for a device that has stopped
+  // receiving - then one notification, so it proves itself.
+  const reconnectDevice = async () => {
+    setBusy(true);
+    setNote("");
+    try {
+      if (!(await reconnect())) throw new Error("reconnect failed");
+      await fetch("/api/push/test", { method: "POST" }).catch(() => null);
+      setNote("Reconnected, and sent one to check.");
+      await load();
+    } catch {
+      setNote("Couldn't reconnect. Try switching it off and on again.");
     } finally {
       setBusy(false);
     }
@@ -247,6 +293,8 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
           />
         )}
 
+        {device === "on" && health && <DeviceHealth health={health} busy={busy} onReconnect={reconnectDevice} />}
+
         {note && (
           <p className="text-[12.5px]" style={{ color: "var(--muted)" }} role="status">
             {note}
@@ -273,5 +321,34 @@ export function NotificationSettings({ onBack }: { onBack: () => void }) {
         </button>
       </div>
     </Sheet>
+  );
+}
+
+// Whether notifications are actually reaching this device. A failure newer
+// than the last delivery means they have stopped - and says so, with the fix
+// one tap away, instead of the switch saying "on" while nothing arrives.
+function DeviceHealth({ health, busy, onReconnect }: { health: Health; busy: boolean; onReconnect: () => void }) {
+  const failing =
+    health.lastError &&
+    health.lastErrorAt &&
+    (!health.lastDeliveredAt || health.lastErrorAt > health.lastDeliveredAt);
+  if (failing) {
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[12.5px] font-semibold" style={{ color: "var(--bad)" }} role="status">
+          Stopped reaching this device {whenText(health.lastErrorAt!)}.
+        </p>
+        <button type="button" className="btn btn-ghost !min-h-9 !py-1.5 !px-3.5 !text-[13px] shrink-0" disabled={busy} onClick={onReconnect}>
+          Reconnect
+        </button>
+      </div>
+    );
+  }
+  return (
+    <p className="text-[12.5px]" style={{ color: "var(--muted)" }}>
+      {health.lastDeliveredAt
+        ? `Last delivered ${whenText(health.lastDeliveredAt)}.`
+        : "Nothing delivered to this device yet."}
+    </p>
   );
 }

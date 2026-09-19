@@ -1,9 +1,6 @@
-// Tests for the reminders: what counts as due on a day, and what a day's
-// recap contains.
+// Tests for the reminders: what counts as due on a day, the words on each
+// notification, and how the outbox retries.
 import {
-  buildRecap,
-  recapIsEmpty,
-  pakistanDayWindow,
   findDue,
   nextDueAfter,
   summaryMonth,
@@ -12,12 +9,15 @@ import {
 } from "../src/lib/reminders.ts";
 import {
   importedExpensesMessage,
+  missedExpensesMessage,
   monthlySummaryMessage,
   notificationKind,
-  recapMessage,
   subscriptionMessage,
+  uncategorisedExpenseMessage,
+  uncategorisedRollupMessage,
   udharMessage,
 } from "../src/lib/reminder-messages.ts";
+import { nextAttemptDelayMs } from "../src/lib/outbox-policy.ts";
 import { fmtAgo } from "../src/lib/format.ts";
 
 let pass = 0;
@@ -67,51 +67,6 @@ check("next due clamps short months", nextDueAfter("2027-01", 31), "2027-02-28")
 check("summary only on the 1st", [summaryMonth("2026-09-15"), summaryMonth("2026-09-01")?.key], [null, "summary:2026-08"]);
 check("summary on 1 Jan is December", summaryMonth("2027-01-01")?.key, "summary:2026-12");
 
-/* daily recap */
-check("Pakistan day window", pakistanDayWindow("2026-09-15"), { from: "2026-09-14T19:00:00.000Z", to: "2026-09-15T19:00:00.000Z" });
-const recap = await buildRecap("2026-09-15", {
-  expenses: async () => [
-    { amount: 3000, vendor: "Shell", note: "fuel", category: "Car" },
-    { amount: 1200, vendor: null, note: "Assistant: dinner", category: null },
-  ],
-  ledger: async () => [
-    { name: "Ali", amount: 500 },
-    { name: "Usama", amount: -300 },
-  ],
-  subscriptions: async () => [
-    { name: "Netflix", amount: 1500, active: true, history: [{ due_date: "2026-09-15", paid_at: null }] },
-    { name: "Spotify", amount: 900, active: true, history: [{ due_date: "2026-09-05", paid_at: "2026-09-15T08:00:00.000Z" }] },
-    { name: "Gym", amount: 5000, active: true, history: [{ due_date: "2026-09-01", paid_at: "2026-09-15T20:00:00.000Z" }] },
-  ],
-});
-check("recap expense labels", recap.expenses.map((e) => e.label), ["Shell · Car", "dinner"]);
-check("recap due and paid", [recap.subsDue, recap.subsPaid.map((s) => s.name)], [[{ name: "Netflix", amount: 1500, paid: false }], ["Spotify"]]);
-// A day on which nothing at all happened is not notified.
-check(
-  "a day with nothing on it is empty",
-  recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [] }),
-  true
-);
-check(
-  "one expense is enough to be worth sending",
-  recapIsEmpty({ date: "2026-09-15", expenses: [{ label: "Shell", amount: 3000 }], ledger: [], subsDue: [], subsPaid: [] }),
-  false
-);
-check(
-  "an Udhar Khata entry on its own counts",
-  recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [{ name: "Ali", amount: 700 }], subsDue: [], subsPaid: [] }),
-  false
-);
-check(
-  "a subscription falling due counts",
-  recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [{ name: "Netflix", amount: 1200, paid: false }], subsPaid: [] }),
-  false
-);
-check(
-  "a subscription marked paid counts",
-  recapIsEmpty({ date: "2026-09-15", expenses: [], ledger: [], subsDue: [], subsPaid: [{ name: "Netflix", amount: 1200 }] }),
-  false
-);
 /* ---------- the words on each notification ---------- */
 
 const item = { key: "sub:s1:2026-09-17:before", id: "s 1", name: "Netflix", amount: 1200, date: "2026-09-17" };
@@ -123,20 +78,19 @@ check("a subscription due tomorrow", subscriptionMessage(item, "before"), {
 });
 check("one due today", subscriptionMessage(item, "due").body, "Rs 1,200, still unpaid. Tap to mark it paid.");
 check("a follow-up", udharMessage({ ...item, name: "Ali", amount: 700 }).title, "Ali owes you Rs 700");
-check("a recap", recapMessage("Yesterday", 3700, 2, "k"), {
-  title: "Yesterday: Rs 3,700 spent",
-  body: "2 expenses recorded. Add anything you missed.",
-  url: "/expenses",
-  tag: "k",
+check("the 4am reminder", missedExpensesMessage("missed:2026-09-20"), {
+  title: "Missed any expenses yesterday?",
+  body: "Add anything you paid in cash or forgot to log. Tap to add it.",
+  url: "/expenses?add=1",
+  tag: "missed:2026-09-20",
 });
-check("a recap of a day with nothing on it", recapMessage("Yesterday", 0, 0, "k").title, "Yesterday: nothing spent");
 check("a month wrapped up", monthlySummaryMessage(8, "k").title, "August is wrapped up");
 
 // The phone already shows the app's name: a title that repeats it wastes the
 // only line anyone reads.
 check(
   "no notification says Khata in its title",
-  [subscriptionMessage(item, "due"), udharMessage(item), recapMessage("Yesterday", 1, 1, "k"), monthlySummaryMessage(8, "k")].some(
+  [subscriptionMessage(item, "due"), udharMessage(item), missedExpensesMessage("k"), monthlySummaryMessage(8, "k")].some(
     (m) => m.title.includes("Khata")
   ),
   false
@@ -146,7 +100,6 @@ check(
 // The bell: which part of the app each notification belongs to, from its tag.
 check("kind: subscription", notificationKind("sub:s1:2026-09-17:before"), "subscription");
 check("kind: udhar", notificationKind("udhar:p1:2026-09-17"), "udhar");
-check("kind: recap", notificationKind("recap:2026-09-16"), "expenses");
 check("kind: monthly summary", notificationKind("summary:2026-08"), "expenses");
 check("kind: the switch-on confirmation", notificationKind("khata-test"), "general");
 check("kind: no tag", notificationKind(null), "general");
@@ -175,11 +128,6 @@ check("one import", importedExpensesMessage([{ amount: 4324, vendor: "Euro Food 
   tag: "import:m1",
 });
 check(
-  "one import without a category asks for one",
-  importedExpensesMessage([{ amount: 160, vendor: "PSO LAHORE", category: null }], "m2").body,
-  "Added from your bank alert. Tap to give it a category."
-);
-check(
   "two imports",
   importedExpensesMessage(
     [
@@ -196,17 +144,39 @@ check(
   }
 );
 check(
-  "four imports, one uncategorised",
+  "four imports",
   importedExpensesMessage(
     [
       { amount: 100, vendor: "A", category: "Car" },
-      { amount: 200, vendor: "B", category: null },
+      { amount: 200, vendor: "B", category: "Car" },
       { amount: 300, vendor: "C", category: "Car" },
       { amount: 400, vendor: "D", category: "Car" },
     ],
     "m4"
   ).body,
-  "Rs 1,000 in all: A, B and 2 more. One needs a category. Tap to review."
+  "Rs 1,000 in all: A, B and 2 more. Tap to review."
+);
+
+// An expense added without a category: its own notification, opening it.
+check("one needs a category", uncategorisedExpenseMessage({ id: "e 1", amount: 160, vendor: "PSO LAHORE" }), {
+  title: "Rs 160 at PSO LAHORE needs a category",
+  body: "Added from your bank alert. Tap to choose one.",
+  url: "/expenses?open=e%201",
+  tag: "uncat:e 1",
+});
+check(
+  "the rest of a big batch",
+  uncategorisedRollupMessage(4, "m6").title,
+  "4 more expenses need a category"
+);
+check("kind: needs a category", notificationKind("uncat:e1"), "expenses");
+check("kind: the 4am reminder", notificationKind("missed:2026-09-20"), "expenses");
+
+// The outbox: soon at first, then less often.
+check(
+  "retry schedule",
+  [1, 2, 3, 4, 5, 9].map((n) => nextAttemptDelayMs(n) / 60000),
+  [5, 15, 30, 60, 120, 120]
 );
 check("an import with no payee", importedExpensesMessage([{ amount: 50, vendor: null, category: "Car" }], "m5").title, "Rs 50 at an unnamed payee");
 check("kind: an import", notificationKind("import:m1"), "expenses");

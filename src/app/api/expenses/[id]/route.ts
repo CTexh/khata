@@ -76,6 +76,17 @@ export async function PUT(req: Request, { params }: Params) {
   return NextResponse.json({ ok: true, category: resolved.category });
 }
 
+// One expense on its own - for a notification that opens it directly, when it
+// may not be in the month the list is showing.
+export async function GET(_req: Request, { params }: Params) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const { id } = await params;
+  const expense = await getExpense(id, session.userId);
+  if (!expense) return NextResponse.json({ error: "Expense not found" }, { status: 404 });
+  return NextResponse.json(expense, { headers: { "Cache-Control": "private, no-store" } });
+}
+
 export async function DELETE(_req: Request, { params }: Params) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

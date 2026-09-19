@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { sendPush } from "@/lib/push";
+import { notify } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -11,13 +11,17 @@ export async function POST() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const delivered = await sendPush(session.userId, {
-    // The phone already shows the app's name and icon, so the title is the
-    // message itself - never "Khata".
-    title: "Notifications are on",
-    body: "Reminders will arrive here, like this one.",
-    url: "/",
-    tag: "khata-test",
-  });
-  return NextResponse.json({ delivered });
+  await notify(
+    session.userId,
+    {
+      // The phone already shows the app's name and icon, so the title is the
+      // message itself - never "Khata".
+      title: "Notifications are on",
+      body: "Reminders will arrive here, like this one.",
+      url: "/",
+      tag: "khata-test",
+    },
+    { validForMinutes: 60 }
+  );
+  return NextResponse.json({ ok: true });
 }

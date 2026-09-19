@@ -293,27 +293,28 @@ await c.execute({
   args: [mailUser, "reminder-test", now],
 });
 
-// An account with no device registered has nowhere to send to.
-check("no device means no recipient", await dbm.getNotificationRecipient(mailUser), null);
-check("and it is not in the list", (await dbm.listNotificationRecipients()).some((u) => u.id === mailUser), false);
+// Every account gets notifications - into the bell - even with no device
+// registered yet.
+check("no device is still a recipient", (await dbm.getNotificationRecipient(mailUser))?.id, mailUser);
+check("and it is in the list", (await dbm.listNotificationRecipients()).some((u) => u.id === mailUser), true);
 
 await dbm.savePushSubscription(mailUser, { endpoint: "https://push.example/first", p256dh: "k", auth: "a" });
 const fresh = await dbm.getNotificationRecipient(mailUser);
 check("a registered device gets every kind by default", fresh?.prefs, {
   subscriptions: true,
   udhar: true,
-  dailyRecap: true,
+  missedExpenses: true,
   monthlySummary: true,
   importedExpenses: true,
 });
 check("and is in the list", (await dbm.listNotificationRecipients()).filter((u) => u.id === mailUser).length, 1);
 
-await dbm.updateUserProfile(mailUser, { prefs: { dailyRecap: false } });
+await dbm.updateUserProfile(mailUser, { prefs: { missedExpenses: false } });
 const narrowed = await dbm.getNotificationRecipient(mailUser);
 check("one kind switched off leaves the rest alone", narrowed?.prefs, {
   subscriptions: true,
   udhar: true,
-  dailyRecap: false,
+  missedExpenses: false,
   monthlySummary: true,
   importedExpenses: true,
 });
@@ -342,6 +343,37 @@ check("re-subscribing replaces that device", [devices.length, devices.find((d) =
 await dbm.deletePushSubscription(device.endpoint, mailUser);
 check("a device can be removed", (await dbm.listPushSubscriptions(mailUser)).length, 2);
 check("another account sees none of them", (await dbm.listPushSubscriptions(userId)).length, 0);
+
+/* ---------- the outbox ---------- */
+
+delete process.env.VAPID_PUBLIC_KEY;
+delete process.env.VAPID_PRIVATE_KEY;
+const { notify, deliverPending } = await import("../src/lib/notify.ts");
+const statusOf = async (id: string) =>
+  (await c.execute({ sql: "SELECT status, attempts, next_attempt_at FROM notifications WHERE id = ?", args: [id] })).rows[0];
+
+const unreadBefore = await dbm.unreadNotificationCount(mailUser);
+const queued = await notify(mailUser, { title: "Outbox test", body: "b", url: "/expenses?open=x" }, { validForMinutes: 60 });
+check("a notification is in the bell even when it can't be pushed", (await dbm.listNotifications(mailUser)).items.some((n) => n.id === queued.id), true);
+check("and counts as unread for the badge", await dbm.unreadNotificationCount(mailUser), unreadBefore + 1);
+const afterFirst = await statusOf(queued.id);
+check("a failed push waits to try again", [afterFirst.status, afterFirst.attempts], ["pending", 1]);
+const waitMin = (Date.parse(afterFirst.next_attempt_at as string) - Date.now()) / 60000;
+check("the first retry is about five minutes later", waitMin > 4 && waitMin <= 5, true);
+check("it is not retried before then", (await deliverPending({ userId: mailUser })).retrying, 0);
+
+// Two senders reaching for the same due row: only one gets it.
+const dueAt = new Date(Date.now() + 6 * 60 * 1000).toISOString();
+check("the first claim wins", await dbm.claimForDelivery(queued.id, dueAt), true);
+check("a second claim loses", await dbm.claimForDelivery(queued.id, dueAt), false);
+
+// One that can no longer arrive in time stops being pushed, and stays in the bell.
+const late = await notify(mailUser, { title: "Short-lived", body: "b" }, { validForMinutes: 3 });
+check("a notification past its useful life expires", (await statusOf(late.id)).status, "expired");
+check("but it is still in the bell", (await dbm.listNotifications(mailUser)).items.some((n) => n.id === late.id), true);
+
+await dbm.markNotificationsRead(mailUser);
+check("reading the bell clears the badge", await dbm.unreadNotificationCount(mailUser), 0);
 
 await dbm.deleteUser(mailUser);
 check("deleting an account takes its devices with it", (await dbm.listPushSubscriptions(mailUser)).length, 0);

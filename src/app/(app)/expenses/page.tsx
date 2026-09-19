@@ -1495,10 +1495,22 @@ export default function ExpensesPage() {
   const openAdd = useCallback(() => setAdding(true), []);
   const openRecat = useCallback(() => setRecategorizing(true), []);
 
-  // The daily recap notification links to /expenses?add=1 to add a missed expense.
+  // Notifications open this page two ways: /expenses?add=1 (the 4am reminder
+  // to add anything missed) opens the add form, and /expenses?open=<id> (an
+  // expense added without a category) opens that expense. It is fetched on
+  // its own, since it may not be in the month the list is showing.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("add") !== "1") return;
-    setAdding(true);
+    const params = new URLSearchParams(window.location.search);
+    const openId = params.get("open");
+    if (params.get("add") === "1") setAdding(true);
+    else if (openId) {
+      fetch(`/api/expenses/${encodeURIComponent(openId)}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((expense: Expense | null) => {
+          if (expense) setViewingDetail(expense);
+        })
+        .catch(() => {});
+    } else return;
     window.history.replaceState(null, "", "/expenses");
   }, []);
 

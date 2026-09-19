@@ -38,7 +38,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
     title: "Services that process your data",
     body: [
       "Google (Gemini API) reads messages sent to the Khata assistant, bill photos and voice notes, to work out what they describe or ask. So that a message can be matched to the right person, it is also sent the names in your Udhar Khata, your category names and your subscription names. Khata uses Google's free tier, under which Google may use the content sent to it to improve its products.",
-      "Reminders are sent as notifications to the devices you register in Settings > Manage notifications: subscriptions that are due, Udhar Khata follow-up dates, a daily recap and a monthly summary. Delivery goes through your device's own push service (Apple's or Google's), which sees only an encrypted message. Khata sends no email.",
+      "Reminders are sent as notifications to the devices you register in Settings > Manage notifications: subscriptions that are due, Udhar Khata follow-up dates, a morning reminder to add missed expenses, new expenses added from your bank alerts, and a monthly summary. Delivery goes through your device's own push service (Apple's or Google's), which sees only an encrypted message. Khata sends no email.",
       "Vercel hosts the app, and Turso hosts its database.",
     ],
   },

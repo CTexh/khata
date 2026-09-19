@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getSession } from "@/lib/auth";
-import { deletePushSubscription, listPushSubscriptions, savePushSubscription } from "@/lib/db";
+import { deletePushSubscription, getPushDevice, listPushSubscriptions, savePushSubscription } from "@/lib/db";
 import { pushConfigured, pushPublicKey } from "@/lib/push";
+import { deliverPending } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -15,15 +16,28 @@ async function signedIn() {
 
 // What the page needs to offer the switch: whether the server can send at all,
 // the key a browser needs to subscribe, and how many devices are registered.
-export async function GET() {
+// Given this device's endpoint, also whether the server still has it and how
+// delivery to it has been going - for the health line in Settings, and so the
+// app can tell when iOS has quietly dropped its registration.
+export async function GET(req: Request) {
   const { session, error } = await signedIn();
   if (error) return error;
   const devices = pushConfigured() ? await listPushSubscriptions(session.userId) : [];
+  const endpoint = new URL(req.url).searchParams.get("endpoint");
+  const device = endpoint ? await getPushDevice(session.userId, endpoint) : null;
   return NextResponse.json(
     {
       available: pushConfigured(),
       publicKey: pushPublicKey(),
       devices: devices.length,
+      thisDevice: endpoint
+        ? {
+            registered: Boolean(device),
+            lastDeliveredAt: device?.lastDeliveredAt ?? null,
+            lastError: device?.lastError ?? null,
+            lastErrorAt: device?.lastErrorAt ?? null,
+          }
+        : null,
     },
     { headers: { "Cache-Control": "no-store" } }
   );
@@ -47,6 +61,10 @@ export async function POST(req: Request) {
   }
 
   await savePushSubscription(session.userId, { endpoint, p256dh, auth });
+  // Anything that piled up in the outbox while this account had no working
+  // device is delivered now, not at the next scheduled run.
+  const userId = session.userId;
+  after(() => deliverPending({ userId }).then(() => undefined).catch(() => undefined));
   return NextResponse.json({ success: true });
 }
 

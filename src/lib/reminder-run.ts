@@ -6,48 +6,57 @@
 // arrives is worse than one that arrives late.
 //
 // Sending twice is prevented by the claim rather than by who calls: the row
-// in reminder_log is written first, and only whoever wrote it sends.
+// in reminder_log is written first, and only whoever wrote it sends. Once a
+// reminder is in the outbox it counts as sent - getting it onto the phone,
+// and trying again if that fails, is the outbox's job (lib/notify.ts).
 import {
   claimReminder,
-  listExpensesInRange,
-  listLedgerActivity,
   listLedgerPeople,
   listSubscriptions,
   releaseReminder,
   type NotificationRecipient,
 } from "@/lib/db";
-import { sendPush, type PushMessage } from "@/lib/push";
+import type { PushMessage } from "@/lib/push";
+import { notify } from "@/lib/notify";
+import { findDue, summaryMonth } from "@/lib/reminders";
 import {
-  buildRecap,
-  findDue,
-  recapIsEmpty,
-  summaryMonth,
-} from "@/lib/reminders";
-import {
+  missedExpensesMessage,
   monthlySummaryMessage,
-  recapMessage,
   subscriptionMessage,
   udharMessage,
 } from "@/lib/reminder-messages";
-import { addDays, pakistanMinutes, pakistanToday } from "@/lib/expense-parse";
-import { fmtDateLabel } from "@/lib/format";
+import { pakistanMinutes, pakistanToday } from "@/lib/expense-parse";
 
 // The hours the reminders belong to, in Pakistan time.
 export const EVENING_HOUR = 18;
-export const RECAP_HOUR = 4;
-export const RECAP_MINUTE = 30;
+export const MISSED_HOUR = 4;
+// The morning nudge is about yesterday; past this hour it would only be noise.
+const MISSED_UNTIL_HOUR = 10;
+
+// How long each kind stays worth delivering to a phone. After that it stays
+// in the bell but is no longer pushed.
+const EVENING_VALID_MINUTES = 6 * 60; // until about midnight
+const MISSED_VALID_MINUTES = 6 * 60; // until about 10am
+const SUMMARY_VALID_MINUTES = 24 * 60;
 
 export type SendResult = { sent: number; errors: string[] };
 
-// Claims the reminder, then notifies every device the account registered. The
-// claim is released again if nothing could be delivered, so the next run
-// tries again rather than the reminder being lost.
-async function send(user: NotificationRecipient, key: string, message: PushMessage): Promise<boolean> {
+// Claims the reminder, then puts it in the outbox. The claim is released only
+// if it could not even be written there, so the next run tries again.
+async function send(
+  user: NotificationRecipient,
+  key: string,
+  message: PushMessage,
+  validForMinutes: number
+): Promise<boolean> {
   if (!(await claimReminder(user.id, key))) return false;
-  const delivered = await sendPush(user.id, message);
-  if (delivered) return true;
-  await releaseReminder(user.id, key);
-  return false;
+  try {
+    await notify(user.id, message, { validForMinutes });
+    return true;
+  } catch (err) {
+    await releaseReminder(user.id, key);
+    throw err;
+  }
 }
 
 // Everything that goes out at 6pm: a subscription due tomorrow, one due today
@@ -66,26 +75,38 @@ export async function sendEveningReminders(
     people
   );
 
-  const pending: { key: string; message: PushMessage }[] = [];
+  const pending: { key: string; message: PushMessage; valid: number }[] = [];
   if (user.prefs.subscriptions) {
     pending.push(
-      ...due.subsTomorrow.map((item) => ({ key: item.key, message: subscriptionMessage(item, "before") })),
-      ...due.subsToday.map((item) => ({ key: item.key, message: subscriptionMessage(item, "due") }))
+      ...due.subsTomorrow.map((item) => ({
+        key: item.key,
+        message: subscriptionMessage(item, "before"),
+        valid: EVENING_VALID_MINUTES,
+      })),
+      ...due.subsToday.map((item) => ({
+        key: item.key,
+        message: subscriptionMessage(item, "due"),
+        valid: EVENING_VALID_MINUTES,
+      }))
     );
   }
   if (user.prefs.udhar) {
     pending.push(
-      ...due.reachOut.map((item) => ({ key: item.key, message: udharMessage(item) }))
+      ...due.reachOut.map((item) => ({ key: item.key, message: udharMessage(item), valid: EVENING_VALID_MINUTES }))
     );
   }
   const summaryFor = summaryMonth(today);
   if (summaryFor && user.prefs.monthlySummary) {
-    pending.push({ key: summaryFor.key, message: monthlySummaryMessage(summaryFor.month, summaryFor.key) });
+    pending.push({
+      key: summaryFor.key,
+      message: monthlySummaryMessage(summaryFor.month, summaryFor.key),
+      valid: SUMMARY_VALID_MINUTES,
+    });
   }
 
   for (const reminder of pending) {
     try {
-      if (await send(user, reminder.key, reminder.message)) result.sent++;
+      if (await send(user, reminder.key, reminder.message, reminder.valid)) result.sent++;
     } catch (err) {
       result.errors.push(`${user.id.slice(0, 8)} ${reminder.key.split(":")[0]}: ${(err as Error).message.slice(0, 200)}`);
     }
@@ -93,52 +114,35 @@ export async function sendEveningReminders(
   return result;
 }
 
-// The 4:30am recap of the day that just ended - unless the day was empty, in
-// which case there is nothing to recap and nothing is sent. The claim is
-// taken first and kept either way, so a quiet day is settled once rather than
-// rebuilt by every run.
-export async function sendDailyRecap(user: NotificationRecipient, date: string): Promise<SendResult> {
+// 4am: a nudge to add anything missed yesterday. Every day - the bank emails
+// already cover card payments, and this is for everything they cannot see.
+export async function sendMissedExpenseReminder(
+  user: NotificationRecipient,
+  today = pakistanToday()
+): Promise<SendResult> {
   const result: SendResult = { sent: 0, errors: [] };
-  if (!user.prefs.dailyRecap) return result;
-
-  const key = `recap:${date}`;
-  if (!(await claimReminder(user.id, key))) return result;
+  if (!user.prefs.missedExpenses) return result;
+  const key = `missed:${today}`;
   try {
-    const recap = await buildRecap(date, {
-      expenses: (from, to) => listExpensesInRange(user.id, from, to),
-      ledger: (from, to) => listLedgerActivity(user.id, from, to),
-      subscriptions: () => listSubscriptions(user.id),
-    });
-    if (recapIsEmpty(recap)) return result;
-
-    const spent = recap.expenses.reduce((sum, e) => sum + e.amount, 0);
-    // Sent at 4:30am about the day before, so "Yesterday" is what it is -
-    // unless a missed run is being caught up days later, when the date is
-    // clearer.
-    const day = date === addDays(pakistanToday(), -1) ? "Yesterday" : fmtDateLabel(date);
-    const delivered = await sendPush(user.id, recapMessage(day, spent, recap.expenses.length, key));
-    if (delivered) result.sent++;
-    else await releaseReminder(user.id, key);
+    if (await send(user, key, missedExpensesMessage(key), MISSED_VALID_MINUTES)) result.sent++;
   } catch (err) {
-    // Not sent after all: let the next run try again.
-    await releaseReminder(user.id, key);
-    result.errors.push(`${user.id.slice(0, 8)} recap: ${(err as Error).message.slice(0, 200)}`);
+    result.errors.push(`${user.id.slice(0, 8)} missed: ${(err as Error).message.slice(0, 200)}`);
   }
   return result;
 }
 
-// What today still owes this account, by the clock in Pakistan. Used when the
-// app is opened, so a run that never happened doesn't cost the user their
-// reminder.
+// What today still owes this account, by the clock in Pakistan. Used by the
+// scheduled job, and when the app is opened, so a run that never happened
+// doesn't cost the user their reminder.
 export async function sendAnythingDue(user: NotificationRecipient, now = new Date()): Promise<SendResult> {
   const minutes = pakistanMinutes(now);
   const today = pakistanToday(now);
   const out: SendResult = { sent: 0, errors: [] };
 
-  if (minutes >= RECAP_HOUR * 60 + RECAP_MINUTE) {
-    const recap = await sendDailyRecap(user, addDays(today, -1));
-    out.sent += recap.sent;
-    out.errors.push(...recap.errors);
+  if (minutes >= MISSED_HOUR * 60 && minutes < MISSED_UNTIL_HOUR * 60) {
+    const missed = await sendMissedExpenseReminder(user, today);
+    out.sent += missed.sent;
+    out.errors.push(...missed.errors);
   }
   if (minutes >= EVENING_HOUR * 60) {
     const evening = await sendEveningReminders(user, today);

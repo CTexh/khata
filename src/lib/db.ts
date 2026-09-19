@@ -194,7 +194,7 @@ export async function findUserById(id: string): Promise<User | null> {
 // Reminders: which kinds each account wants, which devices to notify, and a
 // log of what has been sent so a retried run never sends the same one twice.
 let reminderTablesEnsured = false;
-const REMINDER_SCHEMA = "6";
+const REMINDER_SCHEMA = "7";
 export async function ensureReminderTables(): Promise<void> {
   if (reminderTablesEnsured) return;
   if (await schemaCurrent("reminders", REMINDER_SCHEMA)) {
@@ -241,8 +241,8 @@ export async function ensureReminderTables(): Promise<void> {
   } catch {
     // Index already exists.
   }
-  // Every notification that actually reached a device, so the bell in the app
-  // can show what arrived - including anything swiped away on the lock screen.
+  // Every notification, written before it is delivered: the bell reads from
+  // here, and delivery to devices is retried from here (the outbox).
   await c.execute(`CREATE TABLE IF NOT EXISTS notifications (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -258,6 +258,32 @@ export async function ensureReminderTables(): Promise<void> {
   } catch {
     // Index already exists.
   }
+  // The outbox. Rows from before it existed were only ever kept if they had
+  // been delivered, so they default to that. And per device, when it last
+  // received something and what went wrong if it did not - for the health
+  // line in Settings.
+  for (const sql of [
+    `ALTER TABLE notifications ADD COLUMN status TEXT NOT NULL DEFAULT 'delivered'`,
+    `ALTER TABLE notifications ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE notifications ADD COLUMN next_attempt_at TEXT`,
+    `ALTER TABLE notifications ADD COLUMN expires_at TEXT`,
+    `ALTER TABLE notifications ADD COLUMN delivered_at TEXT`,
+    `ALTER TABLE notifications ADD COLUMN last_error TEXT`,
+    `ALTER TABLE push_subscriptions ADD COLUMN last_delivered_at TEXT`,
+    `ALTER TABLE push_subscriptions ADD COLUMN last_error TEXT`,
+    `ALTER TABLE push_subscriptions ADD COLUMN last_error_at TEXT`,
+  ]) {
+    try {
+      await c.execute(sql);
+    } catch {
+      // Column already exists.
+    }
+  }
+  try {
+    await c.execute(`CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications (status, next_attempt_at)`);
+  } catch {
+    // Index already exists.
+  }
   await markSchema("reminders", REMINDER_SCHEMA);
   reminderTablesEnsured = true;
 }
@@ -266,7 +292,7 @@ export async function ensureReminderTables(): Promise<void> {
 export type NotificationPrefs = {
   subscriptions: boolean;
   udhar: boolean;
-  dailyRecap: boolean;
+  missedExpenses: boolean;
   monthlySummary: boolean;
   importedExpenses: boolean;
 };
@@ -281,7 +307,8 @@ export type ProfileSettings = {
 export const NOTIFICATION_PREF_COLUMNS = {
   subscriptions: "remind_subs",
   udhar: "remind_udhar",
-  dailyRecap: "remind_recap",
+  // Was the 4:30am recap; now the 4am reminder to add anything missed.
+  missedExpenses: "remind_recap",
   monthlySummary: "remind_summary",
   importedExpenses: "remind_imports",
 } as const;
@@ -302,7 +329,7 @@ export async function getProfileSettings(userId: string): Promise<ProfileSetting
     prefs: {
       subscriptions: on(r.remind_subs),
       udhar: on(r.remind_udhar),
-      dailyRecap: on(r.remind_recap),
+      missedExpenses: on(r.remind_recap),
       monthlySummary: on(r.remind_summary),
       importedExpenses: on(r.remind_imports),
     },
@@ -331,8 +358,9 @@ export async function updateUserProfile(
   await c.execute({ sql: `UPDATE users SET ${sets.join(", ")} WHERE id = ?`, args: [...args, userId] });
 }
 
-// Everyone with at least one device registered for notifications, with the
-// kinds they want, so each run only sends what was asked for.
+// Every account, with the kinds of notification it wants. Not only those with
+// a device registered: a notification goes into the bell whether or not it
+// can reach a phone (see lib/notify.ts), and is delivered once one exists.
 export type NotificationRecipient = {
   id: string;
   username: string;
@@ -344,8 +372,8 @@ export async function listNotificationRecipients(): Promise<NotificationRecipien
   await ensureReminderTables();
   const c = await db();
   const rs = await c.execute(
-    `SELECT DISTINCT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary, u.remind_imports
-     FROM users u JOIN push_subscriptions p ON p.user_id = u.id`
+    `SELECT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary, u.remind_imports
+     FROM users u`
   );
   return rs.rows.map((r) => ({
     id: r.id as string,
@@ -354,21 +382,21 @@ export async function listNotificationRecipients(): Promise<NotificationRecipien
     prefs: {
       subscriptions: on(r.remind_subs),
       udhar: on(r.remind_udhar),
-      dailyRecap: on(r.remind_recap),
+      missedExpenses: on(r.remind_recap),
       monthlySummary: on(r.remind_summary),
       importedExpenses: on(r.remind_imports),
     },
   }));
 }
 
-// One account's settings, for the catch-up when the app is opened. null when
-// there is no device to notify.
+// One account's settings, for the catch-up when the app is opened and for the
+// email routine's notifications. null only when the account does not exist.
 export async function getNotificationRecipient(userId: string): Promise<NotificationRecipient | null> {
   await ensureReminderTables();
   const c = await db();
   const rs = await c.execute({
     sql: `SELECT u.id, u.username, u.name, u.remind_subs, u.remind_udhar, u.remind_recap, u.remind_summary, u.remind_imports
-          FROM users u WHERE u.id = ? AND EXISTS (SELECT 1 FROM push_subscriptions p WHERE p.user_id = u.id)`,
+          FROM users u WHERE u.id = ?`,
     args: [userId],
   });
   const r = rs.rows[0];
@@ -380,7 +408,7 @@ export async function getNotificationRecipient(userId: string): Promise<Notifica
     prefs: {
       subscriptions: on(r.remind_subs),
       udhar: on(r.remind_udhar),
-      dailyRecap: on(r.remind_recap),
+      missedExpenses: on(r.remind_recap),
       monthlySummary: on(r.remind_summary),
       importedExpenses: on(r.remind_imports),
     },
@@ -419,6 +447,37 @@ export async function listPushSubscriptions(userId: string): Promise<PushSubscri
   }));
 }
 
+// What happened the last time this device was sent something, for the health
+// line in Settings.
+export async function recordDeviceDelivery(endpoint: string, error: string | null): Promise<void> {
+  const c = await db();
+  const now = new Date().toISOString();
+  await c.execute(
+    error
+      ? { sql: "UPDATE push_subscriptions SET last_error = ?, last_error_at = ? WHERE endpoint = ?", args: [error, now, endpoint] }
+      : { sql: "UPDATE push_subscriptions SET last_delivered_at = ?, last_error = NULL WHERE endpoint = ?", args: [now, endpoint] }
+  );
+}
+
+export async function getPushDevice(
+  userId: string,
+  endpoint: string
+): Promise<{ lastDeliveredAt: string | null; lastError: string | null; lastErrorAt: string | null } | null> {
+  await ensureReminderTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT last_delivered_at, last_error, last_error_at FROM push_subscriptions WHERE endpoint = ? AND user_id = ?",
+    args: [endpoint, userId],
+  });
+  const r = rs.rows[0];
+  if (!r) return null;
+  return {
+    lastDeliveredAt: (r.last_delivered_at as string | null) ?? null,
+    lastError: (r.last_error as string | null) ?? null,
+    lastErrorAt: (r.last_error_at as string | null) ?? null,
+  };
+}
+
 // Used when a device unsubscribes, and when its push service reports the
 // subscription as gone - a phone that reinstalled the app, say.
 export async function deletePushSubscription(endpoint: string, userId?: string): Promise<void> {
@@ -448,10 +507,39 @@ export type NotificationItem = {
 // table never grows past what anyone would scroll back through.
 const NOTIFICATION_KEEP_DAYS = 90;
 
-export async function recordNotification(
+// One notification waiting in, or delivered from, the outbox.
+export type OutboxRow = {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  url: string | null;
+  tag: string | null;
+  attempts: number;
+  expiresAt: string;
+};
+
+function toOutboxRow(r: Record<string, unknown>): OutboxRow {
+  return {
+    id: r.id as string,
+    userId: r.user_id as string,
+    title: r.title as string,
+    body: r.body as string,
+    url: (r.url as string | null) ?? null,
+    tag: (r.tag as string | null) ?? null,
+    attempts: Number(r.attempts ?? 0),
+    expiresAt: r.expires_at as string,
+  };
+}
+
+// Into the outbox: it is in the bell from this moment, whatever happens to
+// delivery. `expiresAt` is when it stops being worth delivering - a 6pm
+// reminder that reaches the phone the next morning is noise.
+export async function createNotification(
   userId: string,
-  message: { title: string; body: string; url?: string; tag?: string }
-): Promise<string> {
+  message: { title: string; body: string; url?: string; tag?: string },
+  expiresAt: string
+): Promise<OutboxRow> {
   await ensureReminderTables();
   const c = await db();
   const id = randomUUID();
@@ -460,22 +548,99 @@ export async function recordNotification(
   await c.batch(
     [
       {
-        sql: `INSERT INTO notifications (id, user_id, title, body, url, tag, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: [id, userId, message.title, message.body, message.url ?? null, message.tag ?? null, now.toISOString()],
+        sql: `INSERT INTO notifications (id, user_id, title, body, url, tag, created_at, status, attempts, next_attempt_at, expires_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+        args: [
+          id,
+          userId,
+          message.title,
+          message.body,
+          message.url ?? null,
+          message.tag ?? null,
+          now.toISOString(),
+          now.toISOString(),
+          expiresAt,
+        ],
       },
       { sql: "DELETE FROM notifications WHERE user_id = ? AND created_at < ?", args: [userId, cutoff] },
     ],
     "write"
   );
-  return id;
+  return {
+    id,
+    userId,
+    title: message.title,
+    body: message.body,
+    url: message.url ?? null,
+    tag: message.tag ?? null,
+    attempts: 0,
+    expiresAt,
+  };
 }
 
-// For a notification that was recorded but reached no device after all.
-export async function discardNotification(id: string): Promise<void> {
+// Notifications whose next delivery attempt is due, oldest first.
+export async function dueNotifications(nowIso: string, limit: number, userId?: string): Promise<OutboxRow[]> {
   await ensureReminderTables();
   const c = await db();
-  await c.execute({ sql: "DELETE FROM notifications WHERE id = ?", args: [id] });
+  const rs = await c.execute({
+    sql: `SELECT id, user_id, title, body, url, tag, attempts, expires_at FROM notifications
+          WHERE status = 'pending' AND next_attempt_at <= ?${userId ? " AND user_id = ?" : ""}
+          ORDER BY created_at LIMIT ?`,
+    args: userId ? [nowIso, userId, limit] : [nowIso, limit],
+  });
+  return rs.rows.map(toOutboxRow);
+}
+
+// Takes one pending notification for delivery, for two minutes. The cron job
+// and the attempt made the moment a notification is created can both reach
+// for the same row; only the one whose update lands gets to send it.
+export async function claimForDelivery(id: string, nowIso: string): Promise<boolean> {
+  const c = await db();
+  const lease = new Date(Date.parse(nowIso) + 2 * 60 * 1000).toISOString();
+  const rs = await c.execute({
+    sql: `UPDATE notifications SET next_attempt_at = ?
+          WHERE id = ? AND status = 'pending' AND next_attempt_at <= ?`,
+    args: [lease, id, nowIso],
+  });
+  return rs.rowsAffected === 1;
+}
+
+export async function markNotificationDelivered(id: string): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: `UPDATE notifications SET status = 'delivered', delivered_at = ?, attempts = attempts + 1, last_error = NULL
+          WHERE id = ?`,
+    args: [new Date().toISOString(), id],
+  });
+}
+
+export async function markNotificationRetry(
+  id: string,
+  attempts: number,
+  nextAttemptAt: string,
+  error: string | null
+): Promise<void> {
+  const c = await db();
+  await c.execute({
+    sql: "UPDATE notifications SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE id = ?",
+    args: [attempts, nextAttemptAt, error, id],
+  });
+}
+
+// Too late to be worth delivering. It stays in the bell.
+export async function markNotificationExpired(id: string): Promise<void> {
+  const c = await db();
+  await c.execute({ sql: "UPDATE notifications SET status = 'expired' WHERE id = ?", args: [id] });
+}
+
+export async function unreadNotificationCount(userId: string): Promise<number> {
+  await ensureReminderTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL",
+    args: [userId],
+  });
+  return Number(rs.rows[0]?.n ?? 0);
 }
 
 export async function listNotifications(
@@ -2272,24 +2437,6 @@ export async function saveModelHealth(updates: HealthUpdate[]): Promise<void> {
 }
 
 /* ---------- reads and small writes for assistant questions ---------- */
-
-// Udhar Khata entries made in a time window (ISO timestamps, end exclusive),
-// oldest first, with the person's name - for the daily recap.
-export async function listLedgerActivity(
-  userId: string,
-  fromIso: string,
-  toIso: string
-): Promise<{ name: string; amount: number; created_at: string }[]> {
-  const c = await db();
-  const rs = await c.execute({
-    sql: `SELECT p.name, t.amount, t.created_at FROM transactions t
-          JOIN people p ON p.id = t.person_id
-          WHERE p.user_id = ? AND t.created_at >= ? AND t.created_at < ?
-          ORDER BY t.created_at ASC`,
-    args: [userId, fromIso, toIso],
-  });
-  return rs.rows.map((r) => ({ name: r.name as string, amount: Number(r.amount), created_at: r.created_at as string }));
-}
 
 // Expenses between two days, inclusive (YYYY-MM-DD), newest first.
 export async function listExpensesInRange(userId: string, from: string, to: string): Promise<Expense[]> {

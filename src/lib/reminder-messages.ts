@@ -40,15 +40,14 @@ export function monthlySummaryMessage(month: number, key: string): PushMessage {
   };
 }
 
-// `day` is "Yesterday" when that is what it means, and a date when a missed
-// run is caught up later.
-export function recapMessage(day: string, spent: number, expenses: number, key: string): PushMessage {
+// 4am every day: a nudge to add whatever the bank emails will never show -
+// cash, a payment to a person, anything forgotten. Tapping it opens the
+// add-expense form directly.
+export function missedExpensesMessage(key: string): PushMessage {
   return {
-    title: expenses ? `${day}: ${fmtRs(spent)} spent` : `${day}: nothing spent`,
-    body: expenses
-      ? `${expenses} ${expenses === 1 ? "expense" : "expenses"} recorded. Add anything you missed.`
-      : "Add anything you forgot to record.",
-    url: "/expenses",
+    title: "Missed any expenses yesterday?",
+    body: "Add anything you paid in cash or forgot to log. Tap to add it.",
+    url: "/expenses?add=1",
     tag: key,
   };
 }
@@ -59,36 +58,54 @@ export function recapMessage(day: string, spent: number, expenses: number, key: 
 // one that has not been looked at yet.
 export type ImportedExpense = { amount: number; vendor: string | null; category: string | null };
 
+const payee = (vendor: string | null) => vendor?.trim() || "an unnamed payee";
+
 export function importedExpensesMessage(items: ImportedExpense[], key: string): PushMessage {
-  const name = (e: ImportedExpense) => e.vendor?.trim() || "an unnamed payee";
-  const uncategorised = items.filter((e) => !e.category).length;
   const url = "/expenses";
   const tag = `import:${key}`;
 
   if (items.length === 1) {
     const e = items[0];
     return {
-      title: `${fmtRs(e.amount)} at ${name(e)}`,
-      body: e.category
-        ? `Added from your bank alert under ${e.category}. Tap to review it.`
-        : "Added from your bank alert. Tap to give it a category.",
+      title: `${fmtRs(e.amount)} at ${payee(e.vendor)}`,
+      body: `Added from your bank alert under ${e.category ?? "a category"}. Tap to review it.`,
       url,
       tag,
     };
   }
 
   const total = items.reduce((sum, e) => sum + e.amount, 0);
-  const shown = items.slice(0, 2).map(name);
+  const shown = items.slice(0, 2).map((e) => payee(e.vendor));
   const rest = items.length - shown.length;
   const who = rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(" and ");
-  const needs = uncategorised
-    ? ` ${uncategorised === 1 ? "One needs" : `${uncategorised} need`} a category.`
-    : "";
   return {
     title: `${items.length} expenses added from your bank`,
-    body: `${fmtRs(total)} in all: ${who}.${needs} Tap to review.`,
+    body: `${fmtRs(total)} in all: ${who}. Tap to review.`,
     url,
     tag,
+  };
+}
+
+// An expense the routine added without a category gets a notification of its
+// own, which opens that very expense - so the category can be set in one tap
+// from the lock screen instead of hunting for it in the list.
+export function uncategorisedExpenseMessage(e: { id: string; amount: number; vendor: string | null }): PushMessage {
+  return {
+    title: `${fmtRs(e.amount)} at ${payee(e.vendor)} needs a category`,
+    body: "Added from your bank alert. Tap to choose one.",
+    url: `/expenses?open=${encodeURIComponent(e.id)}`,
+    tag: `uncat:${e.id}`,
+  };
+}
+
+// More uncategorised expenses than it is reasonable to notify about one by
+// one in a single run: the first few individually, the rest in one of these.
+export function uncategorisedRollupMessage(count: number, key: string): PushMessage {
+  return {
+    title: `${count} more expenses need a category`,
+    body: "Added from your bank alerts. Tap to sort them out.",
+    url: "/expenses",
+    tag: `uncat-more:${key}`,
   };
 }
 
@@ -100,6 +117,12 @@ export function notificationKind(tag: string | null | undefined): NotificationKi
   if (!tag) return "general";
   if (tag.startsWith("sub:")) return "subscription";
   if (tag.startsWith("udhar:")) return "udhar";
-  if (tag.startsWith("recap:") || tag.startsWith("summary:") || tag.startsWith("import:")) return "expenses";
+  if (
+    tag.startsWith("missed:") ||
+    tag.startsWith("summary:") ||
+    tag.startsWith("import:") ||
+    tag.startsWith("uncat")
+  )
+    return "expenses";
   return "general";
 }

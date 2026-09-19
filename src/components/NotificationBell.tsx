@@ -7,6 +7,7 @@ import { HandshakeIcon, ReceiptIcon } from "@/components/icons";
 import { fetchKey, useCached } from "@/lib/swr";
 import { fmtAgo } from "@/lib/format";
 import { notificationKind, type NotificationKind } from "@/lib/reminder-messages";
+import { ensureRegistered, setAppBadge } from "@/lib/push-client";
 
 // The bell beside the profile picture: every notification this account has
 // been sent, newest first, including the ones swiped away on the lock screen.
@@ -44,6 +45,24 @@ export function NotificationBell({ onManage }: { onManage: () => void }) {
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   const router = useRouter();
   const unread = data?.unread ?? 0;
+
+  // The number on the app icon follows the bell: it counts what is unseen,
+  // and clears the moment the bell is opened. The service worker sets it too
+  // when a notification arrives with the app closed.
+  useEffect(() => {
+    if (data) setAppBadge(unread);
+  }, [data, unread]);
+
+  // Keep this device registered: iOS can drop a registration without telling
+  // anyone. Checked on opening and on coming back to the app.
+  useEffect(() => {
+    ensureRegistered().catch(() => {});
+    const onVisible = () => {
+      if (document.visibilityState === "visible") ensureRegistered().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   // A notification that lands while the app is open shows up straight away:
   // the service worker says so as it displays it.

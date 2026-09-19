@@ -8,6 +8,7 @@ import {
 } from "@/lib/db";
 import { EVENING_HOUR, sendAnythingDue } from "@/lib/reminder-run";
 import { pushConfigured } from "@/lib/push";
+import { deliverPending } from "@/lib/notify";
 import { addDays, pakistanMinutes, pakistanToday } from "@/lib/expense-parse";
 
 export const dynamic = "force-dynamic";
@@ -56,20 +57,30 @@ export async function GET(req: Request) {
     }
   }
 
+  // Reminders go into the outbox for every account - into the bell whether or
+  // not the account has a phone registered.
   let notified = 0;
-  if (pushConfigured()) {
-    for (const user of await listNotificationRecipients()) {
-      try {
-        const result = await sendAnythingDue(user);
-        notified += result.sent;
-        errors.push(...result.errors);
-      } catch (err) {
-        errors.push(`notify ${user.id.slice(0, 8)}: ${(err as Error).message.slice(0, 200)}`);
-      }
+  for (const user of await listNotificationRecipients()) {
+    try {
+      const result = await sendAnythingDue(user);
+      notified += result.sent;
+      errors.push(...result.errors);
+    } catch (err) {
+      errors.push(`notify ${user.id.slice(0, 8)}: ${(err as Error).message.slice(0, 200)}`);
     }
   }
 
+  // Then the outbox itself: anything that did not reach a phone the first
+  // time, and whose next attempt is due, is tried again.
+  let outbox = { delivered: 0, retrying: 0, expired: 0 };
+  try {
+    outbox = await deliverPending();
+  } catch (err) {
+    errors.push(`outbox: ${(err as Error).message.slice(0, 200)}`);
+  }
+
   if (errors.length) console.error(JSON.stringify({ evt: "cron_run", errors }));
-  else if (notified || added) console.log(JSON.stringify({ evt: "cron_run", today, notified, added }));
-  return NextResponse.json({ ok: true, today, notified, added, pushConfigured: pushConfigured(), errors });
+  else if (notified || added || outbox.delivered || outbox.expired)
+    console.log(JSON.stringify({ evt: "cron_run", today, notified, added, outbox }));
+  return NextResponse.json({ ok: true, today, notified, added, outbox, pushConfigured: pushConfigured(), errors });
 }

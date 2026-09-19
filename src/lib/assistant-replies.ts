@@ -128,7 +128,7 @@ export const HELP_REPLY = join([
   "",
   "*The app*",
   "how do I turn on notifications?",
-  "when does the daily recap arrive?",
+  "when does the missed-expense reminder arrive?",
   "I wish the app had budgets",
   "",
   "Reply *UNDO* to reverse the last change.",

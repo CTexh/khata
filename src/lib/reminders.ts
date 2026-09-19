@@ -1,11 +1,10 @@
-// What is due on a given day, and what a day's recap contains. No database or
-// network here - the scheduled job gathers the data - so this runs under the
-// scripts/ tests.
+// What is due on a given day. No database or network here - the scheduled
+// job gathers the data - so this runs under the scripts/ tests.
 //
-// Reminders are delivered as notifications (see lib/push.ts):
+// Reminders are delivered as notifications (see lib/notify.ts):
 // - a subscription, the evening before it is due and on the day if unpaid
 // - someone who owes you, on the follow-up date you set
-// - a recap of the day before, each morning
+// - at 4am, a nudge to add any expenses missed the day before
 // - on the 1st, the month just ended
 import { addDays } from "./expense-parse.ts";
 
@@ -77,69 +76,4 @@ export function summaryMonth(today: string): { year: number; month: number; key:
   const year = m === 1 ? y - 1 : y;
   const month = m === 1 ? 12 : m - 1;
   return { year, month, key: `summary:${year}-${String(month).padStart(2, "0")}` };
-}
-
-/* ---------- the daily recap ---------- */
-
-// The UTC instants a Pakistan calendar day starts and ends, for comparing with
-// created_at / paid_at timestamps (Pakistan is UTC+5 all year).
-export function pakistanDayWindow(date: string): { from: string; to: string } {
-  const start = Date.parse(`${date}T00:00:00+05:00`);
-  return { from: new Date(start).toISOString(), to: new Date(start + 86_400_000).toISOString() };
-}
-
-export type RecapData = {
-  date: string; // the Pakistan day being summarised
-  expenses: { label: string; amount: number }[];
-  ledger: { name: string; amount: number }[]; // positive = lent, negative = paid back
-  subsDue: { name: string; amount: number; paid: boolean }[];
-  subsPaid: { name: string; amount: number }[]; // marked paid that day
-};
-
-// A day on which nothing at all was recorded - no expense, no Udhar Khata
-// entry, no subscription due or paid - has nothing worth an email. The nudge
-// to add what you forgot only means something when something happened.
-export function recapIsEmpty(recap: RecapData): boolean {
-  return (
-    recap.expenses.length === 0 &&
-    recap.ledger.length === 0 &&
-    recap.subsDue.length === 0 &&
-    recap.subsPaid.length === 0
-  );
-}
-
-type RecapSources = {
-  expenses: (fromDate: string, toDate: string) => Promise<{ amount: number; vendor?: string | null; note: string; category?: string | null }[]>;
-  ledger: (fromIso: string, toIso: string) => Promise<{ name: string; amount: number }[]>;
-  subscriptions: () => Promise<
-    { name: string; amount: number; active: boolean | number; history: { due_date: string; paid_at: string | null }[] }[]
-  >;
-};
-
-// Gathers one day's recap. The data comes through `sources`, so this stays
-// free of the database and can be tested on its own.
-export async function buildRecap(date: string, sources: RecapSources): Promise<RecapData> {
-  const { from, to } = pakistanDayWindow(date);
-  const [expenses, ledger, subs] = await Promise.all([
-    sources.expenses(date, date),
-    sources.ledger(from, to),
-    sources.subscriptions(),
-  ]);
-  return {
-    date,
-    expenses: expenses.map((e) => {
-      const note = e.note.replace(/^(WhatsApp|Assistant):\s*/, "");
-      const what = e.vendor || note || "Expense";
-      return { label: e.category ? `${what} · ${e.category}` : what, amount: e.amount };
-    }),
-    ledger: ledger.map((l) => ({ name: l.name, amount: l.amount })),
-    subsDue: subs.flatMap((s) =>
-      s.history.filter((h) => h.due_date === date).map((h) => ({ name: s.name, amount: s.amount, paid: Boolean(h.paid_at) }))
-    ),
-    subsPaid: subs.flatMap((s) =>
-      s.history
-        .filter((h) => h.paid_at && h.paid_at >= from && h.paid_at < to)
-        .map(() => ({ name: s.name, amount: s.amount }))
-    ),
-  };
 }

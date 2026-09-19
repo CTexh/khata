@@ -32,7 +32,7 @@ const STEPS: Step[] = [
   {
     Icon: BellIcon,
     title: "Reminders",
-    text: "Subscriptions due, udhar follow-ups and your daily recap, on your lock screen with the app closed. Turn them on in Settings \u2192 Manage notifications. On iPhone, add Khata to your Home Screen first.",
+    text: "Subscriptions due, udhar follow-ups and new bank expenses, on your lock screen with the app closed. Turn them on in Settings \u2192 Manage notifications. On iPhone, add Khata to your Home Screen first.",
   },
 ];
 

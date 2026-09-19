@@ -55,7 +55,7 @@ export function NotificationsNews({ onSetUp, onClose }: { onSetUp: () => void; o
             Reminders are here
           </h2>
           <p className="text-[15px] leading-relaxed mt-2" style={{ color: "var(--muted)" }}>
-            Subscriptions due, udhar follow-ups and your daily recap now arrive on your lock screen, even
+            Subscriptions due, udhar follow-ups and new bank expenses now arrive on your lock screen, even
             with the app closed.
           </p>
         </div>

@@ -11,8 +11,19 @@ import {
 } from "@/lib/db";
 import { routineUserId } from "@/lib/routine-auth";
 import { isMessageId, isSameExpense } from "@/lib/routine-match";
-import { sendPush } from "@/lib/push";
-import { importedExpensesMessage } from "@/lib/reminder-messages";
+import { notify } from "@/lib/notify";
+import {
+  importedExpensesMessage,
+  uncategorisedExpenseMessage,
+  uncategorisedRollupMessage,
+} from "@/lib/reminder-messages";
+
+// How long a notification about an import stays worth pushing to the phone;
+// it is in the bell either way.
+const IMPORT_VALID_MINUTES = 12 * 60;
+// Uncategorised expenses each get their own notification, up to this many in
+// one run - past that, the rest are rolled into one.
+const MAX_SINGLE_UNCATEGORISED = 3;
 
 export const dynamic = "force-dynamic";
 
@@ -167,21 +178,39 @@ export async function POST(req: Request) {
     recordedSkips.push(s.source_id);
   }
 
-  // One notification for what this run added - after the response, so the
-  // routine is never kept waiting on a phone's push service. Only for someone
-  // who has a device registered and has not switched this kind off.
+  // What this run added, told to the user - after the response, so the
+  // routine is never kept waiting on a phone's push service. Expenses with a
+  // category go in one notification for the run. Each one without a category
+  // gets its own, which opens that very expense so it can be sorted in one
+  // tap; past a few in one run, the rest are rolled into a single one.
   if (posted.length) {
     after(async () => {
       try {
         const recipient = await getNotificationRecipient(userId);
         if (!recipient?.prefs.importedExpenses) return;
-        await sendPush(
-          userId,
-          importedExpensesMessage(
-            posted.map((p) => ({ amount: p.amount, vendor: p.vendor, category: p.category })),
-            posted[0].source_id
-          )
-        );
+        const categorised = posted.filter((p) => p.category);
+        const uncategorised = posted.filter((p) => !p.category);
+        if (categorised.length) {
+          await notify(
+            userId,
+            importedExpensesMessage(
+              categorised.map((p) => ({ amount: p.amount, vendor: p.vendor, category: p.category })),
+              categorised[0].source_id
+            ),
+            { validForMinutes: IMPORT_VALID_MINUTES }
+          );
+        }
+        for (const p of uncategorised.slice(0, MAX_SINGLE_UNCATEGORISED)) {
+          await notify(userId, uncategorisedExpenseMessage({ id: p.id, amount: p.amount, vendor: p.vendor }), {
+            validForMinutes: IMPORT_VALID_MINUTES,
+          });
+        }
+        const more = uncategorised.length - MAX_SINGLE_UNCATEGORISED;
+        if (more > 0) {
+          await notify(userId, uncategorisedRollupMessage(more, uncategorised[0].source_id), {
+            validForMinutes: IMPORT_VALID_MINUTES,
+          });
+        }
       } catch (err) {
         console.error(JSON.stringify({ evt: "import_notify", error: (err as Error).message.slice(0, 200) }));
       }

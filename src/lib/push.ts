@@ -9,9 +9,8 @@
 import webpush from "web-push";
 import {
   deletePushSubscription,
-  discardNotification,
   listPushSubscriptions,
-  recordNotification,
+  recordDeviceDelivery,
   type PushSubscriptionRow,
 } from "@/lib/db";
 
@@ -20,6 +19,10 @@ import {
 // itself - short, specific, no "Khata" - and the body carries the figures.
 // Both are kept well inside what a lock screen shows before it truncates.
 export type PushMessage = { title: string; body: string; url?: string; tag?: string };
+
+// What actually goes to the device: the message, plus the unread count for
+// the app icon's badge.
+export type PushPayload = PushMessage & { badge?: number };
 
 const PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY ?? "";
 const PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY ?? "";
@@ -42,45 +45,53 @@ function configure() {
   ready = true;
 }
 
-// Sends to every device this account has registered. A device whose
-// subscription the push service reports as gone (404/410 - the app was
-// deleted, or the browser dropped it) is removed, so it isn't tried again.
-//
-// Each notification is also kept for the bell in the app. It is written
-// before sending, so it is already there when the phone receives the push and
-// the open app refreshes its list, and removed again if no device took it -
-// the bell only ever shows what actually arrived, and a reminder that is
-// retried later is not listed twice.
-export async function sendPush(userId: string, message: PushMessage): Promise<number> {
-  if (!pushConfigured()) return 0;
-  const devices = await listPushSubscriptions(userId);
-  if (!devices.length) return 0;
-  configure();
-  const recorded = await recordNotification(userId, message).catch(() => null);
+export type DeliveryResult = { devices: number; delivered: number; error: string | null };
 
-  const payload = JSON.stringify(message);
+// Hands one notification to every device this account has registered - and
+// only that. Keeping it in the bell and trying again later are the outbox's
+// job (lib/notify.ts); this is the part that talks to Apple and Google.
+//
+// A device whose push service reports it gone (404/410 - the app was
+// deleted, or the browser dropped it) is removed, so it isn't tried again.
+// Every other outcome is written against the device, for the health line in
+// Settings.
+export async function deliverToDevices(
+  userId: string,
+  payload: PushPayload,
+  ttlSeconds: number
+): Promise<DeliveryResult> {
+  if (!pushConfigured()) return { devices: 0, delivered: 0, error: "push is not configured" };
+  const devices = await listPushSubscriptions(userId);
+  if (!devices.length) return { devices: 0, delivered: 0, error: "no device registered" };
+  configure();
+
+  const body = JSON.stringify(payload);
+  const ttl = Math.max(60, Math.min(12 * 60 * 60, Math.round(ttlSeconds)));
   let delivered = 0;
+  let lastError: string | null = null;
   await Promise.all(
     devices.map(async (device: PushSubscriptionRow) => {
       try {
         await webpush.sendNotification(
           { endpoint: device.endpoint, keys: { p256dh: device.p256dh, auth: device.auth } },
-          payload,
-          { TTL: 12 * 60 * 60 }
+          body,
+          { TTL: ttl }
         );
         delivered++;
+        await recordDeviceDelivery(device.endpoint, null).catch(() => {});
       } catch (err) {
         const status = (err as { statusCode?: number }).statusCode;
         if (status === 404 || status === 410) {
           await deletePushSubscription(device.endpoint);
+          lastError = lastError ?? "device no longer registered";
           return;
         }
-        console.error(
-          JSON.stringify({ evt: "push", status: status ?? null, error: (err as Error).message.slice(0, 200) })
-        );
+        const message = `${status ?? "network"}: ${(err as Error).message.slice(0, 160)}`;
+        lastError = message;
+        await recordDeviceDelivery(device.endpoint, message).catch(() => {});
+        console.error(JSON.stringify({ evt: "push", status: status ?? null, error: message }));
       }
     })
   );
-  if (!delivered && recorded) await discardNotification(recorded).catch(() => {});
-  return delivered;
+  return { devices: devices.length, delivered, error: delivered ? null : lastError };
 }
