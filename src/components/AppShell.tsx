@@ -419,7 +419,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               key="assistant"
               href="/assistant"
               className="tab-fab"
-              prefetch={false}
               aria-label="Assistant"
               aria-current={pathname === "/assistant" ? "page" : undefined}
             >
@@ -430,9 +429,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               key={tab.href}
               href={tab.href}
               className="tab"
-              // Navigation is instant from the cache anyway; prefetching all
-              // five at once only steals bandwidth from the opening request.
-              prefetch={false}
               aria-current={pathname === tab.href ? "page" : undefined}
             >
               <tab.Icon size={22} />

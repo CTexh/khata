@@ -30,9 +30,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  // Without this iOS resolves every safe-area inset to zero, and the tab bar
-  // sits under the home indicator.
-  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#eef1f9" },
     { media: "(prefers-color-scheme: dark)", color: "#0a0b12" },
