@@ -283,29 +283,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const home = pathname === "/";
   const displayName = user?.name || user?.username;
 
-  // The assistant is a full-screen chat with its own top bar and composer.
-  if (pathname === "/assistant") {
-    return (
-      <>
-        <a className="skip-link" href="#main-content">Skip to main content</a>
-        <main id="main-content">{children}</main>
-      </>
-    );
-  }
+  // The assistant is a full-screen chat with its own top bar and composer, so
+  // it has none of the chrome around it. That used to be a separate tree
+  // returned early - which made React throw the whole app away and build
+  // another one on the way in, and again on the way out. That was the blink.
+  // Same tree now: the chrome is simply not rendered, and what stays, stays.
+  const chat = pathname === "/assistant";
 
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <div
-        className="w-full max-w-xl mx-auto px-4 pt-5 sm:pt-8 flex flex-col gap-5"
-        style={{
-          paddingLeft: "max(1rem, env(safe-area-inset-left))",
-          paddingRight: "max(1rem, env(safe-area-inset-right))",
-          paddingTop: "max(1.25rem, env(safe-area-inset-top))",
-          // room for the floating tab bar
-          paddingBottom: "calc(118px + env(safe-area-inset-bottom))",
-        }}
+        className={chat ? "contents" : "w-full max-w-xl mx-auto px-4 pt-5 sm:pt-8 flex flex-col gap-5"}
+        style={
+          chat
+            ? undefined
+            : {
+                paddingLeft: "max(1rem, env(safe-area-inset-left))",
+                paddingRight: "max(1rem, env(safe-area-inset-right))",
+                paddingTop: "max(1.25rem, env(safe-area-inset-top))",
+                // room for the floating tab bar
+                paddingBottom: "calc(118px + env(safe-area-inset-bottom))",
+              }
+        }
       >
+        {!chat && (
         <header className="flex items-center justify-between gap-3 min-h-12">
           <div className="min-w-0">
             {home ? (
@@ -395,18 +397,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </header>
+        )}
 
-        <PullToRefresh />
+        {!chat && <PullToRefresh />}
 
         {/* display:contents, so wrapping the page changes no layout. Each
             route is a different component, so its elements are new on every
             navigation and the arrival plays by itself - no key needed, and no
-            forced remount of a page that is only re-rendering. */}
-        <main id="main-content" className="contents page-enter">
+            forced remount of a page that is only re-rendering. The assistant
+            brings its own full-screen layout, and grows out of the button that
+            opened it. */}
+        <main id="main-content" className={chat ? "chat-enter" : "contents page-enter"}>
           {children}
         </main>
       </div>
 
+      {!chat && (
       <nav
         className={`tabbar${user?.aiAccess ? "" : " no-fab"}${user?.tripsEnabled ? " with-trips" : ""}`}
         aria-label="Primary navigation"
@@ -437,6 +443,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )
         )}
       </nav>
+      )}
 
       {tourOpen && user && <WelcomeTour withAssistant={Boolean(user.aiAccess)} onClose={closeTour} />}
 

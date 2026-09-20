@@ -232,6 +232,24 @@
 .page-enter > * {
   animation: page-in 240ms var(--ease-page) backwards;
 }
+/* The assistant grows out of the button in the middle of the tab bar, which is
+   where the tap was, and settles into a full screen. Anchored to the bottom
+   centre so it reads as that button opening rather than a new page arriving. */
+.chat-enter {
+  animation: chat-in 300ms var(--ease-settle) backwards;
+  transform-origin: 50% 100%;
+}
+@keyframes chat-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes page-in {
   from {
     opacity: 0.6;
@@ -617,6 +635,17 @@ body {
 }
 
 /* ---- bottom tab bar ---- */
+/* It is taken away for the assistant and put back on the way out, so it
+   arrives rather than appearing. */
+.tabbar {
+  animation: tabbar-in 260ms var(--ease-settle) backwards;
+}
+@keyframes tabbar-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(14px);
+  }
+}
 .tabbar {
   position: fixed;
   left: 50%;
