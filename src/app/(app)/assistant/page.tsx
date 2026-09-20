@@ -307,31 +307,25 @@ export default function AssistantPage() {
     if (loaded) saveHistory(messages);
   }, [messages, loaded]);
 
-  // Opening the chat lands on the newest message. The first pass runs before
-  // the bubbles have finished being laid out, so it used to stop short of the
-  // bottom: the jump is repeated on the next two frames, once the browser has
-  // settled, and only then does scrolling become smooth for new replies.
+  // Opening the chat lands on the newest message, before the first paint -
+  // the conversation is already in the DOM by then, so the position can be
+  // set outright. It used to jump to the bottom and then jump twice more on
+  // the following frames to correct itself, which happened while the screen
+  // was still animating in: three lots of layout and paint during the one
+  // movement that was meant to look smooth.
   const openedAt = useRef(true);
-  useEffect(() => {
-    if (!loaded) return;
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const instant = openedAt.current || reduce;
-    const toBottom = () => {
-      endRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" });
-      if (instant) window.scrollTo(0, document.documentElement.scrollHeight);
-    };
-    toBottom();
-    if (!instant) return;
-    let second = 0;
-    const first = requestAnimationFrame(() => {
-      toBottom();
-      second = requestAnimationFrame(toBottom);
-    });
+  useBeforePaint(() => {
+    if (!loaded || !openedAt.current) return;
+    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    window.scrollTo(0, document.documentElement.scrollHeight);
     if (messages.length) openedAt.current = false;
-    return () => {
-      cancelAnimationFrame(first);
-      cancelAnimationFrame(second);
-    };
+  }, [loaded, messages.length]);
+
+  // Afterwards a new reply slides into view, as a new message should.
+  useEffect(() => {
+    if (!loaded || openedAt.current) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    endRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "end" });
   }, [messages, loaded]);
 
   const stopRecording = (discard: boolean) => {
