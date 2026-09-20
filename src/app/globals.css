@@ -235,30 +235,29 @@
 /* The assistant grows out of the button in the middle of the tab bar, which is
    where the tap was, and settles into a full screen. Anchored to the bottom
    centre so it reads as that button opening rather than a new page arriving. */
+/* Grows out of the button in the middle of the tab bar. Movement only, no
+   fade: the screen inside this has its own arrival, and two fades multiply -
+   0.55 here over 0.35 on the conversation left the first frame at 0.19, which
+   is what "everything goes blank for a moment" was. Nothing in an arrival may
+   make the content faint. */
 .chat-enter {
-  animation: chat-in 300ms var(--ease-settle) backwards;
+  animation: chat-in 280ms var(--ease-settle) backwards;
   transform-origin: 50% 100%;
 }
 @keyframes chat-in {
   from {
-    /* Not from nothing: a fade that begins at zero is a blank frame of its
-       own, which is what this animation is meant to cover. */
-    opacity: 0.55;
-    transform: scale(0.94) translate3d(0, 10px, 0);
+    transform: scale(0.97) translate3d(0, 8px, 0);
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }
 
 @keyframes page-in {
   from {
-    opacity: 0.6;
     transform: translate3d(0, 8px, 0);
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }
@@ -637,17 +636,6 @@ body {
 }
 
 /* ---- bottom tab bar ---- */
-/* It is taken away for the assistant and put back on the way out, so it
-   arrives rather than appearing. */
-.tabbar {
-  animation: tabbar-in 260ms var(--ease-settle) backwards;
-}
-@keyframes tabbar-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(14px);
-  }
-}
 .tabbar {
   position: fixed;
   left: 50%;
@@ -814,37 +802,24 @@ body {
 .chat-topbar {
   animation: chat-top var(--dur-page) var(--ease-page) backwards;
 }
-.chat-body {
-  animation: chat-fade 280ms ease-out backwards;
-}
+/* No animation on the conversation itself. It is the thing being opened;
+   fading it in is what made the assistant look like it was loading. */
 .chat-composer {
   animation: chat-rise 380ms var(--ease-sheet) 40ms backwards;
 }
 @keyframes chat-top {
   from {
-    opacity: 0.4;
     transform: translate3d(0, -10px, 0);
   }
   to {
-    opacity: 1;
     transform: none;
-  }
-}
-@keyframes chat-fade {
-  from {
-    opacity: 0.35;
-  }
-  to {
-    opacity: 1;
   }
 }
 @keyframes chat-rise {
   from {
-    opacity: 0.4;
     transform: translate3d(0, 26px, 0);
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }
