@@ -518,30 +518,72 @@ body {
   /* Vertical scrolling stays with the browser and never waits for JavaScript;
      sideways movement is ours. */
   touch-action: pan-y;
+  border-radius: 18px;
 }
+/* The buttons sit on the page behind the row, like the app the gesture comes
+   from: round, spaced, and only as wide as they need to be. */
 .swipe-actions {
   position: absolute;
   inset: 0 0 0 auto;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 10px;
+  padding-inline: 12px 4px;
 }
-.swipe-delete,
-.swipe-answer {
-  min-width: 84px;
-  padding: 0 18px;
-  font-size: 14px;
-  font-weight: 800;
+.swipe-circle {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
   color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 6px 16px rgba(31, 45, 90, 0.18);
+  transition:
+    transform var(--dur-press, 260ms) var(--ease-press, cubic-bezier(0.16, 1, 0.3, 1)),
+    opacity var(--dur-quick, 160ms) ease;
+}
+.swipe-circle:active {
+  transform: scale(0.9);
+}
+.swipe-circle:disabled {
+  opacity: 0.6;
+}
+.swipe-bin,
+.swipe-yes {
   background: var(--bad);
 }
-.swipe-answer {
-  min-width: 84px;
+.swipe-no {
   background: var(--surface-2);
   color: var(--ink-2);
+  box-shadow: none;
+  border: 1px solid var(--ring);
 }
-.swipe-answer-yes {
-  background: var(--bad);
-  color: #fff;
+/* The circles arrive with the row rather than sitting there waiting. */
+.swipe-circle {
+  animation: swipe-pop var(--dur-quick, 180ms) var(--ease-settle, cubic-bezier(0.22, 1, 0.36, 1)) backwards;
+}
+.swipe-yes {
+  animation-delay: 40ms;
+}
+@keyframes swipe-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+.swipe-spin {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 /* Anything inside a swipeable row has to leave sideways movement to us.
    `.list-row` sets touch-action: manipulation, which lets the browser claim a
@@ -553,19 +595,25 @@ body {
 }
 .swipe-content {
   position: relative;
-  /* Opaque, so the Delete button behind it is out of sight until it is pulled
-     out of the way. */
+  /* Opaque and rounded, so what slides away reads as a card rather than a
+     strip of the page, and the buttons are out of sight until it moves. */
   background: var(--surface);
+  border-radius: 18px;
   will-change: transform;
 }
 .swipe-question {
   position: absolute;
   left: 14px;
-  bottom: 6px;
-  font-size: 12px;
+  bottom: 4px;
+  font-size: 11.5px;
   font-weight: 700;
   color: var(--bad);
   pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .swipe-circle {
+    animation: none;
+  }
 }
 
 /* ---- bottom tab bar ---- */

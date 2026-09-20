@@ -135,17 +135,37 @@ export function SwipeRow({
       <div className="swipe-actions" aria-hidden={shownOffset === 0}>
         {asking ? (
           <>
-            <button type="button" className="swipe-answer" onClick={close} disabled={busy}>
-              No
+            <button
+              type="button"
+              className="swipe-circle swipe-no"
+              aria-label="Keep it"
+              onClick={close}
+              disabled={busy}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
             </button>
-            <button type="button" className="swipe-answer swipe-answer-yes" onClick={remove} disabled={busy}>
-              {busy ? "…" : "Yes"}
+            <button
+              type="button"
+              className="swipe-circle swipe-yes"
+              aria-label={`Yes, delete ${label}`}
+              onClick={remove}
+              disabled={busy}
+            >
+              {busy ? (
+                <span className="swipe-spin" />
+              ) : (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M5 12.5l4.5 4.5L19 7.5" />
+                </svg>
+              )}
             </button>
           </>
         ) : (
           <button
             type="button"
-            className="swipe-delete"
+            className="swipe-circle swipe-bin"
             aria-label={`Delete ${label}`}
             tabIndex={offset === 0 ? -1 : 0}
             onClick={() => {
@@ -153,7 +173,12 @@ export function SwipeRow({
               open(-CONFIRM_PX);
             }}
           >
-            Delete
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 7h16" />
+              <path d="M9.5 7V5.4c0-.5.4-.9.9-.9h3.2c.5 0 .9.4.9.9V7" />
+              <path d="M6.5 7l.8 12.1c0 .8.7 1.4 1.5 1.4h6.4c.8 0 1.5-.6 1.5-1.4L17.5 7" />
+              <path d="M10.5 11v5.5M13.5 11v5.5" />
+            </svg>
           </button>
         )}
       </div>

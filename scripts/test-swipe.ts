@@ -24,10 +24,10 @@ check("scrolling up is still scrolling", direction(2, -40), "down");
 /* ---------- following the finger ---------- */
 
 check("a shut row follows a pull left", offsetWhileDragging(0, -40), -40);
-check("an open row starts from where it is", offsetWhileDragging(-REVEAL_PX, -20), -116);
+check("an open row starts from where it is", offsetWhileDragging(-REVEAL_PX, -20), -(REVEAL_PX + 20));
 check("it cannot be pulled far past the button", offsetWhileDragging(0, -400), -(REVEAL_PX + 24));
 check("and hardly moves to the right", offsetWhileDragging(0, 100), 15);
-check("closing an open row works normally", offsetWhileDragging(-REVEAL_PX, 40), -56);
+check("closing an open row works normally", offsetWhileDragging(-REVEAL_PX, 40), -(REVEAL_PX - 40));
 
 /* ---------- where it lands ---------- */
 

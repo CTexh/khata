@@ -1,10 +1,10 @@
 // The arithmetic behind swiping a row open, kept apart from the component so
 // scripts/test-swipe.ts can check it without a browser.
 
-// How far a row slides to show its Delete button, and again to ask whether you
-// meant it.
-export const REVEAL_PX = 96;
-export const CONFIRM_PX = 168;
+// How far a row slides to show its round Delete button, and again to ask
+// whether you meant it - one circle, then two.
+export const REVEAL_PX = 74;
+export const CONFIRM_PX = 136;
 
 // Which way a finger is going. Until that is known the row must not move at
 // all, or a scroll down a list drags every row it passes.
