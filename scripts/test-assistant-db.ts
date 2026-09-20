@@ -462,6 +462,23 @@ check("and the closed trip deletes too", await trips.getTrip(tripUser, closing),
 await dbm.deleteUser(tripUser);
 check("deleting an account takes its trips with it", await trips.listTrips(tripUser), []);
 
+/* ---------- the Siri shortcut token ---------- */
+
+check("no token until one is made", await dbm.getShortcutToken(userId), null);
+const shortcutToken = await dbm.rotateShortcutToken(userId);
+check("a token is long enough to be worth having", shortcutToken.length >= 32, true);
+check("it belongs to whoever made it", (await dbm.findUserByShortcutToken(shortcutToken))?.id, userId);
+check("and it is what Settings shows", await dbm.getShortcutToken(userId), shortcutToken);
+check("a wrong token matches nobody", await dbm.findUserByShortcutToken("x".repeat(43)), null);
+check("and a short one never reaches the database", await dbm.findUserByShortcutToken("short"), null);
+
+const replaced = await dbm.rotateShortcutToken(userId);
+check("making a new one stops the old", await dbm.findUserByShortcutToken(shortcutToken), null);
+check("and starts the new", (await dbm.findUserByShortcutToken(replaced))?.id, userId);
+
+await dbm.clearShortcutToken(userId);
+check("turning it off leaves nothing to use", [await dbm.getShortcutToken(userId), await dbm.findUserByShortcutToken(replaced)], [null, null]);
+
 /* ---------- the outbox ---------- */
 
 delete process.env.VAPID_PUBLIC_KEY;

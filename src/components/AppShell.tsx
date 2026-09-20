@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ThemePicker } from "@/components/Theme";
 import { NotificationSettings, Switch } from "@/components/NotificationSettings";
+import { SiriSettings } from "@/components/SiriSettings";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
@@ -38,6 +39,7 @@ function SettingsModal({
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notifications, setNotifications] = useState(Boolean(startOnNotifications));
+  const [siri, setSiri] = useState(false);
   const [trips, setTrips] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
 
@@ -76,6 +78,7 @@ function SettingsModal({
   // which ones you want is another.
   if (notifications)
     return <NotificationSettings onBack={() => (startOnNotifications ? onClose() : setNotifications(false))} />;
+  if (siri) return <SiriSettings onBack={() => setSiri(false)} />;
 
   return (
     <Sheet title="Settings" onClose={onClose}>
@@ -119,6 +122,22 @@ function SettingsModal({
             <span className="block text-[15px] font-bold">Manage notifications</span>
             <span className="block text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
               Which reminders you get, and on which devices.
+            </span>
+          </span>
+          <span style={{ color: "var(--muted)" }} aria-hidden>
+            ›
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className="card p-4 w-full text-left flex items-center gap-3"
+          onClick={() => setSiri(true)}
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-bold">Siri &amp; Shortcuts</span>
+            <span className="block text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
+              Speak to the assistant without opening the app.
             </span>
           </span>
           <span style={{ color: "var(--muted)" }} aria-hidden>

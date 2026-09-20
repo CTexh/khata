@@ -1,5 +1,5 @@
 import { createClient, type Client } from "@libsql/client";
-import { randomUUID } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import {
   CATEGORIES,
   canonicalCategory,
@@ -1998,6 +1998,66 @@ export async function ensureTripTables(): Promise<void> {
   }
   await markSchema("trips", TRIP_SCHEMA);
   tripTablesEnsured = true;
+}
+
+/* ---------- Siri and Shortcuts ---------- */
+
+// A token an Apple Shortcut sends instead of signing in, so "Hey Siri" can
+// reach the assistant. One per account, shown once in Settings, and replacing
+// it makes every Shortcut holding the old one stop working - which is how you
+// take a phone's access away.
+let shortcutTokenEnsured = false;
+async function ensureShortcutTokenColumn(): Promise<void> {
+  if (shortcutTokenEnsured) return;
+  if (await schemaCurrent("shortcut_token", "1")) {
+    shortcutTokenEnsured = true;
+    return;
+  }
+  const c = await db();
+  try {
+    await c.execute(`ALTER TABLE users ADD COLUMN shortcut_token TEXT`);
+  } catch {
+    // Column already exists.
+  }
+  try {
+    await c.execute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_shortcut_token ON users (shortcut_token) WHERE shortcut_token IS NOT NULL`
+    );
+  } catch {
+    // Index already exists.
+  }
+  await markSchema("shortcut_token", "1");
+  shortcutTokenEnsured = true;
+}
+
+export async function getShortcutToken(userId: string): Promise<string | null> {
+  await ensureShortcutTokenColumn();
+  const rs = await db().execute({ sql: "SELECT shortcut_token FROM users WHERE id = ?", args: [userId] });
+  return (rs.rows[0]?.shortcut_token as string | null) ?? null;
+}
+
+export async function rotateShortcutToken(userId: string): Promise<string> {
+  await ensureShortcutTokenColumn();
+  // 32 random bytes: far beyond guessing, and short enough to paste into a
+  // Shortcut by hand.
+  const token = randomBytes(32).toString("base64url");
+  await db().execute({ sql: "UPDATE users SET shortcut_token = ? WHERE id = ?", args: [token, userId] });
+  return token;
+}
+
+export async function clearShortcutToken(userId: string): Promise<void> {
+  await ensureShortcutTokenColumn();
+  await db().execute({ sql: "UPDATE users SET shortcut_token = NULL WHERE id = ?", args: [userId] });
+}
+
+// Whose token this is. The token is random and long, so an exact lookup is
+// enough; an empty or short one never reaches the database.
+export async function findUserByShortcutToken(token: string): Promise<{ id: string; username: string } | null> {
+  if (!token || token.length < 32) return null;
+  await ensureShortcutTokenColumn();
+  const rs = await db().execute({ sql: "SELECT id, username FROM users WHERE shortcut_token = ?", args: [token] });
+  const r = rs.rows[0];
+  return r ? { id: r.id as string, username: r.username as string } : null;
 }
 
 export async function tripsEnabled(userId: string): Promise<boolean> {

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate-db.mjs",
-    "test": "node --experimental-strip-types scripts/test-categorize.ts && node --experimental-strip-types scripts/test-parse.ts && node --experimental-strip-types scripts/test-assistant.ts && node --experimental-strip-types scripts/test-reminders.ts && node --experimental-strip-types scripts/test-trip-split.ts && node --experimental-strip-types scripts/test-routine.ts && node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/test-assistant-db.ts"
+    "test": "node --experimental-strip-types scripts/test-categorize.ts && node --experimental-strip-types scripts/test-parse.ts && node --experimental-strip-types scripts/test-assistant.ts && node --experimental-strip-types scripts/test-reminders.ts && node --experimental-strip-types scripts/test-trip-split.ts && node --experimental-strip-types scripts/test-speakable.ts && node --experimental-strip-types scripts/test-routine.ts && node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/test-assistant-db.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

@@ -15,6 +15,12 @@ const AUTH_PAGES = ["/login", "/signup"];
 // email routine's own endpoints.
 const ROUTINE_AUTH_PATHS = new Set(["/api/expenses", "/api/routine/unseen", "/api/routine/ingest"]);
 
+// The Shortcuts endpoint carries its own token, which is checked against the
+// database - something this proxy cannot do. So the request is let through to
+// the route, and the route refuses anything without a token of its own. It is
+// listed here alone, so nothing else is reachable without a session.
+const TOKEN_AUTH_PATHS = new Set(["/api/shortcut"]);
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -25,8 +31,10 @@ export function proxy(request: NextRequest) {
   const hasValidRoutineSecret =
     ROUTINE_AUTH_PATHS.has(pathname) &&
     verifyRoutineSecret(request.headers.get("x-routine-secret"));
+  // Checked by the route itself.
+  const checksItsOwnToken = TOKEN_AUTH_PATHS.has(pathname);
 
-  if (!session && !isPublic && !hasValidRoutineSecret) {
+  if (!session && !isPublic && !hasValidRoutineSecret && !checksItsOwnToken) {
     if (isApi) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
