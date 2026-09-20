@@ -11,9 +11,9 @@ import { useRouter } from "next/navigation";
 // copy can be a few seconds out of date - which is fine for a heading, and not
 // fine for a redirect that would throw someone off the page they just
 // switched on.
-export function useTripsSection(): "on" | "off" | "loading" {
+export function useTripsSection(): "on" | "off" | "loading" | "failed" {
   const router = useRouter();
-  const [section, setSection] = useState<"on" | "off" | "loading">("loading");
+  const [section, setSection] = useState<"on" | "off" | "loading" | "failed">("loading");
 
   useEffect(() => {
     let cancelled = false;
@@ -22,7 +22,11 @@ export function useTripsSection(): "on" | "off" | "loading" {
       .then((data) => {
         if (cancelled) return;
         // Not signed in: the app's own guard sends them to the login page.
-        if (!data?.user) return;
+        if (!data) {
+          setSection("failed");
+          return;
+        }
+        if (!data.user) return;
         if (data.user.tripsEnabled) {
           setSection("on");
         } else {
@@ -30,7 +34,11 @@ export function useTripsSection(): "on" | "off" | "loading" {
           router.replace("/");
         }
       })
-      .catch(() => {});
+      // Asking failed - offline, most likely. Say so rather than sitting on a
+      // spinner that never stops.
+      .catch(() => {
+        if (!cancelled) setSection("failed");
+      });
     return () => {
       cancelled = true;
     };

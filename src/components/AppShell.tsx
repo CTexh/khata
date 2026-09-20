@@ -3,16 +3,28 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { ThemePicker } from "@/components/Theme";
-import { NotificationSettings, Switch } from "@/components/NotificationSettings";
-import { SiriSettings } from "@/components/SiriSettings";
+import dynamic from "next/dynamic";
+import { Switch } from "@/components/Switch";
+import { PullToRefresh } from "@/components/PullToRefresh";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
-import { WelcomeTour } from "@/components/WelcomeTour";
-import { NotificationsNews } from "@/components/NotificationsNews";
+
 import { NotificationBell } from "@/components/NotificationBell";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
+import { send } from "@/lib/submit";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon, SuitcaseIcon } from "@/components/icons";
+
+// None of this is reachable without opening the avatar menu, and together it
+// was about 10 KB of JavaScript on every page load - the whole settings
+// surface, including the Siri setup guide, downloaded by people who never
+// open it. Fetched when it is actually needed instead.
+const ThemePicker = dynamic(() => import("@/components/Theme").then((m) => m.ThemePicker));
+const NotificationSettings = dynamic(() =>
+  import("@/components/NotificationSettings").then((m) => m.NotificationSettings)
+);
+const SiriSettings = dynamic(() => import("@/components/SiriSettings").then((m) => m.SiriSettings));
+const WelcomeTour = dynamic(() => import("@/components/WelcomeTour").then((m) => m.WelcomeTour));
+const NotificationsNews = dynamic(() => import("@/components/NotificationsNews").then((m) => m.NotificationsNews));
 
 type CurrentUser = {
   id: string;
@@ -59,15 +71,10 @@ function SettingsModal({
     e.preventDefault();
     setSaving(true);
     setMsg(null);
-    const res = await fetch("/api/profile", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, tripsEnabled: trips }),
-    });
+    const sent = await send("/api/profile", { method: "PATCH", body: { name, tripsEnabled: trips } });
     setSaving(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setMsg({ text: j.error ?? "Couldn't save — try again.", bad: true });
+    if (!sent.ok) {
+      setMsg({ text: sent.error, bad: true });
       return;
     }
     onSaved();
@@ -389,6 +396,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
+        <PullToRefresh />
+
         {/* display:contents, so wrapping the page changes no layout. Each
             route is a different component, so its elements are new on every
             navigation and the arrival plays by itself - no key needed, and no
@@ -410,6 +419,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               key="assistant"
               href="/assistant"
               className="tab-fab"
+              prefetch={false}
               aria-label="Assistant"
               aria-current={pathname === "/assistant" ? "page" : undefined}
             >
@@ -420,6 +430,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               key={tab.href}
               href={tab.href}
               className="tab"
+              // Navigation is instant from the cache anyway; prefetching all
+              // five at once only steals bandwidth from the opening request.
+              prefetch={false}
               aria-current={pathname === tab.href ? "page" : undefined}
             >
               <tab.Icon size={22} />

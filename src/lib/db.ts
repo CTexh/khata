@@ -769,6 +769,33 @@ export async function userHasAi(userId: string): Promise<boolean> {
   return Boolean(r) && (Number(r.is_admin) === 1 || Number(r.ai_access) === 1);
 }
 
+export type AccountFlags = {
+  name: string | null;
+  createdAt: string | null;
+  aiAccess: boolean;
+  tripsEnabled: boolean;
+};
+
+// Everything about the account that the app asks for when it opens, from one
+// row. It used to be three separate questions - who are you, may you use the
+// assistant, is Trips on - each its own trip to the database, all reading the
+// same row.
+export async function getAccountFlags(userId: string): Promise<AccountFlags | null> {
+  await Promise.all([ensureAiAccessColumn(), ensureTripTables(), ensureUserNameColumn()]);
+  const rs = await db().execute({
+    sql: "SELECT name, created_at, is_admin, ai_access, trips_enabled FROM users WHERE id = ?",
+    args: [userId],
+  });
+  const r = rs.rows[0];
+  if (!r) return null;
+  return {
+    name: (r.name as string | null) ?? null,
+    createdAt: (r.created_at as string | null) ?? null,
+    aiAccess: Number(r.is_admin) === 1 || Number(r.ai_access) === 1,
+    tripsEnabled: Number(r.trips_enabled ?? 0) === 1,
+  };
+}
+
 export async function setUserAiAccess(userId: string, on: boolean): Promise<void> {
   await ensureAiAccessColumn();
   await db().execute({ sql: "UPDATE users SET ai_access = ? WHERE id = ?", args: [on ? 1 : 0, userId] });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Sheet } from "@/components/Sheet";
+import { Switch } from "@/components/Switch";
 import { fmtAgo } from "@/lib/format";
 import {
   ensureRegistered,
@@ -80,40 +81,6 @@ async function deviceHealth(endpoint: string): Promise<(Health & { registered: b
   return data?.thisDevice ?? null;
 }
 
-// Also used by the Settings sheet for the Trips switch.
-export function Switch({
-  label,
-  hint,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  hint?: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex items-start justify-between gap-3 min-h-11 cursor-pointer">
-      <span className="min-w-0">
-        <span className="block text-[15px] font-semibold">{label}</span>
-        {hint && (
-          <span className="block text-[12.5px] mt-0.5" style={{ color: "var(--muted)" }}>
-            {hint}
-          </span>
-        )}
-      </span>
-      <input
-        type="checkbox"
-        className="h-6 w-6 mt-0.5 shrink-0 accent-[var(--accent)] cursor-pointer"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-    </label>
-  );
-}
 
 export function NotificationSettings({ onBack }: { onBack: () => void }) {
   const [device, setDevice] = useState<DeviceState>("loading");

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { clearCache } from "@/lib/swr";
+import { send } from "@/lib/submit";
 
 export default function SignupPage() {
   const [name, setName] = useState("");
@@ -23,15 +24,10 @@ export default function SignupPage() {
     }
     setBusy(true);
     setError("");
-    const res = await fetch("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, username, password }),
-    });
+    const sent = await send("/api/auth/signup", { body: { name, username, password } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     // A different account may have used this browser: drop its cached data.
@@ -73,6 +69,7 @@ export default function SignupPage() {
           aria-label="Password"
           placeholder="Password (min 6 characters)"
           type="password"
+          autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required

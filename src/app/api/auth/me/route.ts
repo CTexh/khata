@@ -1,26 +1,24 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { findUserById, tripsEnabled, userHasAi } from "@/lib/db";
+import { getAccountFlags } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ user: null });
-  const [record, aiAccess, trips] = await Promise.all([
-    findUserById(session.userId),
-    userHasAi(session.userId),
-    tripsEnabled(session.userId),
-  ]);
+  // One row answers all of it: the name, assistant access and whether Trips
+  // is switched on.
+  const account = await getAccountFlags(session.userId);
   return NextResponse.json({
     user: {
       id: session.userId,
       username: session.username,
-      name: record?.name ?? null,
+      name: account?.name ?? null,
       isAdmin: session.isAdmin,
-      aiAccess,
-      tripsEnabled: trips,
-      createdAt: record?.created_at ?? null,
+      aiAccess: Boolean(account?.aiAccess),
+      tripsEnabled: Boolean(account?.tripsEnabled),
+      createdAt: account?.createdAt ?? null,
     },
   });
 }

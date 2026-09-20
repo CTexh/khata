@@ -6,6 +6,7 @@ import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { fmtWhen } from "@/lib/format";
 import { useCached } from "@/lib/swr";
+import { send } from "@/lib/submit";
 
 /* ---------- create user ---------- */
 
@@ -20,15 +21,10 @@ function CreateUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
     e.preventDefault();
     setBusy(true);
     setError("");
-    const res = await fetch("/api/admin/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, name }),
-    });
+    const sent = await send("/api/admin/users", { body: { username, password, name } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onDone();
@@ -92,15 +88,10 @@ function UserSheet({ user, onClose, onChanged }: { user: UserSummary; onClose: (
   const toggleAi = async (next: boolean) => {
     setAiOn(next);
     setMessage(null);
-    const res = await fetch(`/api/admin/users/${user.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ aiAccess: next }),
-    });
-    if (!res.ok) {
+    const sent = await send(`/api/admin/users/${user.id}`, { method: "PATCH", body: { aiAccess: next } });
+    if (!sent.ok) {
       setAiOn(!next);
-      const j = await res.json().catch(() => ({}));
-      setMessage({ text: j.error ?? "Couldn't change assistant access", bad: true });
+      setMessage({ text: sent.error, bad: true });
       return;
     }
     setMessage({ text: next ? `${user.username} can now use the assistant.` : `${user.username} no longer has the assistant.` });
@@ -111,15 +102,10 @@ function UserSheet({ user, onClose, onChanged }: { user: UserSummary; onClose: (
     e.preventDefault();
     setBusy(true);
     setMessage(null);
-    const res = await fetch(`/api/admin/users/${user.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    });
+    const sent = await send(`/api/admin/users/${user.id}`, { method: "PUT", body: { password } });
     setBusy(false);
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setMessage({ text: j.error ?? "Couldn't update the password", bad: true });
+    if (!sent.ok) {
+      setMessage({ text: sent.error, bad: true });
       return;
     }
     setPassword("");
@@ -128,11 +114,10 @@ function UserSheet({ user, onClose, onChanged }: { user: UserSummary; onClose: (
 
   const remove = async () => {
     setBusy(true);
-    const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
+    const sent = await send(`/api/admin/users/${user.id}`, { method: "DELETE" });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setMessage({ text: j.error ?? "Couldn't delete that user", bad: true });
+    if (!sent.ok) {
+      setMessage({ text: sent.error, bad: true });
       setConfirmDelete(false);
       return;
     }

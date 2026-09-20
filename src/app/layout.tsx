@@ -3,10 +3,14 @@ import { Nunito } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 
+// Nunito has a variable font, which covers every weight in one file. Asking
+// for four fixed weights downloaded four files - 137 KB before the app had
+// drawn anything - and three of them were only discovered after the CSS had
+// parsed, so the text visibly reflowed a second in.
 const nunito = Nunito({
   variable: "--font-app",
   subsets: ["latin"],
-  weight: ["400", "600", "700", "800"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -26,9 +30,12 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Without this iOS resolves every safe-area inset to zero, and the tab bar
+  // sits under the home indicator.
+  viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f9f9f7" },
-    { media: "(prefers-color-scheme: dark)", color: "#0d0d0d" },
+    { media: "(prefers-color-scheme: light)", color: "#eef1f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0b12" },
   ],
 };
 

@@ -23,6 +23,10 @@
   --good-soft: rgba(16, 168, 96, 0.12);
   --bad: #d03b3b;
   --bad-soft: rgba(208, 59, 59, 0.1);
+  /* "due soon" - amber. Used to be hard-coded per page, with no dark version,
+     which left the warning about an overdue payment unreadable at night. */
+  --warn: #b45309;
+  --warn-soft: rgba(224, 122, 31, 0.14);
   --hero-1: #121833;
   --hero-2: #1f2a5c;
   --tabbar: rgba(255, 255, 255, 0.97);
@@ -67,6 +71,8 @@
   --good-soft: rgba(38, 197, 118, 0.16);
   --bad: #e66767;
   --bad-soft: rgba(230, 103, 103, 0.14);
+  --warn: #fbbf5a;
+  --warn-soft: rgba(251, 191, 90, 0.18);
   --hero-1: #161c3a;
   --hero-2: #26306a;
   --tabbar: rgba(21, 24, 35, 0.97);
@@ -110,6 +116,8 @@
     --good-soft: rgba(38, 197, 118, 0.16);
     --bad: #e66767;
     --bad-soft: rgba(230, 103, 103, 0.14);
+  --warn: #fbbf5a;
+  --warn-soft: rgba(251, 191, 90, 0.18);
     --hero-1: #161c3a;
     --hero-2: #26306a;
     --tabbar: rgba(21, 24, 35, 0.97);
@@ -1198,6 +1206,14 @@ body {
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+/* A chip that is a button - picking who shared an expense, taking someone off
+   a trip - has to be big enough to hit. As a label it stays small. */
+button.chip {
+  min-height: 40px;
+  padding: 8px 14px;
+  font-size: 13px;
 }
 
 /* the bell beside the profile picture */

@@ -1,9 +1,90 @@
-// The service worker exists for one reason: a phone can only receive a push
-// notification through one. It deliberately does not cache or intercept
-// anything else - the app is served fresh, as before.
+// The service worker does two jobs: it receives push notifications - a phone
+// can only get them through one - and it keeps the app openable without a
+// connection.
+//
+// What is cached is the app itself: the HTML shell and the build's static
+// files. Never /api/, because a stale balance shown as if it were current is
+// worse than no balance at all; the pages read their own cached copy of that
+// data from localStorage and show it as what it is.
 
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+const SHELL = "khata-shell-v1";
+const ASSETS = "khata-assets-v1";
+const KEEP = [SHELL, ASSETS];
+// The pages someone can land on from the Home Screen or a notification.
+const SHELL_PAGES = ["/", "/expenses", "/udhar-khata", "/subscriptions", "/trips"];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(SHELL);
+      // One missing page must not stop the rest being cached.
+      await Promise.all(SHELL_PAGES.map((page) => cache.add(page).catch(() => {})));
+      await self.skipWaiting();
+    })()
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      const names = await caches.keys();
+      await Promise.all(names.filter((n) => !KEEP.includes(n)).map((n) => caches.delete(n)));
+      await self.clients.claim();
+    })()
+  );
+});
+
+const isAsset = (url) =>
+  url.pathname.startsWith("/_next/static/") ||
+  url.pathname.startsWith("/icon") ||
+  url.pathname.startsWith("/favicon") ||
+  url.pathname === "/apple-touch-icon.png" ||
+  url.pathname === "/manifest.json";
+
+// A build's static files never change under the same name, so they are served
+// from the cache and fetched only once.
+async function fromCacheFirst(request) {
+  const cache = await caches.open(ASSETS);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  const response = await fetch(request);
+  if (response.ok) cache.put(request, response.clone()).catch(() => {});
+  return response;
+}
+
+// A page is always fetched fresh when there is a connection; the cached copy
+// is what stands in when there is not.
+async function fromNetworkFirst(request) {
+  const cache = await caches.open(SHELL);
+  try {
+    const response = await fetch(request);
+    // A redirect (to /login, say) is an answer about this moment, not a page
+    // worth keeping.
+    if (response.ok && !response.redirected) cache.put(request, response.clone()).catch(() => {});
+    return response;
+  } catch (err) {
+    const hit = (await cache.match(request)) ?? (await cache.match("/"));
+    if (hit) return hit;
+    throw err;
+  }
+}
+
+self.addEventListener("fetch", (event) => {
+  const { request } = event;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  // Data is never served from here: the app knows how old its own copy is.
+  if (url.pathname.startsWith("/api/")) return;
+
+  if (isAsset(url)) {
+    event.respondWith(fromCacheFirst(request).catch(() => fetch(request)));
+    return;
+  }
+  if (request.mode === "navigate") {
+    event.respondWith(fromNetworkFirst(request));
+  }
+});
 
 self.addEventListener("push", (event) => {
   let payload = {};

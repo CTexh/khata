@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Person, Tx } from "@/lib/db";
 import { fmtRs, fmtWhen, fmtFull, fmtDateLabel, dueDateInfo, todayLocalYMD } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
-import { Sheet, SheetRow } from "@/components/Sheet";
+import { Sheet, SheetRow, useUnsaved } from "@/components/Sheet";
 import { invalidate, useCached } from "@/lib/swr";
+import { send } from "@/lib/submit";
+import { LoadError } from "@/components/LoadError";
 import { CoinsIcon } from "@/components/CategoryIcon";
 
 /* ---------- small components ---------- */
@@ -58,19 +60,16 @@ function AddPersonForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useUnsaved(Boolean(name.trim() || amount || note.trim()));
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const res = await fetch("/api/people", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, amount: Number(amount), note, dueDate }),
-    });
+    const sent = await send("/api/people", { body: { name, amount: Number(amount), note, dueDate } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onDone();
@@ -81,6 +80,9 @@ function AddPersonForm({
       <input
         className="field"
         aria-label="Person's name"
+        autoCapitalize="words"
+        autoCorrect="off"
+        spellCheck={false}
         placeholder="Person's name"
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -154,20 +156,17 @@ function TxForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useUnsaved(Boolean(amount || note.trim()));
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const n = Number(amount);
     setBusy(true);
     setError("");
-    const res = await fetch(`/api/people/${personId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount: mode === "lend" ? n : -n, note }),
-    });
+    const sent = await send(`/api/people/${personId}`, { body: { amount: mode === "lend" ? n : -n, note } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onDone();
@@ -220,7 +219,7 @@ function dueStyle(status: "overdue" | "soon" | "upcoming" | undefined) {
   return status === "overdue"
     ? { background: "var(--bad-soft)", color: "var(--bad)" }
     : status === "soon"
-      ? { background: "rgba(224, 122, 31, 0.14)", color: "#c2410c" }
+      ? { background: "var(--warn-soft)", color: "var(--warn)" }
       : { background: "var(--accent-soft)", color: "var(--accent)" };
 }
 
@@ -273,6 +272,10 @@ function PersonSheet({
   const [dueDraft, setDueDraft] = useState(person.due_date ?? "");
   const [dueBusy, setDueBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  // Anything that went wrong while saving from this sheet, shown at the bottom
+  // rather than leaving a button stuck on "Saving…".
+  const [sheetError, setSheetError] = useState("");
 
   // A change here refreshes this history and every balance that shows it.
   const loadTxs = () => invalidate("/api/people");
@@ -281,19 +284,27 @@ function PersonSheet({
   const due = settled ? null : dueDateInfo(person.due_date);
 
   const remove = async () => {
-    await fetch(`/api/people/${person.id}`, { method: "DELETE" });
+    setRemoveBusy(true);
+    const sent = await send(`/api/people/${person.id}`, { method: "DELETE" });
+    setRemoveBusy(false);
+    if (!sent.ok) {
+      setSheetError(sent.error);
+      setConfirmDelete(false);
+      return;
+    }
     onClose();
     onChanged();
   };
 
   const saveDueDate = async () => {
     setDueBusy(true);
-    await fetch(`/api/people/${person.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dueDate: dueDraft }),
-    });
+    const sent = await send(`/api/people/${person.id}`, { method: "PATCH", body: { dueDate: dueDraft } });
     setDueBusy(false);
+    if (!sent.ok) {
+      setSheetError(sent.error);
+      return;
+    }
+    setSheetError("");
     setEditingDue(false);
     onChanged();
   };
@@ -467,8 +478,8 @@ function PersonSheet({
             <button type="button" className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
               Cancel
             </button>
-            <button type="button" className="btn btn-danger" onClick={remove}>
-              Delete
+            <button type="button" className="btn btn-danger" onClick={remove} disabled={removeBusy}>
+              {removeBusy ? "Deleting…" : "Delete"}
             </button>
           </div>
         </div>
@@ -482,6 +493,12 @@ function PersonSheet({
           Delete {person.name}
         </button>
       )}
+
+      {sheetError && (
+        <p className="text-[13px] px-1 text-center" style={{ color: "var(--bad)" }} role="alert">
+          {sheetError}
+        </p>
+      )}
     </Sheet>
   );
 }
@@ -491,7 +508,7 @@ function PersonSheet({
 type Filter = "owing" | "settled" | "all";
 
 export default function UdharKhata() {
-  const { data: peopleData } = useCached<Person[]>("/api/people");
+  const { data: peopleData, failedStatus, refresh } = useCached<Person[]>("/api/people");
   const people = peopleData ?? null;
   const [adding, setAdding] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -534,7 +551,10 @@ export default function UdharKhata() {
   const closeSheet = useCallback(() => setOpenId(null), []);
   const closeAdd = useCallback(() => setAdding(false), []);
 
-  if (people === null) return <Spinner />;
+  if (people === null) {
+    if (failedStatus !== undefined) return <LoadError what="your loan records" onRetry={refresh} />;
+    return <Spinner />;
+  }
 
   return (
     <>

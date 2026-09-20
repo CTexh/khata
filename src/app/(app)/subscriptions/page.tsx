@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { fmtRs, hueFor, initials } from "@/lib/format";
 import { Sheet, SheetRow } from "@/components/Sheet";
 import { invalidate, useCached } from "@/lib/swr";
+import { send } from "@/lib/submit";
 import { CheckIcon, ClockIcon, RecurringIcon } from "@/components/CategoryIcon";
 
 function Spinner() {
@@ -169,7 +170,7 @@ function fmtLongDate(ymd: string): string {
 const STATUS_CHIP: Record<Subscription["status"], { label: string; style: React.CSSProperties }> = {
   paid: { label: "Paid", style: { background: "var(--good-soft)", color: "var(--good)" } },
   "due-today": { label: "Due today", style: { background: "var(--bad-soft)", color: "var(--bad)" } },
-  "due-soon": { label: "Due soon", style: { background: "rgba(224, 122, 31, 0.14)", color: "#c2410c" } },
+  "due-soon": { label: "Due soon", style: { background: "var(--warn-soft)", color: "var(--warn)" } },
   upcoming: { label: "Upcoming", style: { background: "var(--accent-soft)", color: "var(--accent)" } },
   inactive: { label: "Paused", style: { background: "var(--surface-2)", color: "var(--muted)" } },
 };
@@ -359,7 +360,7 @@ function SubscriptionDetail({
 }
 
 export default function Subscriptions() {
-  const { data: subsData, failedStatus, refresh: refreshSubs } = useCached<Subscription[]>("/api/subscriptions");
+  const { data: subsData, failedStatus, refresh: refreshSubs, mutate: mutateSubs } = useCached<Subscription[]>("/api/subscriptions");
   const subscriptions = subsData ?? [];
   const loading = subsData === undefined && failedStatus === undefined;
   const [error, setError] = useState<string | null>(null);
@@ -367,6 +368,7 @@ export default function Subscriptions() {
   const [showForm, setShowForm] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [justPaidId, setJustPaidId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({
     name: "",
@@ -398,7 +400,10 @@ export default function Subscriptions() {
     setForm((prev) => ({ ...prev, logoLoading: true }));
     try {
       const response = await fetch(
-        `https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(name)}`
+        `https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(name)}`,
+        // Someone else's server, on the path of the form: it gets six seconds
+        // before the logo is quietly given up on.
+        { signal: AbortSignal.timeout(6_000) }
       );
       const data = await response.json();
       // Clearbit's suggest endpoint no longer returns a populated `logo`
@@ -415,53 +420,59 @@ export default function Subscriptions() {
     }
   }, []);
 
-  const handleAddSubscription = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.name || !form.amount || !form.date) {
-      setError("Please fill in all fields");
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/subscriptions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+  const handleAddSubscription = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!form.name || !form.amount || !form.date) {
+        setError("Please fill in all fields");
+        return;
+      }
+      // Nothing stopped a second tap on a slow connection, and two identical
+      // subscriptions were created.
+      if (adding) return;
+      setAdding(true);
+      const sent = await send("/api/subscriptions", {
+        body: {
           name: form.name,
           amount: parseFloat(form.amount),
           date: form.date,
           logo_url: form.logo_url || null,
-        }),
+        },
       });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to create subscription");
+      setAdding(false);
+      if (!sent.ok) {
+        setError(sent.error);
+        return;
       }
-
       setForm(emptyForm());
       setShowForm(false);
       await loadSubscriptions();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    }
-  }, [form, loadSubscriptions]);
+    },
+    [adding, form, loadSubscriptions]
+  );
 
-  const handleMarkPaid = useCallback(async (id: string) => {
-    setError(null);
-    setActionLoading(id);
-    try {
-      const res = await fetch(`/api/subscriptions/${id}/mark-paid`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to mark as paid");
-      await loadSubscriptions();
+  // Marking something paid has one possible outcome, so the chip flips at
+  // once rather than after two round trips. If the server disagrees, the old
+  // list comes straight back with the reason.
+  const handleMarkPaid = useCallback(
+    async (id: string) => {
+      setError(null);
+      const before = subsData;
+      if (before) mutateSubs(before.map((sub) => (sub.id === id ? { ...sub, paid_this_period: true } : sub)));
       setJustPaidId(id);
       setTimeout(() => setJustPaidId((cur) => (cur === id ? null : cur)), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setActionLoading(null);
-    }
-  }, [loadSubscriptions]);
+
+      const sent = await send(`/api/subscriptions/${id}/mark-paid`);
+      if (!sent.ok) {
+        if (before) mutateSubs(before);
+        setJustPaidId(null);
+        setError(sent.error);
+        return;
+      }
+      await loadSubscriptions();
+    },
+    [loadSubscriptions, mutateSubs, subsData]
+  );
 
   const handleDelete = useCallback(async (id: string) => {
     setError(null);
@@ -719,8 +730,8 @@ export default function Subscriptions() {
               <button type="button" onClick={closeForm} className="btn btn-ghost">
                 Cancel
               </button>
-              <button type="submit" className="btn btn-primary">
-                {form.logoLoading ? "Fetching logo…" : "Add subscription"}
+              <button type="submit" className="btn btn-primary" disabled={adding}>
+                {adding ? "Saving…" : form.logoLoading ? "Fetching logo…" : "Add subscription"}
               </button>
             </div>
           </form>

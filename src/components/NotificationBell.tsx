@@ -7,7 +7,7 @@ import { HandshakeIcon, ReceiptIcon } from "@/components/icons";
 import { fetchKey, useCached } from "@/lib/swr";
 import { fmtAgo } from "@/lib/format";
 import { notificationKind, type NotificationKind } from "@/lib/reminder-messages";
-import { ensureRegistered, setAppBadge } from "@/lib/push-client";
+import { ensureRegistered, installWorker, setAppBadge } from "@/lib/push-client";
 
 // The bell beside the profile picture: every notification this account has
 // been sent, newest first, including the ones swiped away on the lock screen.
@@ -56,6 +56,9 @@ export function NotificationBell({ onManage }: { onManage: () => void }) {
   // Keep this device registered: iOS can drop a registration without telling
   // anyone. Checked on opening and on coming back to the app.
   useEffect(() => {
+    // The worker is what makes the app open offline, so it goes on whether or
+    // not this device has notifications switched on.
+    installWorker();
     ensureRegistered().catch(() => {});
     const onVisible = () => {
       if (document.visibilityState === "visible") ensureRegistered().catch(() => {});

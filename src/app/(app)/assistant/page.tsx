@@ -86,6 +86,10 @@ function saveHistory(messages: ChatMessage[]) {
 // while waiting no longer loses the reply: checking simply continues.
 async function waitForReply(requestId: string, maxMs: number): Promise<Delivery | null> {
   const started = Date.now();
+  // An answer usually comes in the first few seconds. Asking every second for
+  // a minute and a half after that is eighty requests for one message, so the
+  // gap widens as hope fades.
+  const nextWait = (waited: number) => (waited < 5_000 ? POLL_EVERY_MS : waited < 20_000 ? 2_000 : 5_000);
   while (Date.now() - started < maxMs) {
     try {
       const res = await fetch(`/api/assistant?id=${encodeURIComponent(requestId)}`, { cache: "no-store" });
@@ -105,7 +109,7 @@ async function waitForReply(requestId: string, maxMs: number): Promise<Delivery 
     } catch {
       // A network blip: keep checking.
     }
-    await sleep(POLL_EVERY_MS);
+    await sleep(nextWait(Date.now() - started));
   }
   return { error: "This is taking longer than usual. Check Mera Khata or Udhar Khata before sending it again." };
 }
@@ -235,6 +239,9 @@ function Reply({ text }: { text: string }) {
 
 export default function AssistantPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // A conversation is only kept on this device, so clearing it is final -
+  // worth one question first.
+  const [clearing, setClearing] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [text, setText] = useState("");
   const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
@@ -548,7 +555,7 @@ export default function AssistantPage() {
           type="button"
           className="chat-round"
           aria-label="New chat"
-          onClick={() => setMessages([])}
+          onClick={() => setClearing(true)}
           disabled={busy || recording || messages.length === 0}
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -557,6 +564,27 @@ export default function AssistantPage() {
           </svg>
         </button>
       </header>
+
+      {clearing && (
+        <div className="card p-3 mx-3 mt-2 flex items-center gap-3" style={{ background: "var(--bad-soft)" }} role="alert">
+          <span className="min-w-0 flex-1 text-[13.5px] font-semibold">
+            Start a new chat? This one is only on this phone, and won&apos;t come back.
+          </span>
+          <button type="button" className="btn btn-ghost !min-h-10 shrink-0" onClick={() => setClearing(false)}>
+            Keep
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger !min-h-10 shrink-0"
+            onClick={() => {
+              setMessages([]);
+              setClearing(false);
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       <div className="chat-body" aria-live="polite" aria-label="Conversation">
         {loaded && messages.length === 0 && (
@@ -714,11 +742,16 @@ export default function AssistantPage() {
               placeholder={photo ? "Add a note, or just send" : "Ask or tell Khata anything"}
               aria-label="Message to Khata"
               onChange={(e) => setText(e.target.value)}
+              enterKeyHint="send"
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  send(text);
-                }
+                // On a phone there is no Shift+Enter, so Enter has to be able
+                // to make a new line; the send button is right there. On a
+                // keyboard, Enter sends and Shift+Enter breaks the line, as
+                // everyone expects.
+                if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+                if (window.matchMedia("(pointer: coarse)").matches) return;
+                e.preventDefault();
+                send(text);
               }}
             />
             <div className="flex items-center gap-2 pt-1">

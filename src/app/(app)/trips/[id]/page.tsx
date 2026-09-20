@@ -6,8 +6,10 @@ import type { TripDetail, TripMember, TripSpend } from "@/lib/trips-db";
 import { POT } from "@/lib/trip-split";
 import { fmtRs, fmtDateLabel, todayLocalYMD } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
-import { Sheet } from "@/components/Sheet";
+import { Sheet, useUnsaved } from "@/components/Sheet";
 import { invalidate, useCached } from "@/lib/swr";
+import { send } from "@/lib/submit";
+import { LoadError } from "@/components/LoadError";
 import { useTripsSection } from "../guard";
 
 function Spinner() {
@@ -51,6 +53,8 @@ function SpendForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useUnsaved(Boolean(amount || vendor.trim()));
+
   const toggle = (id: string) =>
     setBetween((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]));
 
@@ -63,22 +67,20 @@ function SpendForm({
     setBusy(true);
     setError("");
     const url = existing ? `/api/trips/${trip.id}/expenses/${existing.id}` : `/api/trips/${trip.id}/expenses`;
-    const res = await fetch(url, {
+    const sent = await send(url, {
       method: existing ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: {
         amount: Number(amount),
         vendor,
         spentAt,
         paidFrom: payer === POT ? "pot" : "member",
         payerMemberId: payer === POT ? null : payer,
         participants: between,
-      }),
+      },
     });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onDone();
@@ -191,9 +193,17 @@ function SpendSheet({ trip, spend, onClose }: { trip: TripDetail; spend: TripSpe
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  const [error, setError] = useState("");
+
   const remove = async () => {
     setBusy(true);
-    await fetch(`/api/trips/${trip.id}/expenses/${spend.id}`, { method: "DELETE" });
+    const sent = await send(`/api/trips/${trip.id}/expenses/${spend.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (!sent.ok) {
+      setError(sent.error);
+      setConfirming(false);
+      return;
+    }
     invalidate("/api/trips");
     onClose();
   };
@@ -227,6 +237,11 @@ function SpendSheet({ trip, spend, onClose }: { trip: TripDetail; spend: TripSpe
         <button className="btn btn-ghost w-full mt-3" style={{ color: "var(--bad)" }} onClick={() => setConfirming(true)}>
           Remove expense
         </button>
+      )}
+      {error && (
+        <p className="text-[13px] mt-3 px-1 text-center" style={{ color: "var(--bad)" }} role="alert">
+          {error}
+        </p>
       )}
     </Sheet>
   );
@@ -276,19 +291,16 @@ function DepositForm({ trip, onDone, onCancel }: { trip: TripDetail; onDone: () 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useUnsaved(Boolean(amount));
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const res = await fetch(`/api/trips/${trip.id}/deposits`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ memberId, amount: Number(amount) }),
-    });
+    const sent = await send(`/api/trips/${trip.id}/deposits`, { body: { memberId, amount: Number(amount) } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onDone();
@@ -342,19 +354,16 @@ function AddMemberForm({ trip, onDone, onCancel }: { trip: TripDetail; onDone: (
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useUnsaved(Boolean(name.trim()));
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const res = await fetch(`/api/trips/${trip.id}/members`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
+    const sent = await send(`/api/trips/${trip.id}/members`, { body: { name } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onDone();
@@ -399,11 +408,10 @@ function PersonSheet({ trip, member, onClose }: { trip: TripDetail; member: Trip
   const remove = async () => {
     setBusy(true);
     setError("");
-    const res = await fetch(`/api/trips/${trip.id}/members/${member.id}`, { method: "DELETE" });
+    const sent = await send(`/api/trips/${trip.id}/members/${member.id}`, { method: "DELETE" });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Couldn't remove them");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     invalidate("/api/trips");
@@ -597,15 +605,10 @@ function CloseSheet({ trip, onClose, onDone }: { trip: TripDetail; onClose: () =
   const close = async () => {
     setBusy(true);
     setError("");
-    const res = await fetch(`/api/trips/${trip.id}/close`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ addToMyExpenses, pushToUdhar }),
-    });
+    const sent = await send(`/api/trips/${trip.id}/close`, { body: { addToMyExpenses, pushToUdhar } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Couldn't close the trip");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onDone();
@@ -746,6 +749,9 @@ export default function TripPage() {
         </button>
       </div>
     );
+  }
+  if (section === "failed" || (trip === null && failedStatus !== undefined)) {
+    return <LoadError what="this trip" onRetry={refresh} />;
   }
   if (section !== "on" || trip === null) return <Spinner />;
 

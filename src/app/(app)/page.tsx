@@ -293,7 +293,13 @@ export default function Home() {
             const colors = categoryVars(e.category);
             const note = e.note.replace(/^(WhatsApp|Assistant):\s*/, "");
             return (
-              <Link key={e.id} href="/expenses" className="card p-4 flex items-center gap-3 rise">
+              // Opens this expense rather than the list it is in, so it does
+              // not have to be found again.
+              <Link
+                key={e.id}
+                href={`/expenses?open=${encodeURIComponent(e.id)}`}
+                className="card p-4 flex items-center gap-3 rise"
+              >
                 <span className="icon-tile" style={{ background: colors.bg, color: colors.fg }} aria-hidden>
                   <CategoryIcon category={e.category} size={22} />
                 </span>

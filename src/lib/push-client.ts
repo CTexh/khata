@@ -62,6 +62,19 @@ async function publicKey(): Promise<string | null> {
   return cfg?.available && cfg.publicKey ? (cfg.publicKey as string) : null;
 }
 
+// Installs the service worker, which is what lets the app open without a
+// connection - and, separately, what receives notifications. It used to be
+// registered only by someone opening notification settings, so most phones
+// never had one at all.
+export async function installWorker(): Promise<void> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  try {
+    await navigator.serviceWorker.register("/sw.js");
+  } catch {
+    // A browser that refuses it (private mode, say) simply goes online-only.
+  }
+}
+
 // Keeps this device registered. iOS can drop a registration without telling
 // anyone - after the app is re-added to the Home Screen, or an update - and
 // until now Khata only found out the next time it tried to send, and then

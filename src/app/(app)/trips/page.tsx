@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import type { TripSummary } from "@/lib/trips-db";
 import { fmtRs, fmtDateLabel } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
-import { Sheet } from "@/components/Sheet";
+import { Sheet, useUnsaved } from "@/components/Sheet";
 import { SuitcaseIcon } from "@/components/icons";
 import { invalidate, useCached } from "@/lib/swr";
+import { send } from "@/lib/submit";
+import { LoadError } from "@/components/LoadError";
 import { useTripsSection } from "./guard";
 
 function Spinner() {
@@ -93,6 +95,8 @@ function NewTripForm({ onDone, onCancel }: { onDone: (id: string) => void; onCan
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useUnsaved(Boolean(name.trim() || who.trim() || members.length));
+
   const addMember = () => {
     const trimmed = who.trim();
     if (!trimmed) return;
@@ -111,19 +115,13 @@ function NewTripForm({ onDone, onCancel }: { onDone: (id: string) => void; onCan
     const all = who.trim() && !members.includes(who.trim()) ? [...members, who.trim()] : members;
     setBusy(true);
     setError("");
-    const res = await fetch("/api/trips", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, startDate, endDate, members: all }),
-    });
+    const sent = await send<{ id: string }>("/api/trips", { body: { name, startDate, endDate, members: all } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
-    const { id } = await res.json();
-    onDone(id);
+    onDone(sent.data.id);
   };
 
   return (
@@ -159,6 +157,10 @@ function NewTripForm({ onDone, onCancel }: { onDone: (id: string) => void; onCan
           <input
             className="field flex-1"
             aria-label="Add someone to the trip"
+            autoCapitalize="words"
+            autoCorrect="off"
+            spellCheck={false}
+            enterKeyHint="done"
             placeholder="Name"
             value={who}
             onChange={(e) => setWho(e.target.value)}
@@ -210,11 +212,13 @@ function NewTripForm({ onDone, onCancel }: { onDone: (id: string) => void; onCan
 export default function Trips() {
   const section = useTripsSection();
   const router = useRouter();
-  const { data } = useCached<TripSummary[]>("/api/trips");
+  const { data, failedStatus, refresh } = useCached<TripSummary[]>("/api/trips");
   const trips = data ?? null;
   const [adding, setAdding] = useState(false);
   const closeAdd = useCallback(() => setAdding(false), []);
 
+  if (section === "failed") return <LoadError what="your trips" onRetry={() => location.reload()} />;
+  if (trips === null && failedStatus !== undefined) return <LoadError what="your trips" onRetry={refresh} />;
   if (section !== "on" || trips === null) return <Spinner />;
 
   const open = trips.filter((t) => t.status === "open");

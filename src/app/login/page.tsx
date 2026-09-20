@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { clearCache } from "@/lib/swr";
+import { send } from "@/lib/submit";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -17,15 +18,10 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    const sent = await send("/api/auth/login", { body: { username, password } });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     // A different account may have used this browser: drop its cached data.
@@ -53,6 +49,14 @@ export default function LoginPage() {
           className="field"
           aria-label="Username"
           placeholder="Username"
+          name="username"
+          // Without these iOS capitalises the first letter of a username and
+          // never offers to save or fill the login.
+          autoComplete="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="next"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           required
@@ -62,6 +66,9 @@ export default function LoginPage() {
           aria-label="Password"
           placeholder="Password"
           type="password"
+          name="password"
+          autoComplete="current-password"
+          enterKeyHint="go"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required

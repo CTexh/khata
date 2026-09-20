@@ -1,13 +1,14 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Expense } from "@/lib/db";
 import { fmtRs, fmtDateLabel, MONTH_NAMES } from "@/lib/format";
 import { categoryVars } from "@/lib/category-style";
 import { CategoryIcon, DownloadIcon, FolderIcon, LeafIcon, QuestionIcon } from "@/components/CategoryIcon";
 import { SparkleIcon } from "@/components/icons";
-import { Sheet, SheetRow } from "@/components/Sheet";
+import { Sheet, SheetRow, useUnsaved } from "@/components/Sheet";
 import { fetchKey, invalidate, isFresh, peek, useCached } from "@/lib/swr";
+import { send } from "@/lib/submit";
 
 // Expense times are stored as Pakistan wall-clock time with a Z suffix - the
 // assistant saves them the same way - so they are read and written as they
@@ -150,28 +151,23 @@ function ManageCategoriesModal({
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
-  const send = async (method: string, body?: unknown, qs = "") => {
+  const save = async (method: string, body?: unknown, qs = "") => {
     setBusy(true);
     setError("");
-    const res = await fetch(`/api/categories${qs}`, {
-      method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    const sent = await send<{ categories?: UserCategory[] }>(`/api/categories${qs}`, { method, body });
     setBusy(false);
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(d.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return false;
     }
-    onChanged(d.categories ?? []);
+    onChanged(sent.data.categories ?? []);
     return true;
   };
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
-    if (await send("POST", { name: newName.trim(), keywords: newKeywords.trim() })) {
+    if (await save("POST", { name: newName.trim(), keywords: newKeywords.trim() })) {
       setNewName("");
       setNewKeywords("");
     }
@@ -179,7 +175,7 @@ function ManageCategoriesModal({
 
   const saveEdit = async () => {
     if (!editing) return;
-    if (await send("PATCH", { name: editing, newName: editName, keywords: editKeywords })) {
+    if (await save("PATCH", { name: editing, newName: editName, keywords: editKeywords })) {
       setEditing(null);
     }
   };
@@ -241,7 +237,7 @@ function ManageCategoriesModal({
                   className="btn btn-primary !py-2 text-[12px]"
                   disabled={busy}
                   onClick={async () => {
-                    if (await send("POST", { reset: true })) setConfirmReset(false);
+                    if (await save("POST", { reset: true })) setConfirmReset(false);
                   }}
                 >
                   Reset
@@ -315,7 +311,7 @@ function ManageCategoriesModal({
                       className="btn btn-danger !py-2 text-[12px]"
                       disabled={busy}
                       onClick={async () => {
-                        if (await send("DELETE", undefined, `?name=${encodeURIComponent(c.name)}`)) {
+                        if (await save("DELETE", undefined, `?name=${encodeURIComponent(c.name)}`)) {
                           setConfirmDelete(null);
                         }
                       }}
@@ -404,15 +400,13 @@ function DetailModal({
     // Keep the time of day when only the date is unchanged.
     const original = expense.expense_datetime || `${expense.expense_date}T00:00:00Z`;
     const datetime = original.slice(0, 10) === date ? original : `${date}T00:00:00Z`;
-    const res = await fetch(`/api/expenses/${expense.id}`, {
+    const sent = await send(`/api/expenses/${expense.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount: Number(amount), note, expense_datetime: datetime, vendor, category }),
+      body: { amount: Number(amount), note, expense_datetime: datetime, vendor, category },
     });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onSaved({ ...expense, amount: Number(amount), note, vendor, category, expense_date: date, expense_datetime: datetime });
@@ -421,10 +415,10 @@ function DetailModal({
 
   const handleDelete = async () => {
     setBusy(true);
-    const res = await fetch(`/api/expenses/${expense.id}`, { method: "DELETE" });
+    const sent = await send(`/api/expenses/${expense.id}`, { method: "DELETE" });
     setBusy(false);
-    if (!res.ok) {
-      setError("Couldn't delete that expense. Please try again.");
+    if (!sent.ok) {
+      setError(sent.error);
       setConfirmDelete(false);
       return;
     }
@@ -501,7 +495,15 @@ function DetailModal({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Paid to</span>
-            <input className="field" placeholder="Shop or person (optional)" value={vendor} onChange={(e) => setVendor(e.target.value)} />
+            <input
+              className="field"
+              placeholder="Shop or person (optional)"
+              autoCapitalize="words"
+              autoCorrect="off"
+              spellCheck={false}
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+            />
           </label>
           <div className="flex flex-col gap-1.5">
             <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Category</span>
@@ -598,27 +600,26 @@ function ExpenseForm({
     };
   }, [vendor, note, categoryTouched]);
 
+  // Something typed but not saved yet: closing by accident should ask.
+  useUnsaved(Boolean(amount || vendor.trim() || note.trim()));
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const url = editing ? `/api/expenses/${editing.id}` : "/api/expenses";
-    const method = editing ? "PUT" : "POST";
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const sent = await send(editing ? `/api/expenses/${editing.id}` : "/api/expenses", {
+      method: editing ? "PUT" : "POST",
+      body: {
         amount: Number(amount),
         note,
         expense_datetime: fromLocalDateTime(datetime),
         vendor,
         category,
-      }),
+      },
     });
     setBusy(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Something went wrong");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onDone();
@@ -654,6 +655,9 @@ function ExpenseForm({
           className="field"
           aria-label="Vendor or merchant"
           placeholder="Where did you spend? (optional)"
+          autoCapitalize="words"
+          autoCorrect="off"
+          spellCheck={false}
           value={vendor}
           onChange={(e) => setVendor(e.target.value)}
         />
@@ -772,10 +776,10 @@ function RecategorizeModal({ onClose, onApplied }: { onClose: () => void; onAppl
 
   const apply = async () => {
     setApplying(true);
-    const res = await fetch("/api/expenses/recategorize", { method: "POST" });
+    const sent = await send("/api/expenses/recategorize");
     setApplying(false);
-    if (!res.ok) {
-      setError("Couldn't apply the changes");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onApplied();
@@ -951,20 +955,19 @@ function ReviewRow({
     if (!category) return;
     setBusy(true);
     setError("");
-    const res = await fetch(`/api/expenses/${expense.id}`, {
+    const sent = await send(`/api/expenses/${expense.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: {
         amount: expense.amount,
         note: expense.note ?? "",
         expense_datetime: expense.expense_datetime || `${expense.expense_date}T00:00:00Z`,
         vendor: expense.vendor ?? "",
         category,
-      }),
+      },
     });
     setBusy(false);
-    if (!res.ok) {
-      setError("Couldn't save");
+    if (!sent.ok) {
+      setError(sent.error);
       return;
     }
     onAssigned();
@@ -1065,8 +1068,11 @@ const ExpensesView = memo(function ExpensesView({
   const totals = useCached<{ total: number; categories: CategoryPoint[] }>(`/api/expenses/categories?year=${year}${monthParam}`);
   const previous = useCached<{ total: number }>(`/api/expenses/categories?${prevParams}`);
   const shownTotals = useRef(totals.data);
-  if (totals.data) shownTotals.current = totals.data;
   const data = totals.data ?? shownTotals.current ?? null;
+  // Remembering the last answer belongs after the render, not during it.
+  useEffect(() => {
+    if (totals.data) shownTotals.current = totals.data;
+  }, [totals.data]);
   const refreshing = !totals.data;
   const loadError =
     totals.failedStatus !== undefined && !totals.data ? "Could not load this period. Check your connection and try again." : "";
@@ -1120,43 +1126,55 @@ const ExpensesView = memo(function ExpensesView({
     setYear(y);
   };
 
-  const filtered = expenses
-    ?.filter((e) => {
-      if (!search.trim()) return true;
-      const q = search.toLowerCase();
-      return (
-        String(e.amount).includes(q) ||
-        (e.note?.toLowerCase().includes(q) ?? false) ||
-        (e.vendor?.toLowerCase().includes(q) ?? false) ||
-        (e.category?.toLowerCase().includes(q) ?? false)
-      );
-    })
-    // Two different questions, two orderings. The plain list is a ledger -
-    // what happened, most recent first. Drilling into a category asks where
-    // the money went, so the biggest amounts lead.
-    .sort((a, b) => {
-      const byDate =
-        new Date(b.expense_datetime || b.expense_date).getTime() -
-        new Date(a.expense_datetime || a.expense_date).getTime();
-      return selected ? b.amount - a.amount || byDate : byDate;
-    });
+  // Filtering, sorting and grouping the whole month used to happen on every
+  // single render - so on every keystroke in the search box, and again just
+  // for opening a menu. Done once per change of what it depends on instead.
+  const filtered = useMemo(
+    () =>
+      expenses
+        ?.filter((e) => {
+          if (!search.trim()) return true;
+          const q = search.toLowerCase();
+          return (
+            String(e.amount).includes(q) ||
+            (e.note?.toLowerCase().includes(q) ?? false) ||
+            (e.vendor?.toLowerCase().includes(q) ?? false) ||
+            (e.category?.toLowerCase().includes(q) ?? false)
+          );
+        })
+        // Two different questions, two orderings. The plain list is a ledger -
+        // what happened, most recent first. Drilling into a category asks where
+        // the money went, so the biggest amounts lead.
+        .sort((a, b) => {
+          // Compared as text: the stored form sorts correctly on its own, and
+          // parsing two dates per comparison was thousands of Date objects
+          // built per keystroke.
+          const at = a.expense_datetime || a.expense_date;
+          const bt = b.expense_datetime || b.expense_date;
+          const byDate = bt.localeCompare(at);
+          return selected ? b.amount - a.amount || byDate : byDate;
+        }),
+    [expenses, search, selected]
+  );
 
-  const shownTotal = filtered?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
+  const shownTotal = useMemo(() => filtered?.reduce((sum, e) => sum + e.amount, 0) ?? 0, [filtered]);
 
   // Grouped by day for the ledger view; a category drill-down stays one list
   // ordered by amount.
-  const groups: { day: string; items: Expense[]; total: number }[] = [];
-  if (filtered && !selected) {
+  const groups = useMemo(() => {
+    const out: { day: string; items: Expense[]; total: number }[] = [];
+    if (!filtered || selected) return out;
     for (const e of filtered) {
-      const last = groups[groups.length - 1];
+      const last = out[out.length - 1];
       if (last && last.day === e.expense_date) {
         last.items.push(e);
         last.total += e.amount;
       } else {
-        groups.push({ day: e.expense_date, items: [e], total: e.amount });
+        out.push({ day: e.expense_date, items: [e], total: e.amount });
       }
     }
-  }
+    return out;
+  }, [filtered, selected]);
 
   const exportHref = `/api/expenses/export?year=${year}${monthParam}${
     selected ? `&category=${encodeURIComponent(selected)}` : ""

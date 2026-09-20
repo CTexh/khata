@@ -3,15 +3,13 @@ import { getSession } from "@/lib/auth";
 import {
   categoryTotals,
   ensureTablesExist,
-  findUserById,
+  getAccountFlags,
   getNotificationRecipient,
   listExpenses,
   listNotifications,
   listPeople,
   listSubscriptions,
   listUserCategories,
-  userHasAi,
-  tripsEnabled,
 } from "@/lib/db";
 import { listTrips } from "@/lib/trips-db";
 import { pushConfigured } from "@/lib/push";
@@ -28,6 +26,11 @@ export const dynamic = "force-dynamic";
 // Checked at most twice an hour per account on a given server.
 const CATCH_UP_EVERY_MS = 30 * 60 * 1000;
 const lastCatchUp = new Map<string, number>();
+
+// The bell shows the most recent notifications and fetches the rest when it is
+// opened; fifty full rows in the opening request is a lot of words to send to
+// a phone that may never tap it.
+const NOTIFICATIONS_PRIMED = 12;
 
 function catchUpReminders(userId: string) {
   if (!pushConfigured()) return;
@@ -65,21 +68,22 @@ export async function GET(req: Request) {
   const userId = session.userId;
 
   await ensureTablesExist();
-  const [user, aiAccess, tripsOn, trips, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories, notifications] = await Promise.all([
-    findUserById(userId),
-    userHasAi(userId),
-    tripsEnabled(userId),
-    // Cheap for an account that never switched Trips on: no trips, no rows.
-    listTrips(userId),
-    listPeople(userId),
-    listSubscriptions(userId),
-    listExpenses(userId, { year: y, month: m }),
-    listExpenses(userId, { year: py, month: pm }),
-    categoryTotals(userId, { year: y, month: m }),
-    categoryTotals(userId, { year: py, month: pm }),
-    listUserCategories(userId),
-    listNotifications(userId),
-  ]);
+  // Who this is, what they can see, and whether Trips is on: one row, one
+  // question. Asked first, because whether to load trips at all depends on it.
+  const account = await getAccountFlags(userId);
+  const [trips, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories, notifications] =
+    await Promise.all([
+      // Four queries, so they are not run for an account with Trips switched off.
+      account?.tripsEnabled ? listTrips(userId) : Promise.resolve([]),
+      listPeople(userId),
+      listSubscriptions(userId),
+      listExpenses(userId, { year: y, month: m }),
+      listExpenses(userId, { year: py, month: pm }),
+      categoryTotals(userId, { year: y, month: m }),
+      categoryTotals(userId, { year: py, month: pm }),
+      listUserCategories(userId),
+      listNotifications(userId, NOTIFICATIONS_PRIMED),
+    ]);
 
   const totals = (year: number, month: number, list: typeof totalsThis) => ({
     year,
@@ -97,11 +101,11 @@ export async function GET(req: Request) {
           user: {
             id: userId,
             username: session.username,
-            name: user?.name ?? null,
+            name: account?.name ?? null,
             isAdmin: session.isAdmin,
-            aiAccess,
-            tripsEnabled: tripsOn,
-            createdAt: user?.created_at ?? null,
+            aiAccess: Boolean(account?.aiAccess),
+            tripsEnabled: Boolean(account?.tripsEnabled),
+            createdAt: account?.createdAt ?? null,
           },
         },
         "/api/people": people,

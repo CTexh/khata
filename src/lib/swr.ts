@@ -10,7 +10,7 @@
 //
 // The storage is per device and cleared on login, signup and logout, so one
 // account's figures are never shown to another.
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useLayoutEffect, useReducer } from "react";
 
 type Entry = { data: unknown; at: number };
 
@@ -45,10 +45,30 @@ function readStored(key: string): Entry | undefined {
   }
 }
 
+// Which keys have a stored copy. Kept as one list so that clearing a section
+// after a change doesn't have to walk the whole of localStorage - which it did
+// on every save, and twenty times over when re-categorising twenty expenses.
+// Built once per session from what is actually there, so copies written by an
+// older version are still found.
+let keyIndex: Set<string> | null = null;
+function storedKeys(): Set<string> {
+  if (keyIndex) return keyIndex;
+  const found = new Set<string>();
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(PREFIX)) found.add(k.slice(PREFIX.length));
+    }
+  } catch {}
+  keyIndex = found;
+  return keyIndex;
+}
+
 function store(key: string, entry: Entry) {
   mem.set(key, entry);
   try {
     localStorage.setItem(PREFIX + key, JSON.stringify(entry));
+    storedKeys().add(key);
   } catch {
     // Storage full or blocked: the in-memory copy still works.
   }
@@ -129,19 +149,13 @@ export function primeFrom(url: string, keys: string[]) {
 // covers the month lists, category totals and Home's figures. Keys no page is
 // showing are simply dropped and fetched next time they're needed.
 export function invalidate(prefix: string) {
-  const keys = new Set<string>(mem.keys());
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k?.startsWith(PREFIX)) keys.add(k.slice(PREFIX.length));
-    }
-  } catch {}
-  for (const key of keys) {
+  for (const key of new Set([...mem.keys(), ...storedKeys()])) {
     if (!key.startsWith(prefix)) continue;
     if (listeners.get(key)?.size) {
       fetchKey(key).catch(() => {});
     } else {
       mem.delete(key);
+      storedKeys().delete(key);
       try {
         localStorage.removeItem(PREFIX + key);
       } catch {}
@@ -149,9 +163,18 @@ export function invalidate(prefix: string) {
   }
 }
 
+// Everything the screen is currently showing, fetched again. This is what
+// pulling down on a page does: the one way to retry by hand, for a screen
+// whose last attempt failed.
+export function refreshAll(): Promise<unknown> {
+  const showing = [...listeners.entries()].filter(([, set]) => set.size).map(([key]) => key);
+  return Promise.all(showing.map((key) => fetchKey(key).catch(() => {})));
+}
+
 export function clearCache() {
   mem.clear();
   failures.clear();
+  keyIndex = null;
   try {
     const stale: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -170,21 +193,25 @@ function hookFocus() {
   focusHooked = true;
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
-    for (const [key, set] of listeners) if (set.size) fetchKey(key).catch(() => {});
+    // Switching away for a second and back should cost nothing: only what has
+    // gone stale is asked for again.
+    for (const [key, set] of listeners) if (set.size && !isFresh(key)) fetchKey(key).catch(() => {});
   });
 }
 
 export function useCached<T>(key: string | null) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
 
-  useEffect(() => {
+  // Before paint, not after: reading the stored copy in a plain effect meant
+  // the browser had already drawn a spinner for data that was on the device
+  // all along. Still after hydration, so the server-rendered HTML and the
+  // first client render match exactly.
+  useLayoutEffect(() => {
     if (!key) return;
     hookFocus();
     let set = listeners.get(key);
     if (!set) listeners.set(key, (set = new Set()));
     set.add(rerender);
-    // Read from storage after mounting, never during the first render, so the
-    // server-rendered HTML and the first client render always match.
     if (!mem.has(key) && readStored(key)) rerender();
     const entry = mem.get(key);
     if (!entry || Date.now() - entry.at > DEDUPE_MS) fetchKey(key).catch(() => {});

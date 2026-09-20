@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { haptic, reducedMotion, rubberBand, springTo } from "@/lib/motion";
 
@@ -74,14 +74,31 @@ const EXIT_MS = 220;
 // Catching up to a size change is a small movement and should be over quickly.
 const GROW_MS = 340;
 
+// A form inside a sheet says when it has something worth keeping, so a stray
+// swipe asks before throwing it away.
+const DirtyContext = createContext<((dirty: boolean) => void) | null>(null);
+
+export function useUnsaved(dirty: boolean) {
+  const tell = useContext(DirtyContext);
+  useEffect(() => {
+    tell?.(dirty);
+    return () => tell?.(false);
+  }, [dirty, tell]);
+}
+
 export function Sheet({
   title,
   onClose,
   children,
+  dirty,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  // Set while there is something half-typed in here. A sheet is dismissed by
+  // a downward swipe or a tap outside, both of which are easy to do by
+  // accident while reaching for a field - and the form was simply gone.
+  dirty?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -94,6 +111,11 @@ export function Sheet({
   // at the same time, so this is a list, and a drag or an exit clears the lot.
   const running = useRef<Animation[]>([]);
   const mounted = usePortal();
+  // Asked before throwing away something half-written.
+  const [asking, setAsking] = useState(false);
+  const [childDirty, setChildDirty] = useState(false);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = (Boolean(dirty) || childDirty) && !asking;
 
   const stop = useCallback(() => {
     running.current.forEach((animation) => animation.cancel());
@@ -105,6 +127,17 @@ export function Sheet({
   // Escape and a flick all end the same way.
   const dismiss = useCallback(() => {
     if (closing.current) return;
+    if (dirtyRef.current) {
+      setAsking(true);
+      // Back to where it started: the sheet stays, the question appears.
+      const panel = panelRef.current;
+      if (panel) {
+        panel.style.transition = "transform var(--dur-press) var(--ease-press)";
+        panel.style.transform = "translate3d(0, 0, 0)";
+      }
+      if (backdropRef.current) backdropRef.current.style.opacity = "1";
+      return;
+    }
     closing.current = true;
     const panel = panelRef.current;
     const backdrop = backdropRef.current;
@@ -240,7 +273,9 @@ export function Sheet({
       // A drag owns the transform outright, and there is nothing to catch up
       // to once the sheet is on its way out.
       if (closing.current || drag.current) return;
-      if (Math.abs(delta) < 6) return;
+      // A line of validation text appearing under a field is not worth
+      // springing the whole sheet for; content arriving is.
+      if (Math.abs(delta) < 40) return;
       // On a phone the sheet is anchored to the bottom, so all of the change
       // happens at the top edge; centred on a wide screen, half of it does.
       const centred = window.matchMedia("(min-width: 640px)").matches;
@@ -408,7 +443,28 @@ export function Sheet({
           </button>
         </div>
         <div className="sheet-body" ref={bodyRef}>
-          {children}
+          <DirtyContext.Provider value={setChildDirty}>{children}</DirtyContext.Provider>
+          {asking && (
+            <div className="card p-4 mt-3 flex flex-col gap-3" style={{ background: "var(--bad-soft)" }} role="alert">
+              <p className="text-[14px] font-semibold">Close without saving? What you typed will be lost.</p>
+              <div className="form-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setAsking(false)}>
+                  Keep editing
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => {
+                    setAsking(false);
+                    // dirtyRef is already false while asking, so this closes.
+                    dismiss();
+                  }}
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>,
