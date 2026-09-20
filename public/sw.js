@@ -41,15 +41,24 @@ const isAsset = (url) =>
   url.pathname === "/apple-touch-icon.png" ||
   url.pathname === "/manifest.json";
 
-// A build's static files never change under the same name, so they are served
-// from the cache and fetched only once.
-async function fromCacheFirst(request) {
+// A build's static files are served from the cache straight away, and fetched
+// again in the background so the copy is fresh next time. In a production
+// build the name carries a hash of the contents, so this changes nothing; in
+// development the names are reused, and without the background fetch the app
+// would keep serving whatever was cached first.
+async function fromCache(request) {
   const cache = await caches.open(ASSETS);
   const hit = await cache.match(request);
+  const fresh = fetch(request)
+    .then((response) => {
+      if (response.ok) cache.put(request, response.clone()).catch(() => {});
+      return response;
+    })
+    .catch(() => null);
   if (hit) return hit;
-  const response = await fetch(request);
-  if (response.ok) cache.put(request, response.clone()).catch(() => {});
-  return response;
+  const response = await fresh;
+  if (response) return response;
+  throw new Error("offline");
 }
 
 // A page is always fetched fresh when there is a connection; the cached copy
@@ -78,7 +87,7 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return;
 
   if (isAsset(url)) {
-    event.respondWith(fromCacheFirst(request).catch(() => fetch(request)));
+    event.respondWith(fromCache(request).catch(() => fetch(request)));
     return;
   }
   if (request.mode === "navigate") {

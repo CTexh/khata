@@ -106,7 +106,7 @@ export function PullToRefresh() {
     >
       <span
         className="grid place-items-center w-9 h-9 rounded-full"
-        style={{ background: "var(--card)", border: "1px solid var(--ring)", boxShadow: "0 4px 14px rgba(31,45,90,0.12)" }}
+        style={{ background: "var(--surface)", border: "1px solid var(--ring)", boxShadow: "0 4px 14px rgba(31,45,90,0.12)" }}
       >
         <span
           className={`w-4 h-4 rounded-full border-2 ${busy ? "animate-spin" : ""}`}

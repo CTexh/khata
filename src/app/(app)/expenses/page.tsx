@@ -7,6 +7,7 @@ import { categoryVars } from "@/lib/category-style";
 import { CategoryIcon, DownloadIcon, FolderIcon, LeafIcon, QuestionIcon } from "@/components/CategoryIcon";
 import { SparkleIcon } from "@/components/icons";
 import { Sheet, SheetRow, useUnsaved } from "@/components/Sheet";
+import { SwipeRow } from "@/components/SwipeRow";
 import { fetchKey, invalidate, isFresh, peek, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
 
@@ -889,18 +890,31 @@ function RecategorizeModal({ onClose, onApplied }: { onClose: () => void; onAppl
 const ExpenseRow = memo(function ExpenseRow({
   expense,
   onView,
+  onDeleted,
   hideDate = false,
 }: {
   expense: Expense;
   onView: (expense: Expense) => void;
+  onDeleted: () => void;
   hideDate?: boolean;
 }) {
   const categoryColor = categoryVars(expense.category);
 
   const note = expense.note.replace(/^(WhatsApp|Assistant):\s*/, "");
 
+  const remove = async () => {
+    const sent = await send(`/api/expenses/${expense.id}`, { method: "DELETE" });
+    if (sent.ok) onDeleted();
+    return sent;
+  };
+
   return (
     <li>
+      <SwipeRow
+        onDelete={remove}
+        label={`${expense.vendor || note || "expense"}, ${fmtRs(expense.amount)}`}
+        question="Delete this expense?"
+      >
       <button
         type="button"
         className="flex w-full items-center gap-3 py-2.5 text-left cursor-pointer rounded-2xl transition hover:bg-[var(--surface-2)]"
@@ -929,6 +943,7 @@ const ExpenseRow = memo(function ExpenseRow({
           {fmtRs(expense.amount)}
         </span>
       </button>
+      </SwipeRow>
     </li>
   );
 });
@@ -1045,6 +1060,8 @@ const ExpensesView = memo(function ExpensesView({
   onRecategorize: () => void;
   onAdd: () => void;
 }) {
+  // Kept stable so that deleting one row does not rebuild every other one.
+  const onDeleted = useCallback(() => invalidate("/api/expenses"), []);
   const now = new Date();
   const [scope, setScope] = useState<"month" | "year">("month");
   const [year, setYear] = useState(now.getFullYear());
@@ -1426,7 +1443,7 @@ const ExpensesView = memo(function ExpensesView({
                       onAssigned={() => invalidate("/api/expenses")}
                     />
                   ) : (
-                    <ExpenseRow key={e.id} expense={e} onView={onViewDetail} />
+                    <ExpenseRow key={e.id} expense={e} onView={onViewDetail} onDeleted={onDeleted} />
                   )
                 )}
               </ul>
@@ -1454,7 +1471,7 @@ const ExpensesView = memo(function ExpensesView({
                 <div className="card px-3 py-1">
                   <ul>
                     {g.items.map((e) => (
-                      <ExpenseRow key={e.id} expense={e} onView={onViewDetail} hideDate />
+                      <ExpenseRow key={e.id} expense={e} onView={onViewDetail} onDeleted={onDeleted} hideDate />
                     ))}
                   </ul>
                 </div>

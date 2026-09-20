@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { fmtRs, hueFor, initials } from "@/lib/format";
 import { Sheet, SheetRow } from "@/components/Sheet";
+import { SwipeRow } from "@/components/SwipeRow";
 import { invalidate, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
 import { CheckIcon, ClockIcon, RecurringIcon } from "@/components/CategoryIcon";
@@ -550,6 +551,15 @@ export default function Subscriptions() {
     const chip = chipFor(sub);
     return (
       <li key={sub.id}>
+        <SwipeRow
+          onDelete={async () => {
+            const sent = await send(`/api/subscriptions/${sub.id}`, { method: "DELETE" });
+            if (sent.ok) await loadSubscriptions();
+            return sent;
+          }}
+          label={sub.name}
+          question={`Delete ${sub.name}?`}
+        >
         <button
           type="button"
           className="list-row"
@@ -583,6 +593,7 @@ export default function Subscriptions() {
             </span>
           </span>
         </button>
+        </SwipeRow>
       </li>
     );
   };

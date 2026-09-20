@@ -5,6 +5,7 @@ import type { Person, Tx } from "@/lib/db";
 import { fmtRs, fmtWhen, fmtFull, fmtDateLabel, dueDateInfo, todayLocalYMD } from "@/lib/format";
 import { Avatar } from "@/components/Avatar";
 import { Sheet, SheetRow, useUnsaved } from "@/components/Sheet";
+import { SwipeRow } from "@/components/SwipeRow";
 import { invalidate, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
 import { LoadError } from "@/components/LoadError";
@@ -223,11 +224,23 @@ function dueStyle(status: "overdue" | "soon" | "upcoming" | undefined) {
       : { background: "var(--accent-soft)", color: "var(--accent)" };
 }
 
-function PersonRow({ person, onOpen }: { person: Person; onOpen: () => void }) {
+function PersonRow({ person, onOpen, onDeleted }: { person: Person; onOpen: () => void; onDeleted: () => void }) {
   const settled = person.balance <= 0;
   const due = settled ? null : dueDateInfo(person.due_date);
+
+  const remove = async () => {
+    const sent = await send(`/api/people/${person.id}`, { method: "DELETE" });
+    if (sent.ok) onDeleted();
+    return sent;
+  };
+
   return (
     <li>
+      <SwipeRow
+        onDelete={remove}
+        label={person.name}
+        question={`Delete ${person.name} and their whole history?`}
+      >
       <button type="button" className="list-row" onClick={onOpen}>
         <Avatar id={person.id} name={person.name} size={46} />
         <span className="min-w-0 flex-1">
@@ -252,6 +265,7 @@ function PersonRow({ person, onOpen }: { person: Person; onOpen: () => void }) {
           <span className="text-[16px] font-extrabold tabular shrink-0">{fmtRs(person.balance)}</span>
         )}
       </button>
+      </SwipeRow>
     </li>
   );
 }
@@ -612,7 +626,7 @@ export default function UdharKhata() {
       ) : (
         <ul className="list-card rise">
           {filtered?.map((p) => (
-            <PersonRow key={p.id} person={p} onOpen={() => setOpenId(p.id)} />
+            <PersonRow key={p.id} person={p} onOpen={() => setOpenId(p.id)} onDeleted={load} />
           ))}
         </ul>
       )}

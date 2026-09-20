@@ -511,6 +511,63 @@ body {
   color: var(--ink-2);
 }
 
+/* ---- swipe a row left to delete it ---- */
+.swipe-row {
+  position: relative;
+  overflow: hidden;
+  /* Vertical scrolling stays with the browser and never waits for JavaScript;
+     sideways movement is ours. */
+  touch-action: pan-y;
+}
+.swipe-actions {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: flex;
+  align-items: stretch;
+}
+.swipe-delete,
+.swipe-answer {
+  min-width: 84px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #fff;
+  background: var(--bad);
+}
+.swipe-answer {
+  min-width: 84px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.swipe-answer-yes {
+  background: var(--bad);
+  color: #fff;
+}
+/* Anything inside a swipeable row has to leave sideways movement to us.
+   `.list-row` sets touch-action: manipulation, which lets the browser claim a
+   horizontal gesture before this code ever sees it - so loans and
+   subscriptions would not swipe at all while expenses did. */
+.swipe-content,
+.swipe-content * {
+  touch-action: pan-y;
+}
+.swipe-content {
+  position: relative;
+  /* Opaque, so the Delete button behind it is out of sight until it is pulled
+     out of the way. */
+  background: var(--surface);
+  will-change: transform;
+}
+.swipe-question {
+  position: absolute;
+  left: 14px;
+  bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--bad);
+  pointer-events: none;
+}
+
 /* ---- bottom tab bar ---- */
 .tabbar {
   position: fixed;
