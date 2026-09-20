@@ -494,14 +494,26 @@ export async function closeTrip(
 // Back to an open trip: the settle-up list goes, and so do the two things the
 // close wrote elsewhere - the expense in Mera Khata and any Udhar Khata
 // entries - so closing it again cannot count them twice.
-export async function reopenTrip(tripId: string): Promise<{ expenseId: string | null; txIds: string[] }> {
+export type TripWriteBacks = { expenseId: string | null; txIds: string[] };
+
+// What closing this trip wrote outside it: the Mera Khata expense for the
+// owner's share, and the Udhar Khata entries for what is owed between them and
+// the others. Reopening a trip takes these back, and deleting one offers to.
+export async function tripWriteBacks(tripId: string): Promise<TripWriteBacks> {
   const c = await db();
   const [trip, settlements] = await Promise.all([
     c.execute({ sql: "SELECT expense_id FROM trips WHERE id = ?", args: [tripId] }),
     c.execute({ sql: "SELECT tx_id FROM trip_settlements WHERE trip_id = ? AND tx_id IS NOT NULL", args: [tripId] }),
   ]);
-  const expenseId = (trip.rows[0]?.expense_id as string | null) ?? null;
-  const txIds = settlements.rows.map((r) => r.tx_id as string);
+  return {
+    expenseId: (trip.rows[0]?.expense_id as string | null) ?? null,
+    txIds: settlements.rows.map((r) => r.tx_id as string),
+  };
+}
+
+export async function reopenTrip(tripId: string): Promise<TripWriteBacks> {
+  const c = await db();
+  const { expenseId, txIds } = await tripWriteBacks(tripId);
   await c.batch(
     [
       { sql: "DELETE FROM trip_settlements WHERE trip_id = ?", args: [tripId] },

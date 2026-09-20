@@ -717,6 +717,9 @@ export default function TripPage() {
   const [addingMember, setAddingMember] = useState(false);
   const [closing, setClosing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Deleting a closed trip: by default, take back the expense and the Udhar
+  // entries it wrote, since deleting it says the trip never counted.
+  const [undoOnDelete, setUndoOnDelete] = useState(true);
 
   const reload = useCallback(() => {
     invalidate("/api/trips");
@@ -845,33 +848,56 @@ export default function TripPage() {
         </button>
       )}
 
-      {closed &&
-        (confirmDelete ? (
-          <div className="card p-4 mt-4 flex flex-col gap-3" style={{ background: "var(--bad-soft)" }}>
-            <p className="text-[14px] font-semibold">
-              Delete this trip for good? Its spending and settle-up go with it.
-            </p>
-            <div className="form-actions">
-              <button className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
-                Cancel
-              </button>
-              <button
-                className="btn btn-danger"
-                onClick={async () => {
-                  await fetch(`/api/trips/${trip.id}`, { method: "DELETE" });
-                  invalidate("/api/trips");
-                  router.push("/trips");
-                }}
-              >
-                Delete trip
-              </button>
-            </div>
+      {confirmDelete ? (
+        <div className="card p-4 mt-4 flex flex-col gap-3" style={{ background: "var(--bad-soft)" }}>
+          <p className="text-[14px] font-semibold">
+            Delete this trip for good? Its spending, deposits and settle-up go with it.
+          </p>
+          {closed && (trip.expenseId || trip.settlements.some((s) => s.personId)) && (
+            <label className="flex items-start justify-between gap-3 cursor-pointer">
+              <span className="min-w-0">
+                <span className="block text-[14px] font-semibold">Also take back what closing it added</span>
+                <span className="block text-[12.5px] mt-0.5" style={{ color: "var(--muted)" }}>
+                  {[
+                    trip.expenseId ? "the expense in Mera Khata" : "",
+                    trip.settlements.some((s) => s.personId) ? "the Udhar Khata entries" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" and ")}
+                  . Leave this off if the money really did change hands.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                className="h-6 w-6 mt-0.5 shrink-0 accent-[var(--accent)] cursor-pointer"
+                checked={undoOnDelete}
+                onChange={(e) => setUndoOnDelete(e.target.checked)}
+              />
+            </label>
+          )}
+          <div className="form-actions">
+            <button className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-danger"
+              onClick={async () => {
+                await fetch(`/api/trips/${trip.id}${closed && undoOnDelete ? "?undo=1" : ""}`, { method: "DELETE" });
+                invalidate("/api/trips");
+                invalidate("/api/expenses");
+                invalidate("/api/people");
+                router.push("/trips");
+              }}
+            >
+              Delete trip
+            </button>
           </div>
-        ) : (
-          <button className="btn btn-ghost w-full mt-4" style={{ color: "var(--bad)" }} onClick={() => setConfirmDelete(true)}>
-            Delete trip
-          </button>
-        ))}
+        </div>
+      ) : (
+        <button className="btn btn-ghost w-full mt-4" style={{ color: "var(--bad)" }} onClick={() => setConfirmDelete(true)}>
+          Delete trip
+        </button>
+      )}
 
       {addingSpend && (
         <Sheet title="New expense" onClose={() => setAddingSpend(false)}>

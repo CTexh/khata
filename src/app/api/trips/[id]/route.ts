@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { deleteExpenseRow, deleteLedgerTransactions } from "@/lib/db";
-import { deleteTrip, getTrip, reopenTrip, updateTrip } from "@/lib/trips-db";
+import { deleteTrip, getTrip, reopenTrip, tripWriteBacks, updateTrip } from "@/lib/trips-db";
 import { DATE, requireTrip } from "../guard";
 
 export const dynamic = "force-dynamic";
@@ -48,10 +48,19 @@ export async function PATCH(req: Request, { params }: Params) {
   return NextResponse.json({ success: true });
 }
 
-export async function DELETE(_req: Request, { params }: Params) {
+// Deleting a trip at any point - a trip started by mistake does not have to be
+// closed first. `?undo=1` also takes back what closing it wrote elsewhere: the
+// expense in Mera Khata and the Udhar Khata entries. Without it they stay, on
+// the reading that the money really did change hands.
+export async function DELETE(req: Request, { params }: Params) {
   const { id } = await params;
   const guard = await requireTrip(id);
   if (guard instanceof NextResponse) return guard;
+
+  const undo = new URL(req.url).searchParams.get("undo") === "1";
+  const written = undo ? await tripWriteBacks(id) : { expenseId: null, txIds: [] };
   await deleteTrip(id);
-  return NextResponse.json({ success: true });
+  if (written.expenseId) await deleteExpenseRow(guard.userId, written.expenseId).catch(() => undefined);
+  await deleteLedgerTransactions(guard.userId, written.txIds).catch(() => undefined);
+  return NextResponse.json({ success: true, undone: undo });
 }

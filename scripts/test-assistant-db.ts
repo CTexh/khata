@@ -430,6 +430,35 @@ check("so the Udhar entry is gone", (await dbm.listPeople(tripUser)).map((p) => 
 const reopened = await trips.getTrip(tripUser, tripId);
 check("and the settle-up is live again", [reopened?.status, reopened?.settlements.length], ["open", 0]);
 
+// Deleting a trip: what closing it wrote is reported so the caller can take
+// it back, and the trip's own rows go whatever its state.
+const throwaway = await trips.createTrip(tripUser, { name: "Mistake", myName: "You", memberNames: [] });
+await trips.deleteTrip(throwaway);
+check("an open trip can be deleted", await trips.getTrip(tripUser, throwaway), null);
+
+const closing = await trips.createTrip(tripUser, { name: "Murree", myName: "You", memberNames: ["Ali"] });
+const both = (await trips.getTrip(tripUser, closing))!.members;
+await trips.addTripExpense(closing, {
+  amount: 1000, vendor: "Fuel", note: "", category: null, spentAt: now,
+  paidFrom: "member", payerMemberId: both[0].id, participants: [both[0].id, both[1].id],
+});
+const owed = await dbm.writeLedgerEntries(tripUser, [{ newName: "Ali", amount: 500 }], "Trip: Murree");
+const murreeExpense = await dbm.insertExpense({
+  userId: tripUser, amount: 500, note: "Trip: Murree", expenseDateTime: now,
+  vendor: "Murree", category: null, vendorKey: null,
+});
+await trips.closeTrip(
+  closing,
+  [{ fromMemberId: both[1].id, toMemberId: both[0].id, amount: 500, txId: owed.txIds[0] }],
+  murreeExpense
+);
+check("what a close wrote can be read back", await trips.tripWriteBacks(closing), {
+  expenseId: murreeExpense,
+  txIds: [owed.txIds[0]],
+});
+await trips.deleteTrip(closing);
+check("and the closed trip deletes too", await trips.getTrip(tripUser, closing), null);
+
 await dbm.deleteUser(tripUser);
 check("deleting an account takes its trips with it", await trips.listTrips(tripUser), []);
 
