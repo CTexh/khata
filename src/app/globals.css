@@ -241,7 +241,9 @@
 }
 @keyframes chat-in {
   from {
-    opacity: 0;
+    /* Not from nothing: a fade that begins at zero is a blank frame of its
+       own, which is what this animation is meant to cover. */
+    opacity: 0.55;
     transform: scale(0.94) translate3d(0, 10px, 0);
   }
   to {

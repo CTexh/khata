@@ -6,6 +6,7 @@ import { fmtRs, fmtDateLabel } from "@/lib/format";
 import { categoryVars } from "@/lib/category-style";
 import { CategoryIcon, LeafIcon } from "@/components/CategoryIcon";
 import { useCached } from "@/lib/swr";
+import { useBeforePaint } from "@/lib/before-paint";
 import { ArrowUpIcon, HandshakeIcon, RepeatIcon } from "@/components/icons";
 
 type Expense = {
@@ -88,7 +89,10 @@ export default function Home() {
     return { due: unpaid.reduce((s, x) => s + x.amount, 0), count: unpaid.length };
   }, [subsQ.data]);
 
-  useEffect(() => {
+  // Before the first paint: which period was last chosen decides every figure
+  // on this screen, so reading it afterwards meant Home drew "Today" and then
+  // corrected itself.
+  useBeforePaint(() => {
     try {
       const saved = localStorage.getItem("khata-home-period");
       if (saved === "today" || saved === "week" || saved === "month") setPeriod(saved);

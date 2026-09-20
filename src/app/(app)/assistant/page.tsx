@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { replyBlocks, splitBold } from "@/lib/chat-format";
 import { encodeWav } from "@/lib/wav";
 import { invalidate, useCached } from "@/lib/swr";
+import { useBeforePaint } from "@/lib/before-paint";
 import { getMic, micPermissionIsPermanent, parkMic, releaseMic } from "@/lib/mic";
 import Link from "next/link";
 import { ArrowUpIcon, CameraIcon, MicIcon, SparkleIcon } from "@/components/icons";
@@ -25,6 +26,7 @@ type Delivery = { reply: string; heard?: string | null } | { error: string };
 // History lives only in this browser. Replies can mention amounts and names,
 // and the device is the user's own, so nothing is stored server-side for it.
 const STORAGE_KEY = "khata-assistant-v1";
+
 const KEEP = 60;
 const MAX_VOICE_SECONDS = 60;
 // How long to keep checking for a reply. The server's own work is bounded
@@ -282,9 +284,13 @@ export default function AssistantPage() {
     );
   };
 
-  // Read after mount: localStorage doesn't exist while the server renders.
+  // Read before the first paint, not after it. localStorage still cannot be
+  // touched while the server renders, so this cannot move into useState - but
+  // a plain effect runs after the browser has already drawn, so the chat
+  // appeared empty for a frame and the conversation then popped in. That was
+  // the blink on opening the assistant.
   // A reply still pending when the page was left is picked up again here.
-  useEffect(() => {
+  useBeforePaint(() => {
     const history = loadHistory();
     setMessages(history);
     setLoaded(true);
