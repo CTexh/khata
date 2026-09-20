@@ -245,11 +245,16 @@
    the same frames. A single slide on a single promoted layer is cheaper than
    any of that and reads as one deliberate movement. No fade: nothing in an
    arrival may leave the content faint. */
-.chat-enter {
+/* The movement is on the bar and the conversation, never on their parent.
+   An element with a transform - or with will-change: transform - becomes the
+   containing block for everything fixed inside it, so animating the wrapper
+   unpinned the composer from the screen and left it at the bottom of the
+   page, out of sight. These two are siblings of the composer, so it stays
+   where it belongs, and they carry the same timing so it still reads as one
+   movement. */
+.chat-enter .chat-topbar,
+.chat-enter .chat-body {
   animation: chat-in 300ms var(--ease-settle) backwards;
-  /* Promoted before it moves, so the first frame is not also the frame the
-     layer is built in. */
-  will-change: transform;
 }
 @keyframes chat-in {
   from {
@@ -799,12 +804,11 @@ body {
   color: var(--page);
 }
 
-/* Opening the assistant is one movement of the whole screen; see .chat-enter.
-   Nothing inside it animates on arrival - in particular not .chat-body, which
-   scrolls itself to the newest message the moment it mounts, and a transform
-   on a scrolling area moves the ground under that. */
-/* No animation on the conversation itself. It is the thing being opened;
-   fading it in is what made the assistant look like it was loading. */
+/* Opening the assistant is one movement, carried by the bar and the
+   conversation together; see .chat-enter. The composer does not move with
+   them - it is fixed to the bottom of the screen, which is where it was
+   tapped from. Nothing here fades: the conversation appearing faint is what
+   made the assistant look like it was still loading. */
 
 /* ---- assistant: full-screen chat ---- */
 .chat-screen {
@@ -815,9 +819,17 @@ body {
     radial-gradient(60% 40% at 50% 38%, var(--accent-soft), transparent 70%),
     var(--page);
 }
+/* Fixed, not sticky. body has overflow-x: hidden, which makes its overflow-y
+   compute to auto - and that quietly stops sticky working against the
+   viewport. So opening a long conversation scrolled to the newest message and
+   took the bar, and the way back out of the assistant with it, off the top of
+   the screen. Fixed is immune to that, and matches the composer at the other
+   end. */
 .chat-topbar {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 20;
   display: grid;
   grid-template-columns: 48px 1fr 48px;
@@ -867,7 +879,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 8px 16px calc(190px + env(safe-area-inset-bottom));
+  /* Clears the fixed bar above and the composer below. */
+  padding: calc(76px + max(12px, env(safe-area-inset-top))) 16px calc(190px + env(safe-area-inset-bottom));
 }
 .chat-empty {
   flex: 1;
