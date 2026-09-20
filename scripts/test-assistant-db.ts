@@ -344,6 +344,95 @@ await dbm.deletePushSubscription(device.endpoint, mailUser);
 check("a device can be removed", (await dbm.listPushSubscriptions(mailUser)).length, 2);
 check("another account sees none of them", (await dbm.listPushSubscriptions(userId)).length, 0);
 
+/* ---------- trips ---------- */
+
+const trips = await import("../src/lib/trips-db.ts");
+const tripUser = randomUUID();
+await c.execute({
+  sql: "INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES (?, ?, 'x', 0, ?)",
+  args: [tripUser, "trip-test", now],
+});
+
+const tripId = await trips.createTrip(tripUser, { name: "Hunza", myName: "You", memberNames: ["Ali", "Sara"] });
+const created = await trips.getTrip(tripUser, tripId);
+check("a trip puts its owner on it", created?.members.map((m) => [m.name, m.isMe]), [["You", true], ["Ali", false], ["Sara", false]]);
+check("another account cannot see it", await trips.getTrip(userId, tripId), null);
+check("nor claim it", await trips.tripBelongsToUser(tripId, userId), false);
+
+const member = Object.fromEntries((created?.members ?? []).map((m) => [m.name, m.id]));
+for (const name of ["You", "Ali", "Sara"]) await trips.addTripDeposit(tripId, { memberId: member[name], amount: 10000 });
+await trips.addTripExpense(tripId, {
+  amount: 24000, vendor: "Hotel", note: "", category: null, spentAt: now,
+  paidFrom: "pot", payerMemberId: null, participants: [member.You, member.Ali, member.Sara],
+});
+await trips.addTripExpense(tripId, {
+  amount: 3000, vendor: "Dinner", note: "", category: null, spentAt: now,
+  paidFrom: "member", payerMemberId: member.Ali, participants: [member.Ali, member.Sara],
+});
+await trips.addTripExpense(tripId, {
+  amount: 6000, vendor: "Jeep", note: "", category: null, spentAt: now,
+  paidFrom: "pot", payerMemberId: null, participants: [member.Ali, member.Sara],
+});
+
+const running = await trips.getTrip(tripUser, tripId);
+check("the pot is what everyone put in", [running?.potIn, running?.potLeft, running?.totalSpent], [30000, 0, 33000]);
+check("everyone's share is worked out on read", running?.state.members.map((m) => m.share), [8000, 12500, 12500]);
+check("and so is where they stand", running?.state.members.map((m) => m.net), [2000, 500, -2500]);
+check(
+  "the settle-up is the fewest payments",
+  running?.settleUp.map((t) => `${t.from === member.Sara ? "Sara" : "?"}->${t.to === member.You ? "You" : "Ali"}:${t.amount}`),
+  ["Sara->You:2000", "Sara->Ali:500"]
+);
+
+// Editing an expense changes the shares it was part of and nothing else.
+const jeep = running!.expenses.find((e) => e.vendor === "Jeep")!;
+await trips.updateTripExpense(tripId, jeep.id, {
+  amount: 6000, vendor: "Jeep", note: "", category: null, spentAt: now,
+  paidFrom: "pot", payerMemberId: null, participants: [member.You, member.Ali, member.Sara],
+});
+const edited = await trips.getTrip(tripUser, tripId);
+check("re-ticking an expense moves the shares", edited?.state.members.map((m) => m.share), [10000, 11500, 11500]);
+await trips.updateTripExpense(tripId, jeep.id, {
+  amount: 6000, vendor: "Jeep", note: "", category: null, spentAt: now,
+  paidFrom: "pot", payerMemberId: null, participants: [member.Ali, member.Sara],
+});
+
+// Someone tangled up in the trip cannot be quietly removed.
+check("a member with expenses is involved", (await trips.memberInvolvement(tripId, member.Ali)) > 0, true);
+const bystander = await trips.addTripMember(tripId, "Zain");
+check("someone on nothing is not", await trips.memberInvolvement(tripId, bystander), 0);
+await trips.removeTripMember(tripId, bystander);
+check("and can be taken off", (await trips.getTrip(tripUser, tripId))?.members.length, 3);
+
+// Closing freezes the list; reopening takes back everything it wrote.
+const settleUp = (await trips.getTrip(tripUser, tripId))!.settleUp;
+const ledger = await dbm.writeLedgerEntries(tripUser, [{ newName: "Sara", amount: 2000 }], "Trip: Hunza");
+const tripExpenseId = await dbm.insertExpense({
+  userId: tripUser, amount: 8000, note: "Trip: Hunza", expenseDateTime: now,
+  vendor: "Hunza", category: null, vendorKey: null,
+});
+await trips.closeTrip(
+  tripId,
+  settleUp.map((t, i) => ({ fromMemberId: t.from, toMemberId: t.to, amount: t.amount, txId: i === 0 ? ledger.txIds[0] : null })),
+  tripExpenseId
+);
+const closed = await trips.getTrip(tripUser, tripId);
+check("closing writes the settle-up down", [closed?.status, closed?.settlements.length], ["closed", 2]);
+check("and the trip is no longer open to changes", await trips.tripStatus(tripId), "closed");
+
+await trips.markSettlementPaid(tripId, closed!.settlements[0].id, true);
+check("a payment can be ticked off", Boolean((await trips.getTrip(tripUser, tripId))?.settlements[0].paidAt), true);
+
+const undone = await trips.reopenTrip(tripId);
+check("reopening hands back what it wrote", [undone.expenseId, undone.txIds], [tripExpenseId, [ledger.txIds[0]]]);
+await dbm.deleteLedgerTransactions(tripUser, undone.txIds);
+check("so the Udhar entry is gone", (await dbm.listPeople(tripUser)).map((p) => p.balance), [0]);
+const reopened = await trips.getTrip(tripUser, tripId);
+check("and the settle-up is live again", [reopened?.status, reopened?.settlements.length], ["open", 0]);
+
+await dbm.deleteUser(tripUser);
+check("deleting an account takes its trips with it", await trips.listTrips(tripUser), []);
+
 /* ---------- the outbox ---------- */
 
 delete process.env.VAPID_PUBLIC_KEY;

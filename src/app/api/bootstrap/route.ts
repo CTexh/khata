@@ -11,7 +11,9 @@ import {
   listSubscriptions,
   listUserCategories,
   userHasAi,
+  tripsEnabled,
 } from "@/lib/db";
+import { listTrips } from "@/lib/trips-db";
 import { pushConfigured } from "@/lib/push";
 import { sendAnythingDue } from "@/lib/reminder-run";
 
@@ -63,9 +65,12 @@ export async function GET(req: Request) {
   const userId = session.userId;
 
   await ensureTablesExist();
-  const [user, aiAccess, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories, notifications] = await Promise.all([
+  const [user, aiAccess, tripsOn, trips, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories, notifications] = await Promise.all([
     findUserById(userId),
     userHasAi(userId),
+    tripsEnabled(userId),
+    // Cheap for an account that never switched Trips on: no trips, no rows.
+    listTrips(userId),
     listPeople(userId),
     listSubscriptions(userId),
     listExpenses(userId, { year: y, month: m }),
@@ -95,10 +100,12 @@ export async function GET(req: Request) {
             name: user?.name ?? null,
             isAdmin: session.isAdmin,
             aiAccess,
+            tripsEnabled: tripsOn,
             createdAt: user?.created_at ?? null,
           },
         },
         "/api/people": people,
+        "/api/trips": trips,
         "/api/subscriptions": subscriptions,
         [`/api/expenses?year=${y}&month=${m}`]: expensesThis,
         [`/api/expenses?year=${py}&month=${pm}`]: expensesPrev,

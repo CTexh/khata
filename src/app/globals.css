@@ -1319,3 +1319,17 @@ body {
 .tabbar.no-fab {
   grid-template-columns: repeat(4, 1fr);
 }
+
+/* with Trips switched on there is one tab more, so the cells get narrower */
+.tabbar.with-trips {
+  grid-template-columns: 1fr 1fr 1fr 76px 1fr 1fr;
+}
+.tabbar.with-trips.no-fab {
+  grid-template-columns: repeat(5, 1fr);
+}
+/* five labels on a small phone need a little less room each */
+@media (max-width: 380px) {
+  .tabbar.with-trips .tab span {
+    font-size: 10px;
+  }
+}

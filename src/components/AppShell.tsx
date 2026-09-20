@@ -4,14 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ThemePicker } from "@/components/Theme";
-import { NotificationSettings } from "@/components/NotificationSettings";
+import { NotificationSettings, Switch } from "@/components/NotificationSettings";
 import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 import { WelcomeTour } from "@/components/WelcomeTour";
 import { NotificationsNews } from "@/components/NotificationsNews";
 import { NotificationBell } from "@/components/NotificationBell";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
-import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon } from "@/components/icons";
+import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon, SuitcaseIcon } from "@/components/icons";
 
 type CurrentUser = {
   id: string;
@@ -19,6 +19,7 @@ type CurrentUser = {
   name?: string | null;
   isAdmin: boolean;
   aiAccess?: boolean;
+  tripsEnabled?: boolean;
   createdAt?: string | null;
 };
 
@@ -37,13 +38,17 @@ function SettingsModal({
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notifications, setNotifications] = useState(Boolean(startOnNotifications));
+  const [trips, setTrips] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
 
   useEffect(() => {
     fetch("/api/profile")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d) setName(d.name ?? "");
+        if (d) {
+          setName(d.name ?? "");
+          setTrips(Boolean(d.tripsEnabled));
+        }
       })
       .finally(() => setLoaded(true));
   }, []);
@@ -55,7 +60,7 @@ function SettingsModal({
     const res = await fetch("/api/profile", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, tripsEnabled: trips }),
     });
     setSaving(false);
     if (!res.ok) {
@@ -93,6 +98,16 @@ function SettingsModal({
             </p>
           </div>
           <ThemePicker />
+        </div>
+
+        <div className="card p-4 flex flex-col gap-3">
+          <p className="text-[15px] font-bold">Sections</p>
+          <Switch
+            label="Trips"
+            hint="Split a group trip's costs between everyone and settle up at the end."
+            checked={trips}
+            onChange={setTrips}
+          />
         </div>
 
         <button
@@ -134,6 +149,7 @@ const TITLES: Record<string, string> = {
   "/expenses": "Mera Khata",
   "/udhar-khata": "Udhar Khata",
   "/subscriptions": "Subscriptions",
+  "/trips": "Trips",
   "/admin": "Admin",
 };
 
@@ -142,12 +158,15 @@ const SUBTITLES: Record<string, string> = {
   "/expenses": "Your everyday spending",
   "/udhar-khata": "Who owes you, and how much",
   "/subscriptions": "Every recurring payment",
+  "/trips": "Split a trip, settle up at the end",
   "/admin": "Manage accounts",
 };
 
 const TABS = [
   { href: "/", label: "Home", Icon: HomeIcon },
   { href: "/expenses", label: "Khata", Icon: ReceiptIcon },
+  // Only for accounts that switched Trips on in Settings.
+  { href: "/trips", label: "Trips", Icon: SuitcaseIcon, optional: "trips" },
   null, // the Assistant button sits in the middle
   { href: "/udhar-khata", label: "Udhar", Icon: HandshakeIcon },
   { href: "/subscriptions", label: "Subs", Icon: RepeatIcon },
@@ -166,6 +185,7 @@ function primeAppData() {
   primeFrom(`/api/bootstrap?y=${now.getFullYear()}&m=${now.getMonth() + 1}`, [
     "/api/auth/me",
     "/api/people",
+    "/api/trips",
     "/api/subscriptions",
     `/api/expenses?${month(now)}`,
     `/api/expenses?${month(prev)}`,
@@ -183,6 +203,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState<false | "settings" | "notifications">(false);
   const pathname = usePathname();
+  // A page inside a section - /trips/<id> - carries the section's heading.
+  const section = pathname.startsWith("/trips/") ? "/trips" : pathname;
 
 
   const logout = async () => {
@@ -272,11 +294,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ) : (
               <>
                 <h1 className="text-[24px] font-extrabold leading-tight truncate">
-                  {TITLES[pathname] ?? "Khata"}
+                  {TITLES[section] ?? "Khata"}
                 </h1>
-                {SUBTITLES[pathname] && (
+                {SUBTITLES[section] && (
                   <p className="text-[13px] truncate" style={{ color: "var(--muted)" }}>
-                    {SUBTITLES[pathname]}
+                    {SUBTITLES[section]}
                   </p>
                 )}
               </>
@@ -357,9 +379,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      <nav className={`tabbar${user?.aiAccess ? "" : " no-fab"}`} aria-label="Primary navigation">
+      <nav
+        className={`tabbar${user?.aiAccess ? "" : " no-fab"}${user?.tripsEnabled ? " with-trips" : ""}`}
+        aria-label="Primary navigation"
+      >
         {TABS.map((tab) =>
-          tab === null ? (
+          tab !== null && "optional" in tab && !user?.tripsEnabled ? null : tab === null ? (
             // Only for accounts with assistant access (admins, or switched on in Admin).
             !user?.aiAccess ? null : 
             <Link

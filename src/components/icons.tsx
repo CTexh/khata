@@ -77,6 +77,16 @@ export function HandshakeIcon({ size = 24, className }: IconProps) {
   );
 }
 
+export function SuitcaseIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>
+      <rect {...base} x="3" y="7.5" width="18" height="12" rx="2.5" />
+      <path {...base} d="M9 7.5V5.8c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3v1.7" />
+      <path {...base} d="M9 19.5v1M15 19.5v1" />
+    </svg>
+  );
+}
+
 export function RepeatIcon({ size = 24, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>

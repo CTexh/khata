@@ -819,6 +819,7 @@ export async function deleteUser(id: string): Promise<void> {
     ensureRoutineTables(),
     ensureFeedbackTable(),
     ensureLoginAttemptsTable(),
+    ensureTripTables(),
   ]);
   const user = await findUserById(id);
   const c = await db();
@@ -844,6 +845,16 @@ export async function deleteUser(id: string): Promise<void> {
       { sql: "DELETE FROM routine_seen WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM expense_tombstones WHERE user_id = ?", args: [id] },
       { sql: "DELETE FROM assistant_feedback WHERE user_id = ?", args: [id] },
+      {
+        sql: `DELETE FROM trip_expense_shares WHERE expense_id IN
+              (SELECT e.id FROM trip_expenses e JOIN trips t ON t.id = e.trip_id WHERE t.user_id = ?)`,
+        args: [id],
+      },
+      ...["trip_expenses", "trip_deposits", "trip_settlements", "trip_members"].map((table) => ({
+        sql: `DELETE FROM ${table} WHERE trip_id IN (SELECT id FROM trips WHERE user_id = ?)`,
+        args: [id],
+      })),
+      { sql: "DELETE FROM trips WHERE user_id = ?", args: [id] },
       ...(user ? [{ sql: "DELETE FROM login_failures WHERE username = ?", args: [user.username.toLowerCase()] }] : []),
       { sql: "DELETE FROM users WHERE id = ?", args: [id] },
     ],
@@ -1891,6 +1902,115 @@ export async function ensureRoutineTables(): Promise<void> {
   routineTablesEnsured = true;
 }
 
+/* ---------- trips ---------- */
+
+// A trip: the people on it, what they put into the common pot, what was spent
+// and who it was for, and - once it is closed - who owes whom. The queries
+// that use these tables live in lib/trips-db.ts; the gate is here, next to the
+// others, so deleteUser can use it without importing that file back.
+let tripTablesEnsured = false;
+const TRIP_SCHEMA = "1";
+export async function ensureTripTables(): Promise<void> {
+  if (tripTablesEnsured) return;
+  if (await schemaCurrent("trips", TRIP_SCHEMA)) {
+    tripTablesEnsured = true;
+    return;
+  }
+  const c = await db();
+  try {
+    // Trips are off until someone switches them on in Settings.
+    await c.execute(`ALTER TABLE users ADD COLUMN trips_enabled INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists.
+  }
+  await c.execute(`CREATE TABLE IF NOT EXISTS trips (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    start_date TEXT,
+    end_date TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL,
+    closed_at TEXT,
+    expense_id TEXT
+  )`);
+  // A member is a name, not an account - the same as a borrower in Udhar
+  // Khata. person_id links them to one, which is how a trip can hand what is
+  // still owed over to the ledger when it closes.
+  await c.execute(`CREATE TABLE IF NOT EXISTS trip_members (
+    id TEXT PRIMARY KEY,
+    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    is_me INTEGER NOT NULL DEFAULT 0,
+    person_id TEXT,
+    created_at TEXT NOT NULL
+  )`);
+  await c.execute(`CREATE TABLE IF NOT EXISTS trip_deposits (
+    id TEXT PRIMARY KEY,
+    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  )`);
+  await c.execute(`CREATE TABLE IF NOT EXISTS trip_expenses (
+    id TEXT PRIMARY KEY,
+    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    amount REAL NOT NULL,
+    vendor TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    category TEXT,
+    spent_at TEXT NOT NULL,
+    paid_from TEXT NOT NULL DEFAULT 'pot',
+    payer_member_id TEXT,
+    created_at TEXT NOT NULL
+  )`);
+  // Only who an expense was split between; the amounts are worked out on read
+  // by lib/trip-split.ts, so editing one member never leaves stale shares.
+  await c.execute(`CREATE TABLE IF NOT EXISTS trip_expense_shares (
+    expense_id TEXT NOT NULL REFERENCES trip_expenses(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL,
+    PRIMARY KEY (expense_id, member_id)
+  )`);
+  await c.execute(`CREATE TABLE IF NOT EXISTS trip_settlements (
+    id TEXT PRIMARY KEY,
+    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    from_member_id TEXT NOT NULL,
+    to_member_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    paid_at TEXT,
+    person_id TEXT,
+    tx_id TEXT,
+    created_at TEXT NOT NULL
+  )`);
+  for (const sql of [
+    `CREATE INDEX IF NOT EXISTS idx_trips_user ON trips (user_id, status)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_trip_members_name ON trip_members (trip_id, lower(name))`,
+    `CREATE INDEX IF NOT EXISTS idx_trip_deposits_trip ON trip_deposits (trip_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_trip_expenses_trip ON trip_expenses (trip_id, spent_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_trip_settlements_trip ON trip_settlements (trip_id)`,
+  ]) {
+    try {
+      await c.execute(sql);
+    } catch {
+      // Index already exists.
+    }
+  }
+  await markSchema("trips", TRIP_SCHEMA);
+  tripTablesEnsured = true;
+}
+
+export async function tripsEnabled(userId: string): Promise<boolean> {
+  await ensureTripTables();
+  const rs = await db().execute({ sql: "SELECT trips_enabled FROM users WHERE id = ?", args: [userId] });
+  return Number(rs.rows[0]?.trips_enabled ?? 0) === 1;
+}
+
+export async function setTripsEnabled(userId: string, on: boolean): Promise<void> {
+  await ensureTripTables();
+  await db().execute({ sql: "UPDATE users SET trips_enabled = ? WHERE id = ?", args: [on ? 1 : 0, userId] });
+}
+
 // Of these Gmail message ids, the ones the routine has never dealt with.
 export async function unseenMessageIds(userId: string, ids: string[]): Promise<string[]> {
   const unique = [...new Set(ids)];
@@ -2389,6 +2509,18 @@ export async function writeLedgerEntries(
     txIds: txIds.filter((_, i) => results[txStatement[i]]?.rowsAffected === 1),
     createdPeople,
   };
+}
+
+// Takes back ledger entries written on behalf of something else - closing a
+// trip, for one - if that is undone. Scoped to this account's own people.
+export async function deleteLedgerTransactions(userId: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const c = await db();
+  await c.execute({
+    sql: `DELETE FROM transactions WHERE id IN (${ids.map(() => "?").join(",")})
+          AND person_id IN (SELECT id FROM people WHERE user_id = ?)`,
+    args: [...ids, userId],
+  });
 }
 
 /* ---------- AI model health ---------- */

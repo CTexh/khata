@@ -80,7 +80,8 @@ async function deviceHealth(endpoint: string): Promise<(Health & { registered: b
   return data?.thisDevice ?? null;
 }
 
-function Switch({
+// Also used by the Settings sheet for the Trips switch.
+export function Switch({
   label,
   hint,
   checked,
