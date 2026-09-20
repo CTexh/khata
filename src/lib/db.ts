@@ -1021,11 +1021,25 @@ export type CategoryPoint = { category: string; total: number; count: number };
 
 // Spending grouped by category for a month (or a whole year when `month` is
 // omitted), biggest first - the shape the report chart renders directly.
+// `through` stops the sum at the end of that day, so a month still running can
+// be compared with the same days of the month before it rather than with a
+// whole one - which would show a fall every month until the last day of it.
+// The day after a YYYY-MM-DD, as a YYYY-MM-DD.
+function nextDay(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function categoryTotals(
   userId: string,
-  opts: { year: number; month?: number }
+  opts: { year: number; month?: number; through?: string }
 ): Promise<CategoryPoint[]> {
   const c = await db();
+  const [from, until] = dateBounds(opts.year, opts.month);
+  // The bound is exclusive, so the day after the one asked for.
+  const capped = opts.through ? nextDay(opts.through) : until;
+  const to = capped < until ? capped : until;
   const rs = await c.execute({
     sql: `SELECT COALESCE(NULLIF(TRIM(category), ''), ?) AS category,
                  SUM(amount) AS total,
@@ -1034,7 +1048,7 @@ export async function categoryTotals(
           WHERE user_id = ? AND expense_date >= ? AND expense_date < ?
           GROUP BY category
           ORDER BY total DESC`,
-    args: [UNCATEGORISED, userId, ...dateBounds(opts.year, opts.month)],
+    args: [UNCATEGORISED, userId, from, to],
   });
   return rs.rows.map((r) => ({
     category: r.category as string,

@@ -28,8 +28,8 @@ const RECENT_SHOWN = 5;
 
 const PERIODS: { id: Period; label: string; heading: string; compare: string }[] = [
   { id: "today", label: "Today", heading: "Today's expense", compare: "yesterday" },
-  { id: "week", label: "This Week", heading: "This week's expense", compare: "last week" },
-  { id: "month", label: "This Month", heading: "This month's expense", compare: "last month" },
+  { id: "week", label: "This Week", heading: "This week's expense", compare: "the same days last week" },
+  { id: "month", label: "This Month", heading: "This month's expense", compare: "the same days last month" },
 ];
 
 

@@ -11,6 +11,7 @@ import { SwipeRow } from "@/components/SwipeRow";
 import dynamic from "next/dynamic";
 import { fetchKey, invalidate, isFresh, peek, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
+import { isPartial, sameDayBefore } from "@/lib/compare-period";
 
 // Expense times are stored as Pakistan wall-clock time with a Z suffix - the
 // assistant saves them the same way - so they are read and written as they
@@ -704,8 +705,14 @@ const ExpensesView = memo(function ExpensesView({
   // Totals for this period and the one before (for "vs last month"), from the
   // shared cache. Moving to a period not seen yet keeps the previous figures
   // on screen, dimmed, until the new ones arrive - the page never blanks.
-  const prevParams =
+  // A period still running is compared with the same days of the one before
+  // it. Against a whole finished month, September on the 20th would always
+  // look like a fall - and Home, which already compared like with like, said
+  // the opposite of this page about the very same figure.
+  const partial = isPartial(now, scope, year, month);
+  const prevBase =
     scope === "year" ? `year=${year - 1}` : month === 1 ? `year=${year - 1}&month=12` : `year=${year}&month=${month - 1}`;
+  const prevParams = partial ? `${prevBase}&through=${sameDayBefore(now, scope)}` : prevBase;
   const totals = useCached<{ total: number; categories: CategoryPoint[] }>(`/api/expenses/categories?year=${year}${monthParam}`);
   const previous = useCached<{ total: number }>(`/api/expenses/categories?${prevParams}`);
   const shownTotals = useRef(totals.data);
@@ -921,7 +928,9 @@ const ExpensesView = memo(function ExpensesView({
               <span className="font-extrabold" style={{ color: change > 0 ? "#ffb4a8" : "#7ee2a8" }}>
                 {change > 0 ? "↑" : "↓"} {Math.abs(change)}%
               </span>{" "}
-              <span className="hero-muted">vs last {scope}</span>
+              <span className="hero-muted">
+                {partial ? `vs the same days last ${scope}` : `vs last ${scope}`}
+              </span>
             </span>
           )}
           {data && (
