@@ -314,18 +314,24 @@ export default function AssistantPage() {
   // was still animating in: three lots of layout and paint during the one
   // movement that was meant to look smooth.
   const openedAt = useRef(true);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useBeforePaint(() => {
     if (!loaded || !openedAt.current) return;
-    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    window.scrollTo(0, document.documentElement.scrollHeight);
+    // The conversation is the only thing that scrolls, so its own scroll
+    // position is set outright - no scrollIntoView, which would also move
+    // anything scrollable around it.
+    const body = bodyRef.current;
+    if (body) body.scrollTop = body.scrollHeight;
     if (messages.length) openedAt.current = false;
   }, [loaded, messages.length]);
 
   // Afterwards a new reply slides into view, as a new message should.
   useEffect(() => {
     if (!loaded || openedAt.current) return;
+    const body = bodyRef.current;
+    if (!body) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    endRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "end" });
+    body.scrollTo({ top: body.scrollHeight, behavior: reduce ? "auto" : "smooth" });
   }, [messages, loaded]);
 
   const stopRecording = (discard: boolean) => {
@@ -586,7 +592,7 @@ export default function AssistantPage() {
         </div>
       )}
 
-      <div className="chat-body" aria-live="polite" aria-label="Conversation">
+      <div className="chat-body" ref={bodyRef} aria-live="polite" aria-label="Conversation">
         {loaded && messages.length === 0 && (
           <div className="chat-empty">
             <div className="chat-glow-card rise">

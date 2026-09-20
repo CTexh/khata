@@ -811,25 +811,27 @@ body {
    made the assistant look like it was still loading. */
 
 /* ---- assistant: full-screen chat ---- */
+/* The assistant is a screen, not a page: it is exactly as tall as the window
+   and never scrolls itself. Only the conversation scrolls, between a bar and a
+   composer that stay where they are. It used to be a tall document that
+   scrolled as a whole, so opening a long conversation moved the entire screen
+   up to reach the newest message. */
 .chat-screen {
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background:
     radial-gradient(60% 40% at 50% 38%, var(--accent-soft), transparent 70%),
     var(--page);
 }
-/* Fixed, not sticky. body has overflow-x: hidden, which makes its overflow-y
-   compute to auto - and that quietly stops sticky working against the
-   viewport. So opening a long conversation scrolled to the newest message and
-   took the bar, and the way back out of the assistant with it, off the top of
-   the screen. Fixed is immune to that, and matches the composer at the other
-   end. */
+/* Part of the column, above the conversation. Nothing here is fixed or sticky
+   any more: with the screen itself not scrolling there is nothing to stay
+   still against, and fixed positioning inside an animated wrapper is what
+   unpinned the composer earlier. */
 .chat-topbar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  flex: none;
   z-index: 20;
   display: grid;
   grid-template-columns: 48px 1fr 48px;
@@ -872,15 +874,20 @@ body {
   opacity: 0.45;
 }
 .chat-body {
-  flex: 1;
+  flex: 1 1 auto;
+  /* Without this a flex child refuses to shrink, and the column grows past the
+     window instead of the conversation scrolling inside it. */
+  min-height: 0;
+  overflow-y: auto;
+  /* A scroll that reaches the end stays here rather than pulling the app. */
+  overscroll-behavior: contain;
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* Clears the fixed bar above and the composer below. */
-  padding: calc(76px + max(12px, env(safe-area-inset-top))) 16px calc(190px + env(safe-area-inset-bottom));
+  padding: 8px 16px 12px;
 }
 .chat-empty {
   flex: 1;
@@ -1021,10 +1028,8 @@ body {
   }
 }
 .chat-dock {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  flex: none;
   z-index: 30;
   width: 100%;
   max-width: 720px;
