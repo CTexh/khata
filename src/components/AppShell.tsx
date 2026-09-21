@@ -39,11 +39,16 @@ type CurrentUser = {
 function SettingsModal({
   initialName,
   startOnNotifications,
+  withAssistant,
   onClose,
   onSaved,
 }: {
   initialName: string;
   startOnNotifications?: boolean;
+  // Siri only reaches the assistant, so it is only offered to accounts that
+  // have one. The token endpoint refuses the rest anyway; there is no reason
+  // to show them a door that does not open.
+  withAssistant: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -136,6 +141,7 @@ function SettingsModal({
           </span>
         </button>
 
+        {withAssistant && (
         <button
           type="button"
           className="card p-4 w-full text-left flex items-center gap-3"
@@ -151,6 +157,7 @@ function SettingsModal({
             ›
           </span>
         </button>
+        )}
 
         {msg && (
           <p className="text-[13px] px-1" style={{ color: msg.bad ? "var(--bad)" : "var(--good)" }} role="status">
@@ -461,6 +468,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <SettingsModal
           initialName={user?.name ?? ""}
           startOnNotifications={profileOpen === "notifications"}
+          withAssistant={Boolean(user?.aiAccess)}
           onClose={closeProfile}
           onSaved={() => refreshMe()}
         />
