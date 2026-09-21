@@ -981,15 +981,31 @@ export async function listTx(personId: string): Promise<Tx[]> {
 
 export type Expense = {
   id: string;
-  user_id: string;
   amount: number;
   note: string;
   expense_date: string;
   expense_datetime: string;
-  created_at: string;
   vendor?: string;
   category?: string;
+  // Not sent to the app: it knows whose expenses it asked for, and shows the
+  // date it happened rather than the moment it was written down. Together they
+  // were a quarter of every row on the wire.
+  user_id?: string;
+  created_at?: string;
 };
+
+// What a list of expenses looks like when it leaves the server.
+export function forTheApp(e: Expense): Expense {
+  return {
+    id: e.id,
+    amount: e.amount,
+    note: e.note,
+    expense_date: e.expense_date,
+    expense_datetime: e.expense_datetime,
+    vendor: e.vendor,
+    category: e.category,
+  };
+}
 
 // Rows with no category are reported under this label so they stay visible in
 // breakdowns instead of silently vanishing from the totals.

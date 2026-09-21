@@ -10,8 +10,10 @@ import {
   listPeople,
   listSubscriptions,
   listUserCategories,
+  forTheApp,
 } from "@/lib/db";
 import { listTrips } from "@/lib/trips-db";
+import { sameDayBefore } from "@/lib/compare-period";
 import { pushConfigured } from "@/lib/push";
 import { sendAnythingDue } from "@/lib/reminder-run";
 
@@ -65,22 +67,29 @@ export async function GET(req: Request) {
   const askedMonth = Number(url.searchParams.get("m"));
   const m = askedMonth >= 1 && askedMonth <= 12 ? askedMonth : now.getMonth() + 1;
   const [py, pm] = m === 1 ? [y - 1, 12] : [y, m - 1];
+  // The browser's own day, so the "same days last month" comparison both
+  // screens show is primed with exactly the key they will ask for.
+  const askedDay = Number(url.searchParams.get("d"));
+  const day = askedDay >= 1 && askedDay <= 31 ? askedDay : now.getDate();
+  const through = sameDayBefore(new Date(y, m - 1, day), "month");
   const userId = session.userId;
 
   await ensureTablesExist();
   // Who this is, what they can see, and whether Trips is on: one row, one
   // question. Asked first, because whether to load trips at all depends on it.
   const account = await getAccountFlags(userId);
-  const [trips, people, subscriptions, expensesThis, expensesPrev, totalsThis, totalsPrev, categories, notifications] =
+  const [trips, people, subscriptions, expensesThis, totalsThis, totalsPrev, categories, notifications] =
     await Promise.all([
       // Four queries, so they are not run for an account with Trips switched off.
       account?.tripsEnabled ? listTrips(userId) : Promise.resolve([]),
       listPeople(userId),
       listSubscriptions(userId),
       listExpenses(userId, { year: y, month: m }),
-      listExpenses(userId, { year: py, month: pm }),
       categoryTotals(userId, { year: y, month: m }),
-      categoryTotals(userId, { year: py, month: pm }),
+      // Only the same days of it, which is what the comparison needs. The whole
+      // of last month used to be sent as well - hundreds of rows, for a figure
+      // that is one number.
+      categoryTotals(userId, { year: py, month: pm, through }),
       listUserCategories(userId),
       listNotifications(userId, NOTIFICATIONS_PRIMED),
     ]);
@@ -111,10 +120,9 @@ export async function GET(req: Request) {
         "/api/people": people,
         "/api/trips": trips,
         "/api/subscriptions": subscriptions,
-        [`/api/expenses?year=${y}&month=${m}`]: expensesThis,
-        [`/api/expenses?year=${py}&month=${pm}`]: expensesPrev,
+        [`/api/expenses?year=${y}&month=${m}`]: expensesThis.map(forTheApp),
         [`/api/expenses/categories?year=${y}&month=${m}`]: totals(y, m, totalsThis),
-        [`/api/expenses/categories?year=${py}&month=${pm}`]: totals(py, pm, totalsPrev),
+        [`/api/expenses/categories?year=${py}&month=${pm}&through=${through}`]: totals(py, pm, totalsPrev),
         "/api/categories": { categories },
         "/api/notifications": notifications,
       },

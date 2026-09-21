@@ -12,6 +12,7 @@ import { Sheet } from "@/components/Sheet";
 import { NotificationBell } from "@/components/NotificationBell";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
+import { sameDayBefore } from "@/lib/compare-period";
 import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon, SuitcaseIcon } from "@/components/icons";
 
 // None of this is reachable without opening the avatar menu, and together it
@@ -215,15 +216,14 @@ function primeAppData() {
   const now = new Date();
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const month = (d: Date) => `year=${d.getFullYear()}&month=${d.getMonth() + 1}`;
-  primeFrom(`/api/bootstrap?y=${now.getFullYear()}&m=${now.getMonth() + 1}`, [
+  primeFrom(`/api/bootstrap?y=${now.getFullYear()}&m=${now.getMonth() + 1}&d=${now.getDate()}`, [
     "/api/auth/me",
     "/api/people",
     "/api/trips",
     "/api/subscriptions",
     `/api/expenses?${month(now)}`,
-    `/api/expenses?${month(prev)}`,
     `/api/expenses/categories?${month(now)}`,
-    `/api/expenses/categories?${month(prev)}`,
+    `/api/expenses/categories?${month(prev)}&through=${sameDayBefore(now, "month")}`,
     "/api/categories",
     "/api/notifications",
   ]);

@@ -925,8 +925,13 @@ const ExpensesView = memo(function ExpensesView({
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[14px]">
           {change !== null && (
             <span>
-              <span className="font-extrabold" style={{ color: change > 0 ? "#ffb4a8" : "#7ee2a8" }}>
-                {change > 0 ? "↑" : "↓"} {Math.abs(change)}%
+              {/* Nothing went up or down: an arrow beside a zero says the
+                  opposite of what it means. */}
+              <span
+                className="font-extrabold"
+                style={{ color: change === 0 ? undefined : change > 0 ? "#ffb4a8" : "#7ee2a8" }}
+              >
+                {change === 0 ? "No change" : `${change > 0 ? "↑" : "↓"} ${Math.abs(change)}%`}
               </span>{" "}
               <span className="hero-muted">
                 {partial ? `vs the same days last ${scope}` : `vs last ${scope}`}

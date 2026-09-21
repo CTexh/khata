@@ -7,6 +7,7 @@ import { categoryVars } from "@/lib/category-style";
 import { CategoryIcon, LeafIcon } from "@/components/CategoryIcon";
 import { useCached } from "@/lib/swr";
 import { useBeforePaint } from "@/lib/before-paint";
+import { sameDayBefore } from "@/lib/compare-period";
 import { ArrowUpIcon, HandshakeIcon, RepeatIcon } from "@/components/icons";
 
 type Expense = {
@@ -67,7 +68,21 @@ export default function Home() {
   const now = new Date();
   const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const thisMonth = useCached<Expense[]>(`/api/expenses?year=${now.getFullYear()}&month=${now.getMonth() + 1}`);
-  const lastMonth = useCached<Expense[]>(`/api/expenses?year=${prevDate.getFullYear()}&month=${prevDate.getMonth() + 1}`);
+  // Last month's rows are only needed when a period being compared reaches
+  // back into it - the first days of a month, and a week that began in it.
+  // The rest of the time this is hundreds of rows for nothing, so it is not
+  // asked for at all.
+  const spans = ranges(now);
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const needsLastMonth = spans.today.prevFrom < monthStart || spans.week.prevFrom < monthStart;
+  const lastMonth = useCached<Expense[]>(
+    needsLastMonth ? `/api/expenses?year=${prevDate.getFullYear()}&month=${prevDate.getMonth() + 1}` : null
+  );
+  // The month's comparison is one number, not a month of rows: the same days
+  // of last month, summed by the server.
+  const lastMonthSameDays = useCached<{ total: number }>(
+    `/api/expenses/categories?year=${prevDate.getFullYear()}&month=${prevDate.getMonth() + 1}&through=${sameDayBefore(now, "month")}`
+  );
   const peopleQ = useCached<{ balance: number }[]>("/api/people");
   const subsQ = useCached<{ amount: number; active: number | boolean; paid_this_period: boolean }[]>("/api/subscriptions");
 
@@ -110,7 +125,10 @@ export default function Home() {
     if (!expenses) return null;
     const r = ranges(new Date())[period];
     const total = sum(expenses, r.from, r.to);
-    const previous = sum(expenses, r.prevFrom, r.prevTo);
+    const previous =
+      period === "month"
+        ? Number(lastMonthSameDays.data?.total ?? 0)
+        : sum(expenses, r.prevFrom, r.prevTo);
     const items = expenses
       .filter((e) => e.expense_date >= r.from && e.expense_date <= r.to)
       .sort(
@@ -137,7 +155,7 @@ export default function Home() {
       : lead;
 
     return { total, previous, change, items, breakdown, categories: ranked.length };
-  }, [expenses, period]);
+  }, [expenses, period, lastMonthSameDays.data]);
 
   const meta = PERIODS.find((p) => p.id === period)!;
 
@@ -167,14 +185,18 @@ export default function Home() {
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[14px]">
           {view && view.change !== null ? (
             <span className="flex items-center gap-1.5">
+              {/* Nothing went up or down: an arrow beside a zero says the
+                  opposite of what it means. */}
               <span
                 className="font-extrabold flex items-center gap-1"
-                style={{ color: view.change > 0 ? "#ffb4a8" : "#7ee2a8" }}
+                style={{ color: view.change === 0 ? undefined : view.change > 0 ? "#ffb4a8" : "#7ee2a8" }}
               >
-                <span style={{ display: "inline-flex", transform: view.change > 0 ? "none" : "rotate(180deg)" }}>
-                  <ArrowUpIcon size={16} />
-                </span>
-                {Math.abs(view.change)}%
+                {view.change !== 0 && (
+                  <span style={{ display: "inline-flex", transform: view.change > 0 ? "none" : "rotate(180deg)" }}>
+                    <ArrowUpIcon size={16} />
+                  </span>
+                )}
+                {view.change === 0 ? "No change" : `${Math.abs(view.change)}%`}
               </span>
               <span className="hero-muted">vs {meta.compare}</span>
             </span>

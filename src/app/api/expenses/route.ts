@@ -6,6 +6,7 @@ import {
   resolveExpenseCategory,
   upsertVendorRule,
   insertExpense,
+  forTheApp,
 } from "@/lib/db";
 import { getSession, verifyRoutineSecret } from "@/lib/auth";
 
@@ -48,7 +49,7 @@ export async function GET(req: Request) {
   const category = url.searchParams.get("category")?.trim() || undefined;
 
   const expenses = await listExpenses(userId, { year, month, category });
-  return NextResponse.json(expenses);
+  return NextResponse.json(expenses.map(forTheApp));
 }
 
 export async function POST(req: Request) {
