@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { BellIcon, RecurringIcon } from "@/components/CategoryIcon";
 import { HandshakeIcon, ReceiptIcon } from "@/components/icons";
 import { fetchKey, useCached } from "@/lib/swr";
+import { send } from "@/lib/submit";
+import { SwipeRow } from "@/components/SwipeRow";
 import { fmtAgo } from "@/lib/format";
 import { notificationKind, type NotificationKind } from "@/lib/reminder-messages";
 import { ensureRegistered, installWorker, setAppBadge } from "@/lib/push-client";
@@ -95,6 +97,25 @@ export function NotificationBell({ onManage }: { onManage: () => void }) {
       body: JSON.stringify({ before: newest ?? null }),
     }).catch(() => {});
   }, [open, data, mutate]);
+
+  // Swiping one away. It leaves the list at once - the outcome is not in
+  // doubt - and comes back with the reason if the server disagrees.
+  const removeItem = useCallback(
+    async (id: string) => {
+      const before = data;
+      if (before) {
+        const item = before.items.find((i) => i.id === id);
+        mutate({
+          items: before.items.filter((i) => i.id !== id),
+          unread: Math.max(0, before.unread - (item && !item.read ? 1 : 0)),
+        });
+      }
+      const sent = await send(`${KEY}?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!sent.ok && before) mutate(before);
+      return sent;
+    },
+    [data, mutate]
+  );
 
   // Closing plays the entrance backwards, then removes the panel.
   const [closing, setClosing] = useState(false);
@@ -235,6 +256,11 @@ export function NotificationBell({ onManage }: { onManage: () => void }) {
                     const isNew = fresh.has(item.id);
                     return (
                       <li key={item.id}>
+                        <SwipeRow
+                          onDelete={() => removeItem(item.id)}
+                          label={item.title}
+                          question="Remove this notification?"
+                        >
                         <button type="button" className="list-row items-start" onClick={() => go(item)}>
                           <span
                             className="icon-tile !w-10 !h-10 !rounded-xl"
@@ -258,6 +284,7 @@ export function NotificationBell({ onManage }: { onManage: () => void }) {
                           </span>
                           {isNew && <span className="bell-dot" aria-label="New" />}
                         </button>
+                        </SwipeRow>
                       </li>
                     );
                   })}

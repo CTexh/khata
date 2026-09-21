@@ -674,6 +674,18 @@ export async function listNotifications(
   };
 }
 
+// Clearing one from the bell. Scoped to the account that owns it, so an id
+// from somewhere else deletes nothing.
+export async function deleteNotification(userId: string, id: string): Promise<boolean> {
+  await ensureReminderTables();
+  const c = await db();
+  const rs = await c.execute({
+    sql: "DELETE FROM notifications WHERE id = ? AND user_id = ?",
+    args: [id, userId],
+  });
+  return rs.rowsAffected > 0;
+}
+
 // `before` is the newest notification the reader was actually shown; anything
 // that arrived after it stays unread until it has been seen too.
 export async function markNotificationsRead(userId: string, before?: string | null): Promise<void> {

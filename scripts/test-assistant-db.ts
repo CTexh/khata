@@ -549,6 +549,16 @@ check("but it is still in the bell", (await dbm.listNotifications(mailUser)).ite
 await dbm.markNotificationsRead(mailUser);
 check("reading the bell clears the badge", await dbm.unreadNotificationCount(mailUser), 0);
 
+// Swiping one away in the bell.
+const listed = await dbm.listNotifications(mailUser);
+const first = listed.items[0];
+check("a notification can be removed", await dbm.deleteNotification(mailUser, first.id), true);
+check("and is gone from the bell", (await dbm.listNotifications(mailUser)).items.some((n) => n.id === first.id), false);
+check("removing it twice changes nothing", await dbm.deleteNotification(mailUser, first.id), false);
+const other = (await dbm.listNotifications(mailUser)).items[0];
+check("and another account cannot remove yours", await dbm.deleteNotification(userId, other.id), false);
+check("so it is still there", (await dbm.listNotifications(mailUser)).items.some((n) => n.id === other.id), true);
+
 await dbm.deleteUser(mailUser);
 check("deleting an account takes its devices with it", (await dbm.listPushSubscriptions(mailUser)).length, 0);
 

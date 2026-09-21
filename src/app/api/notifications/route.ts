@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { listNotifications, markNotificationsRead } from "@/lib/db";
+import { deleteNotification, listNotifications, markNotificationsRead } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -27,4 +27,16 @@ export async function PATCH(req: Request) {
   }
   await markNotificationsRead(session.userId, before);
   return NextResponse.json({ ok: true });
+}
+
+// Swiping one away in the bell. It is gone for good: the bell is a record of
+// what was sent, not something that has to be kept.
+export async function DELETE(req: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const id = new URL(req.url).searchParams.get("id") ?? "";
+  if (!id) return NextResponse.json({ error: "Which notification?" }, { status: 400 });
+  const gone = await deleteNotification(session.userId, id);
+  if (!gone) return NextResponse.json({ error: "That notification is already gone." }, { status: 404 });
+  return NextResponse.json({ success: true });
 }

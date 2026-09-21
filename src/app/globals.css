@@ -632,14 +632,35 @@ body {
   border-radius: 18px;
   will-change: transform;
 }
-.swipe-question {
+/* The question, once Delete is tapped: a layer over the whole row rather than
+   a line printed across what the row already said. */
+.swipe-ask {
   position: absolute;
-  left: 14px;
-  bottom: 4px;
-  font-size: 11.5px;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-inline: 14px 4px;
+  border-radius: 18px;
+  background: var(--surface);
+  animation: swipe-ask-in 160ms var(--ease-settle) backwards;
+}
+.swipe-ask-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
   font-weight: 700;
   color: var(--bad);
-  pointer-events: none;
+  /* One line, ending in an ellipsis rather than pushing the buttons off. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes swipe-ask-in {
+  from {
+    opacity: 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .swipe-circle {

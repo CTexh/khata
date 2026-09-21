@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CONFIRM_PX, REVEAL_PX, direction, offsetWhileDragging, settle, type Direction } from "@/lib/swipe";
+import { REVEAL_PX, direction, offsetWhileDragging, settle, type Direction } from "@/lib/swipe";
 import { haptic } from "@/lib/motion";
 
 // Swipe a row to the left and a Delete button appears behind it; tap that and
@@ -128,41 +128,41 @@ export function SwipeRow({
     close();
   };
 
-  const shownOffset = asking ? -CONFIRM_PX : offset;
+  // Asking covers the row instead of pushing it aside. Sliding it left cut the
+  // start of whatever it said and printed the question over the line beneath -
+  // two halves of a row that no longer belonged together.
+  const shownOffset = asking ? 0 : offset;
 
   return (
     <div className="swipe-row">
-      <div className="swipe-actions" aria-hidden={shownOffset === 0}>
-        {asking ? (
-          <>
-            <button
-              type="button"
-              className="swipe-circle swipe-no"
-              aria-label="Keep it"
-              onClick={close}
-              disabled={busy}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
-                <path d="M6 6l12 12M18 6L6 18" />
+      {asking && (
+        <div className="swipe-ask">
+          <span className="swipe-ask-text">{error || question}</span>
+          <button type="button" className="swipe-circle swipe-no" aria-label="Keep it" onClick={close} disabled={busy}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="swipe-circle swipe-yes"
+            aria-label={`Yes, delete ${label}`}
+            onClick={remove}
+            disabled={busy}
+          >
+            {busy ? (
+              <span className="swipe-spin" />
+            ) : (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
               </svg>
-            </button>
-            <button
-              type="button"
-              className="swipe-circle swipe-yes"
-              aria-label={`Yes, delete ${label}`}
-              onClick={remove}
-              disabled={busy}
-            >
-              {busy ? (
-                <span className="swipe-spin" />
-              ) : (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M5 12.5l4.5 4.5L19 7.5" />
-                </svg>
-              )}
-            </button>
-          </>
-        ) : (
+            )}
+          </button>
+        </div>
+      )}
+
+      <div className="swipe-actions" aria-hidden={offset === 0 || asking}>
+        {asking ? null : (
           <button
             type="button"
             className="swipe-circle swipe-bin"
@@ -170,7 +170,7 @@ export function SwipeRow({
             tabIndex={offset === 0 ? -1 : 0}
             onClick={() => {
               setAsking(true);
-              open(-CONFIRM_PX);
+              open(-REVEAL_PX);
             }}
           >
             <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -206,11 +206,6 @@ export function SwipeRow({
         {children}
       </div>
 
-      {asking && (
-        <p className="swipe-question" role="status">
-          {error || question}
-        </p>
-      )}
     </div>
   );
 }
