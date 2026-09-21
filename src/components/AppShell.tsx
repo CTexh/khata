@@ -13,7 +13,17 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
 import { sameDayBefore } from "@/lib/compare-period";
-import { HomeIcon, ReceiptIcon, HandshakeIcon, RepeatIcon, SparkleIcon, SuitcaseIcon } from "@/components/icons";
+import {
+  HomeIcon,
+  ReceiptIcon,
+  HandshakeIcon,
+  RepeatIcon,
+  SparkleIcon,
+  SuitcaseIcon,
+  GearIcon,
+  ShieldIcon,
+  LogOutIcon,
+} from "@/components/icons";
 
 // None of this is reachable without opening the avatar menu, and together it
 // was about 10 KB of JavaScript on every page load - the whole settings
@@ -235,6 +245,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const user = me?.user ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState<false | "settings" | "notifications">(false);
+
+  // Escape closes the account menu, as it closes everything else here.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
   const pathname = usePathname();
   // A page inside a section - /trips/<id> - carries the section's heading.
   const section = pathname.startsWith("/trips/") ? "/trips" : pathname;
@@ -355,46 +375,65 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </button>
                 {menuOpen && (
                   <>
-                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                    <div className="card absolute right-0 top-14 z-20 p-2 w-52 rise" role="menu">
-                      <p className="px-3 py-1.5 text-[13px] font-bold truncate">
-                        {user.username}
-                        {user.isAdmin && (
-                          <span
-                            className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-                          >
-                            ADMIN
+                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
+                    <div className="account-menu" role="menu" aria-label="Account">
+                      <div className="account-menu-head">
+                        <Avatar id={user.id} name={displayName ?? user.username} size={42} />
+                        <span className="min-w-0">
+                          <span className="block text-[15px] font-extrabold truncate">
+                            {displayName ?? user.username}
                           </span>
-                        )}
-                      </p>
+                          <span className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                            <span className="text-[12.5px] truncate" style={{ color: "var(--muted)" }}>
+                              @{user.username}
+                            </span>
+                            {user.isAdmin && <span className="account-menu-tag">Admin</span>}
+                          </span>
+                        </span>
+                      </div>
+
+                      <div className="account-menu-rule" aria-hidden />
+
                       <button
                         type="button"
                         role="menuitem"
+                        className="account-menu-item"
                         onClick={() => {
                           setMenuOpen(false);
                           setProfileOpen("settings");
                         }}
-                        className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-xl text-[14px] cursor-pointer hover:bg-[var(--surface-2)]"
                       >
+                        <span className="account-menu-icon" aria-hidden>
+                          <GearIcon size={20} />
+                        </span>
                         Settings
                       </button>
+
                       {user.isAdmin && (
                         <Link
                           href="/admin"
                           role="menuitem"
+                          className="account-menu-item"
                           onClick={() => setMenuOpen(false)}
-                          className="w-full min-h-12 flex items-center px-3 py-1.5 rounded-xl text-[14px] hover:bg-[var(--surface-2)]"
                         >
+                          <span className="account-menu-icon" aria-hidden>
+                            <ShieldIcon size={20} />
+                          </span>
                           Admin
                         </Link>
                       )}
+
+                      <div className="account-menu-rule" aria-hidden />
+
                       <button
-                        onClick={logout}
+                        type="button"
                         role="menuitem"
-                        className="w-full min-h-12 text-left px-3 py-1.5 rounded-xl text-[14px] cursor-pointer hover:bg-[var(--surface-2)]"
-                        style={{ color: "var(--bad)" }}
+                        className="account-menu-item account-menu-leave"
+                        onClick={logout}
                       >
+                        <span className="account-menu-icon" aria-hidden>
+                          <LogOutIcon size={20} />
+                        </span>
                         Log out
                       </button>
                     </div>

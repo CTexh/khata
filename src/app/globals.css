@@ -1454,6 +1454,98 @@ button.chip {
   border-top: 1px solid var(--hairline);
 }
 
+/* ---- the account menu, from the profile picture ---- */
+/* Built like the bell's list: the same corner, shadow, caret and arrival, so
+   the two things that open from the top right feel like one family. */
+.account-menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  z-index: 20;
+  width: min(268px, calc(100vw - 32px));
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  border-radius: 24px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
+  transform-origin: calc(100% - 24px) -12px;
+  animation: bell-pop-in 240ms var(--ease-sheet) backwards;
+}
+/* the little point that says which icon this came from */
+.account-menu::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  right: 17px;
+  width: 14px;
+  height: 14px;
+  background: var(--surface);
+  border-left: 1px solid var(--ring);
+  border-top: 1px solid var(--ring);
+  border-top-left-radius: 3px;
+  transform: rotate(45deg);
+}
+.account-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 10px 12px;
+}
+.account-menu-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.account-menu-item {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px;
+  border-radius: 16px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  transition: background-color var(--dur-quick) ease;
+}
+.account-menu-item:hover {
+  background: var(--surface-2);
+}
+.account-menu-item:active {
+  background: var(--surface-2);
+  transform: scale(0.985);
+}
+.account-menu-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.account-menu-rule {
+  height: 1px;
+  margin: 6px 10px;
+  background: var(--hairline);
+}
+.account-menu-leave {
+  color: var(--bad);
+}
+.account-menu-leave .account-menu-icon {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
 .bell-dot {
   flex: none;
   width: 8px;
