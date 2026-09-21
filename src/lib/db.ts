@@ -1587,6 +1587,27 @@ async function ensurePeriodPayment(subscriptionId: string, due_day: number, peri
   });
 }
 
+// Changing the day a subscription falls due has to move the months that have
+// not been paid yet. Their rows were written when the old day applied, and
+// nothing rewrote them - so the rule said "20th of every month" while the next
+// payment still said the 22nd. Months already paid keep the date they were
+// actually due on: that is history, not a plan.
+export async function realignUnpaidDueDates(subscriptionId: string, due_day: number): Promise<void> {
+  const c = await db();
+  const rs = await c.execute({
+    sql: "SELECT id, period, due_date FROM subscription_payments WHERE subscription_id = ? AND paid_at IS NULL",
+    args: [subscriptionId],
+  });
+  const moved = rs.rows
+    .map((r) => ({ id: r.id as string, want: clampedDateForPeriod(r.period as string, due_day), had: r.due_date as string }))
+    .filter((r) => r.want !== r.had);
+  if (!moved.length) return;
+  await c.batch(
+    moved.map((r) => ({ sql: "UPDATE subscription_payments SET due_date = ? WHERE id = ?", args: [r.want, r.id] })),
+    "write"
+  );
+}
+
 export async function listSubscriptions(userId: string): Promise<SubscriptionWithStatus[]> {
   const c = await db();
   const rs = await c.execute({
@@ -1635,6 +1656,26 @@ export async function listSubscriptions(userId: string): Promise<SubscriptionWit
               VALUES (?, ?, ?, ?, NULL, ?)`,
         args: [randomUUID(), r.id as string, period, clampedDateForPeriod(period, Number(r.due_day)), new Date().toISOString()],
       })),
+      "write"
+    );
+    historyBySub = await loadHistory();
+  }
+
+  // An unpaid month whose date no longer matches the day the subscription
+  // falls due: put it right here, so anything already recorded under an older
+  // rule corrects itself rather than showing two different days at once.
+  const adrift: { id: string; due_date: string }[] = [];
+  for (const r of rs.rows) {
+    const due_day = Number(r.due_day);
+    for (const h of historyBySub.get(r.id as string) ?? []) {
+      if (h.paid_at) continue;
+      const want = clampedDateForPeriod(h.period, due_day);
+      if (want !== h.due_date) adrift.push({ id: h.id, due_date: want });
+    }
+  }
+  if (adrift.length > 0) {
+    await c.batch(
+      adrift.map((h) => ({ sql: "UPDATE subscription_payments SET due_date = ? WHERE id = ?", args: [h.due_date, h.id] })),
       "write"
     );
     historyBySub = await loadHistory();
@@ -3106,6 +3147,7 @@ export async function updateSubscriptionFields(
     sql: "UPDATE subscriptions SET name = ?, amount = ?, due_day = ?, active = ? WHERE id = ? AND user_id = ?",
     args: [after.name, after.amount, after.due_day, after.active, id, userId],
   });
+  if (after.due_day !== before.due_day) await realignUnpaidDueDates(id, after.due_day);
   return { before, after };
 }
 

@@ -150,6 +150,45 @@ await undo();
 subRow = await one("SELECT amount, due_day FROM subscriptions WHERE id = ?", [netflixId]);
 check("subscription edit undone", [Number(subRow?.amount), Number(subRow?.due_day)], [1500, Number(netflix?.due_day)]);
 
+// Changing the day it falls due has to move the month waiting to be paid.
+// It did not, so the rule said one day and the next payment said another.
+const unpaidDue = async () =>
+  (await c.execute({
+    sql: "SELECT period, due_date FROM subscription_payments WHERE subscription_id = ? AND paid_at IS NULL ORDER BY period",
+    args: [netflixId],
+  })).rows.map((r) => `${r.period}|${r.due_date}`);
+check(
+  "an unpaid month moves to the new due day",
+  (await unpaidDue()).every((row) => row.endsWith("-20")),
+  true
+);
+
+// A day that does not exist in a short month stops at its last day.
+await act({ ok: true, kind: "subscription", sub: { action: "edit", name: "Netflix", newName: null, amount: null, dueDay: 31 } });
+check(
+  "the 31st never spills into the next month",
+  (await unpaidDue()).every((row) => {
+    const [period, date] = row.split("|");
+    const [y, m] = period.split("-").map(Number);
+    return date === `${period}-${String(Math.min(31, new Date(y, m, 0).getDate())).padStart(2, "0")}`;
+  }),
+  true
+);
+await act({ ok: true, kind: "subscription", sub: { action: "edit", name: "Netflix", newName: null, amount: null, dueDay: 20 } });
+
+// What has been paid is history: its date is not rewritten.
+await act({ ok: true, kind: "subscription", sub: { action: "mark_paid", name: "Netflix" } });
+const paidDue = async () =>
+  (await c.execute({
+    sql: "SELECT due_date FROM subscription_payments WHERE subscription_id = ? AND paid_at IS NOT NULL",
+    args: [netflixId],
+  })).rows.map((r) => r.due_date as string);
+const paidBefore = await paidDue();
+await act({ ok: true, kind: "subscription", sub: { action: "edit", name: "Netflix", newName: null, amount: null, dueDay: 5 } });
+check("a month already paid keeps the date it was due", await paidDue(), paidBefore);
+check("while the unpaid one follows the new day", (await unpaidDue()).every((row) => row.endsWith("-05")), true);
+await act({ ok: true, kind: "subscription", sub: { action: "edit", name: "Netflix", newName: null, amount: 1800, dueDay: 20 } });
+
 const paymentsBeforeDelete = (await payments()).rows.length;
 reply = await act({ ok: true, kind: "subscription", sub: { action: "delete", name: "Netflix" } });
 check("subscription deleted", [reply.startsWith("*Subscription deleted*"), await count("SELECT COUNT(*) AS n FROM subscriptions WHERE id = ?", [netflixId]), (await payments()).rows.length], [true, 0, 0]);

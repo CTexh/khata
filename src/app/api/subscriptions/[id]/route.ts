@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { db, deleteSubscription, ensureTablesExist } from "@/lib/db";
+import { db, deleteSubscription, ensureTablesExist, realignUnpaidDueDates } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +48,8 @@ export async function PATCH(
     sql: "UPDATE subscriptions SET name = ?, amount = ?, due_day = ?, logo_url = ?, active = ? WHERE id = ?",
     args: [name, amount, due_day, logo_url, active ? 1 : 0, id],
   });
+  // The months not yet paid move with the rule; the paid ones keep their dates.
+  if (due_day !== Number(r.due_day)) await realignUnpaidDueDates(id, due_day);
 
   return NextResponse.json({ success: true });
 }
