@@ -24,7 +24,10 @@ turned up and the question is why.
 
 ## Setup, once
 
-Khata needs read-only access to the mailbox. Three environment variables:
+Khata needs read-only access to the mailbox the banks write to -
+walliullah28@gmail.com, where Bank Al Habib, Allied Bank and Meezan all deliver.
+The Google Cloud project and the account that authorises it are that same
+account. Three environment variables:
 `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`. Without them
 the import reports "not configured" and the rest of the cron keeps working.
 
@@ -33,13 +36,21 @@ the import reports "not configured" and the rest of the cron keeps working.
 2. **Switch on the Gmail API.** APIs & Services > Library > Gmail API >
    Enable.
 3. **The consent screen.** APIs & Services > OAuth consent screen. User type
-   *External*; fill in the app name and your own email. Under *Audience*, add
-   your own Google account as a test user. It never needs verifying or
-   publishing - a test user's access is enough, and the refresh token does not
-   expire while the account is listed there.
-4. **A client.** Credentials > Create credentials > OAuth client ID > type
+   *External*; fill in the app name and your own email.
+4. **Publish it.** On the *Audience* page, press **Publish app**. This matters:
+   an app left in *Testing* is issued refresh tokens that expire after seven
+   days, so the import would stop every week. Published, the token lasts until
+   it is revoked or goes six months unused.
+
+   Publishing does not mean submitting for verification, and it should not be
+   submitted. An unverified app shows "Google hasn't verified this app" when
+   authorising - press *Advanced*, then *Go to ...* - and is capped at 100
+   accounts for its lifetime, which is no constraint for one mailbox. Removing
+   that warning would need Google's review and, because `gmail.readonly` is a
+   restricted scope, a security assessment.
+5. **A client.** Credentials > Create credentials > OAuth client ID > type
    **Desktop app**. Copy the client ID and secret.
-5. **Mint the refresh token** on your own machine:
+6. **Mint the refresh token** on your own machine:
 
    ```bash
    GMAIL_CLIENT_ID=... GMAIL_CLIENT_SECRET=... node scripts/gmail-authorize.mjs
@@ -48,7 +59,7 @@ the import reports "not configured" and the rest of the cron keeps working.
    It prints a link. Approve it in the browser (Google warns that the app is
    unverified - it is your own), and the refresh token is printed in the
    terminal.
-6. **Put all three in Vercel**, Production, then redeploy. The next cron call
+7. **Put all three in Vercel**, Production, then redeploy. The next cron call
    imports.
 
 The scope is `gmail.readonly`: Khata can read mail and nothing else - it cannot
