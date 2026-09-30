@@ -67,30 +67,6 @@ async function markSchema(name: string, version: string): Promise<void> {
   (await loadMeta()).set(name, version);
 }
 
-/* ---------- a note the server leaves itself ---------- */
-
-// app_meta also holds a few values that are not schema versions: where the
-// Gmail import last read up to, so far. Read straight from the table rather
-// than from the schema cache above, which is loaded once per instance and
-// would hand back a stale bookmark to every later run.
-export async function readAppMeta(key: string): Promise<string | null> {
-  const c = db();
-  try {
-    const rs = await c.execute({ sql: "SELECT value FROM app_meta WHERE key = ?", args: [key] });
-    return (rs.rows[0]?.value as string | undefined) ?? null;
-  } catch {
-    await c.execute("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-    return null;
-  }
-}
-
-export async function writeAppMeta(key: string, value: string): Promise<void> {
-  await db().execute({
-    sql: "INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    args: [key, value],
-  });
-}
-
 // Date bounds for a month ("2026-09" up to "2026-10") or a year ("2026" up to
 // "2027"). Compared as strings they select the same rows as LIKE '2026-09%',
 // but let SQLite use the (user_id, expense_date) index for the whole range
