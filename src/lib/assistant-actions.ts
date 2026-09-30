@@ -1000,7 +1000,7 @@ Assistant (admins, and accounts an admin has given assistant access in Admin): a
 
 Accounts and security: sign up with a username and password, or an admin creates the account. After 10 wrong passwords an account is locked for 15 minutes. Admins can create users, reset passwords, turn assistant access on or off for each account, delete users and read assistant feedback. Data shown in the app is kept on the device for speed and cleared on logout. New accounts see a short welcome tour once, on first open.
 
-Not available: budgets outside trips, multiple currencies, bank syncing inside the app, accounts shared with other people (trip members are names you type, not Khata users), exporting Udhar Khata, recurring expenses other than subscriptions.`;
+Not available: budgets outside trips, multiple currencies, connecting a bank account directly (expenses are read from the bank's alert emails instead), accounts shared with other people (trip members are names you type, not Khata users), exporting Udhar Khata, recurring expenses other than subscriptions.`;
 
 const HELP_INSTRUCTIONS = [
   "You answer questions about using the Khata app, using only the guide below.",

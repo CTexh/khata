@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import {
   ensureMonthlySubscriptionsExpense,
   ensureTablesExist,
@@ -10,6 +10,7 @@ import { EVENING_HOUR, sendAnythingDue } from "@/lib/reminder-run";
 import { pushConfigured } from "@/lib/push";
 import { deliverPending } from "@/lib/notify";
 import { addDays, pakistanMinutes, pakistanToday } from "@/lib/expense-parse";
+import { syncGmailExpenses, type SyncSummary } from "@/lib/gmail-sync";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -28,7 +29,13 @@ export const maxDuration = 60;
 //
 // Guarded by CRON_SECRET; the route is excluded from the session check in
 // proxy.ts, as a scheduled caller has no session.
+// Room to leave for the Gmail import at the end of a run. Reminders come
+// first: they are what somebody is waiting for at a particular minute, and the
+// import loses nothing by being a quarter of an hour late.
+const GMAIL_BUDGET_MS = 35_000;
+
 export async function GET(req: Request) {
+  const started = Date.now();
   const auth = req.headers.get("authorization");
   if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -79,8 +86,32 @@ export async function GET(req: Request) {
     errors.push(`outbox: ${(err as Error).message.slice(0, 200)}`);
   }
 
+  // Bank alert emails, turned into expenses. Skipped when this call has
+  // already used most of its time - the next one is fifteen minutes away and
+  // picks up exactly where this would have.
+  let gmail: SyncSummary | { state: "not run" } = { state: "not run" };
+  if (Date.now() - started < GMAIL_BUDGET_MS) {
+    try {
+      const run = await syncGmailExpenses();
+      gmail = run.summary;
+      after(run.notify);
+      if (!gmail.ok) errors.push(`gmail: ${gmail.error ?? "failed"}`);
+    } catch (err) {
+      errors.push(`gmail: ${(err as Error).message.slice(0, 200)}`);
+    }
+  }
+
   if (errors.length) console.error(JSON.stringify({ evt: "cron_run", errors }));
-  else if (notified || added || outbox.delivered || outbox.expired)
-    console.log(JSON.stringify({ evt: "cron_run", today, notified, added, outbox }));
-  return NextResponse.json({ ok: true, today, notified, added, outbox, pushConfigured: pushConfigured(), errors });
+  else if (notified || added || outbox.delivered || outbox.expired || gmail.state === "imported")
+    console.log(JSON.stringify({ evt: "cron_run", today, notified, added, outbox, gmail }));
+  return NextResponse.json({
+    ok: true,
+    today,
+    notified,
+    added,
+    outbox,
+    gmail,
+    pushConfigured: pushConfigured(),
+    errors,
+  });
 }
