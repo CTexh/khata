@@ -16,6 +16,12 @@ export const THEME_KEY = "khata-theme";
 export const VELVET_BAR = "#110c22";
 export const VELVET_BAR_ID = "velvet-theme-color";
 
+// Velvet is finished but switched off: taken out of the picker and the
+// gallery, and a device that already chose it falls back to System. The code
+// behind it - app/velvet.css, lib/velvet-motion.ts, components/VelvetMotion -
+// is untouched, so turning it back on later is this one line.
+const VELVET_ENABLED = false;
+
 export type ThemeInfo = {
   value: ThemeChoice;
   label: string;
@@ -24,17 +30,22 @@ export type ThemeInfo = {
   tag?: string;
 };
 
-export const THEMES: ThemeInfo[] = [
+const ALL_THEMES: ThemeInfo[] = [
   { value: "light", label: "Light", tagline: "Bright and clear" },
   { value: "dark", label: "Dark", tagline: "Easy on the eyes at night" },
   { value: "system", label: "System", tagline: "Follows your phone" },
   { value: "velvet", label: "Velvet", tagline: "Clay and glass in plum and gold", tag: "3D" },
 ];
 
+export const THEMES: ThemeInfo[] = VELVET_ENABLED ? ALL_THEMES : ALL_THEMES.filter((t) => t.value !== "velvet");
+
 // What a stored value means. Anything else - nothing saved, a value written by
-// some later version, storage that could not be read - follows the phone.
+// some later version, storage that could not be read, or a theme switched off
+// since it was chosen - follows the phone.
 export function parseTheme(saved: string | null | undefined): ThemeChoice {
-  return saved === "light" || saved === "dark" || saved === "velvet" ? saved : "system";
+  if (saved === "light" || saved === "dark") return saved;
+  if (saved === "velvet" && VELVET_ENABLED) return "velvet";
+  return "system";
 }
 
 // How far a circle growing from (x, y) has to reach to cover the whole screen:
@@ -51,8 +62,12 @@ export function revealRadius(x: number, y: number, width: number, height: number
 // The status bar colour for Velvet is a meta tag of its own, put first so it
 // wins over the page's light and dark ones. Those belong to Next and are left
 // untouched; this one belongs to no one else, so it can come and go freely.
+const THEME_INIT_VALUES = VELVET_ENABLED ? '"light"||t==="dark"||t==="velvet"' : '"light"||t==="dark"';
+const THEME_INIT_VELVET_METADATA = VELVET_ENABLED
+  ? `if(t==="velvet"){var m=document.createElement("meta");m.name="theme-color";` +
+    `m.content=${JSON.stringify(VELVET_BAR)};m.id=${JSON.stringify(VELVET_BAR_ID)};document.head.prepend(m)}`
+  : "";
 export const THEME_INIT_SCRIPT =
   `try{var t=localStorage.getItem(${JSON.stringify(THEME_KEY)});` +
-  `if(t==="light"||t==="dark"||t==="velvet"){var d=document.documentElement;d.dataset.theme=t;` +
-  `if(t==="velvet"){var m=document.createElement("meta");m.name="theme-color";` +
-  `m.content=${JSON.stringify(VELVET_BAR)};m.id=${JSON.stringify(VELVET_BAR_ID)};document.head.prepend(m)}}}catch(e){}`;
+  `if(t===${THEME_INIT_VALUES}){var d=document.documentElement;d.dataset.theme=t;` +
+  `${THEME_INIT_VELVET_METADATA}}}catch(e){}`;

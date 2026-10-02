@@ -5,8 +5,6 @@ import {
   THEMES,
   THEME_INIT_SCRIPT,
   THEME_KEY,
-  VELVET_BAR,
-  VELVET_BAR_ID,
   parseTheme,
   revealRadius,
 } from "../src/lib/themes.ts";
@@ -26,15 +24,15 @@ function check(label: string, got: unknown, want: unknown) {
 
 /* ---------- which themes there are ---------- */
 
-check("four themes, in the order they are offered", THEMES.map((t) => t.value), ["light", "dark", "system", "velvet"]);
+check("three themes offered while Velvet is switched off", THEMES.map((t) => t.value), ["light", "dark", "system"]);
 check("every name is different", new Set(THEMES.map((t) => t.label)).size, THEMES.length);
-check("only Velvet carries a tag", THEMES.filter((t) => t.tag).map((t) => t.value), ["velvet"]);
+check("nothing carries a tag while Velvet is off", THEMES.filter((t) => t.tag).map((t) => t.value), []);
 
 /* ---------- reading what was saved ---------- */
 
 check("light", parseTheme("light"), "light");
 check("dark", parseTheme("dark"), "dark");
-check("velvet", parseTheme("velvet"), "velvet");
+check("velvet falls back to system while switched off", parseTheme("velvet"), "system");
 check("nothing saved follows the phone", parseTheme(null), "system");
 check("nor does a missing value", parseTheme(undefined), "system");
 // System is never stored: choosing it removes the saved value.
@@ -63,17 +61,14 @@ function runInit(stored: string | null, storageThrows = false) {
   return { theme: dataset.theme ?? null, head };
 }
 
-for (const t of ["light", "dark", "velvet"]) {
+for (const t of ["light", "dark"]) {
   check(`a saved ${t} is on the first frame`, runInit(t).theme, t);
 }
 check("nothing saved leaves the phone in charge", runInit(null).theme, null);
 check("something unknown is ignored", runInit("midnight").theme, null);
 check("storage that refuses to be read is not an error", runInit(null, true), { theme: null, head: [] });
-check(
-  "Velvet colours the status bar, first in line",
-  runInit("velvet").head,
-  [{ name: "theme-color", content: VELVET_BAR, id: VELVET_BAR_ID }]
-);
+check("a stored velvet is ignored while the theme is switched off", runInit("velvet").theme, null);
+check("and colours no status bar", runInit("velvet").head, []);
 check("Light leaves the status bar to the page", runInit("light").head, []);
 check("so does Dark", runInit("dark").head, []);
 // The script and the parser must agree on what a theme is.

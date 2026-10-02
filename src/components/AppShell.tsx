@@ -123,7 +123,7 @@ function SettingsModal({
           <div>
             <p className="text-[15px] font-bold">Appearance</p>
             <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
-              System follows your phone&apos;s light or dark setting. Velvet is the 3D one, in clay and glass.
+              System follows your phone&apos;s light or dark setting.
             </p>
           </div>
           <ThemePicker />
