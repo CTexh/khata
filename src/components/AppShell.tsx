@@ -10,6 +10,7 @@ import { Avatar } from "@/components/Avatar";
 import { Sheet } from "@/components/Sheet";
 
 import { NotificationBell } from "@/components/NotificationBell";
+import { VelvetMotion } from "@/components/VelvetMotion";
 import { clearCache, primeFrom, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
 import { sameDayBefore } from "@/lib/compare-period";
@@ -23,6 +24,7 @@ import {
   GearIcon,
   ShieldIcon,
   LogOutIcon,
+  PaletteIcon,
 } from "@/components/icons";
 
 // None of this is reachable without opening the avatar menu, and together it
@@ -30,6 +32,7 @@ import {
 // surface, including the Siri setup guide, downloaded by people who never
 // open it. Fetched when it is actually needed instead.
 const ThemePicker = dynamic(() => import("@/components/Theme").then((m) => m.ThemePicker));
+const ThemesSheet = dynamic(() => import("@/components/Theme").then((m) => m.ThemesSheet));
 const NotificationSettings = dynamic(() =>
   import("@/components/NotificationSettings").then((m) => m.NotificationSettings)
 );
@@ -120,7 +123,7 @@ function SettingsModal({
           <div>
             <p className="text-[15px] font-bold">Appearance</p>
             <p className="text-[13px] mt-0.5" style={{ color: "var(--muted)" }}>
-              System follows your phone&apos;s light or dark setting.
+              System follows your phone&apos;s light or dark setting. Velvet is the 3D one, in clay and glass.
             </p>
           </div>
           <ThemePicker />
@@ -244,7 +247,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: me, refresh: refreshMe } = useCached<{ user: CurrentUser | null }>("/api/auth/me");
   const user = me?.user ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState<false | "settings" | "notifications">(false);
+  const [profileOpen, setProfileOpen] = useState<false | "settings" | "notifications" | "themes">(false);
 
   // Escape closes the account menu, as it closes everything else here.
   useEffect(() => {
@@ -409,6 +412,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         Settings
                       </button>
 
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="account-menu-item"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setProfileOpen("themes");
+                        }}
+                      >
+                        <span className="account-menu-icon" aria-hidden>
+                          <PaletteIcon size={20} />
+                        </span>
+                        Themes
+                      </button>
+
                       {user.isAdmin && (
                         <Link
                           href="/admin"
@@ -491,6 +509,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </nav>
       )}
 
+      {/* Velvet's depth: starts and stops itself with the theme. */}
+      <VelvetMotion />
+
       {tourOpen && user && <WelcomeTour withAssistant={Boolean(user.aiAccess)} onClose={closeTour} />}
 
       {newsOpen && user && !tourOpen && (
@@ -503,7 +524,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      {profileOpen && (
+      {profileOpen === "themes" && <ThemesSheet onClose={closeProfile} />}
+
+      {(profileOpen === "settings" || profileOpen === "notifications") && (
         <SettingsModal
           initialName={user?.name ?? ""}
           startOnNotifications={profileOpen === "notifications"}

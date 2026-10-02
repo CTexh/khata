@@ -128,3 +128,17 @@ export function RepeatIcon({ size = 24, className }: IconProps) {
     </svg>
   );
 }
+
+export function PaletteIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>
+      <path
+        {...base}
+        d="M12 3.5a8.5 8.5 0 0 0 0 17c1.05 0 1.75-.78 1.75-1.68 0-.45-.17-.86-.47-1.18-.29-.31-.46-.7-.46-1.15 0-.93.76-1.69 1.7-1.69h2.02a3.96 3.96 0 0 0 3.96-3.96C20.5 6.96 16.7 3.5 12 3.5z"
+      />
+      <circle cx="7.4" cy="11.2" r="1.15" fill="currentColor" />
+      <circle cx="9.9" cy="7.5" r="1.15" fill="currentColor" />
+      <circle cx="14.4" cy="7.4" r="1.15" fill="currentColor" />
+    </svg>
+  );
+}

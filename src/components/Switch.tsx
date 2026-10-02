@@ -28,7 +28,7 @@ export function Switch({
       </span>
       <input
         type="checkbox"
-        className="h-6 w-6 mt-0.5 shrink-0 accent-[var(--accent)] cursor-pointer"
+        className="switch-input h-6 w-6 mt-0.5 shrink-0 accent-[var(--accent)] cursor-pointer"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}

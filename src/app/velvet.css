@@ -1,0 +1,805 @@
+/* ==========================================================================
+   Velvet: the one theme with depth.
+
+   Plum clay and champagne gold, with a little glass. Every surface is made of
+   the same material - a rim of light along its top edge, a soft glow inside
+   that, a shade gathering in the far corner and a shadow under it - so raised
+   things look raised and pressed-in things look pressed in. Glass is kept to
+   what floats over the page: the tab bar and the menus that drop from the
+   header. Everything else is solid, which is what keeps it cheap.
+
+   How it moves, and why it stays smooth:
+   - Only transform and opacity ever animate. No shadow, blur, colour or size
+     is animated anywhere, so every frame is composited and nothing is laid
+     out or repainted while it moves.
+   - Nothing that contains a fixed element is ever transformed. A transform
+     makes an element the containing block for everything fixed inside it -
+     the bug that once unpinned the assistant's composer. The surfaces that
+     tilt here (summary panels, cards that open something) hold nothing fixed.
+   - Nothing that arrives with a page is faded in. Content that starts faint
+     reads as a blink, as it did once; cards here move and are fully drawn
+     throughout.
+   - Reduce Motion turns all of it off: the global rule in globals.css ends
+     every animation, and lib/velvet-motion.ts never starts.
+
+   Every rule is scoped to :root[data-theme="velvet"], so nothing here can
+   reach Light, Dark or System. The specificity also beats the base rules it
+   restyles regardless of which stylesheet loads first.
+   ========================================================================== */
+
+/* ---------- palette ---------- */
+:root[data-theme="velvet"] {
+  color-scheme: dark;
+
+  /* The night the app sits in, and what is made from it. */
+  --page: #110c22;
+  --surface: #221a40;
+  --surface-2: #2b2250;
+  --field-bg: #170f30;
+  --ink: #f6f2ff;
+  --ink-2: #ddd4f7;
+  --muted: #ab9fd0;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --ring: rgba(255, 255, 255, 0.06);
+
+  /* Gold for every action, violet for the assistant. Checked against the
+     surfaces they sit on: every pairing used here clears WCAG AA. */
+  --accent: #f3cd7d;
+  --accent-2: #d99a4c;
+  --accent-soft: rgba(243, 205, 125, 0.14);
+  --on-accent: #1c1233;
+  --good: #6fe3b4;
+  --good-2: #2fb98a;
+  --good-soft: rgba(111, 227, 180, 0.14);
+  --bad: #ff8396;
+  --bad-soft: rgba(255, 131, 150, 0.14);
+  --warn: #f7bf5e;
+  --warn-soft: rgba(247, 191, 94, 0.16);
+  --hero-1: #43308c;
+  --hero-2: #1b1342;
+  --tabbar: rgba(32, 24, 62, 0.64);
+  --inset-hl: rgba(255, 255, 255, 0.09);
+
+  /* The clay. --glass-shadow is the name every surface in the app already
+     takes its shadow from, so cards, lists and buttons that use it become
+     clay without a rule of their own. */
+  --glass-shadow:
+    0 22px 40px -22px rgba(3, 0, 14, 0.95),
+    0 6px 14px -8px rgba(3, 0, 14, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 16px 26px -18px rgba(255, 255, 255, 0.11),
+    inset -10px -14px 24px -14px rgba(3, 0, 14, 0.6);
+  --v-clay: linear-gradient(162deg, #2a2151 0%, #221a40 52%, #1c1538 100%);
+  --v-clay-raised: linear-gradient(180deg, #31285c 0%, #251d47 100%);
+  --v-clay-sm:
+    0 10px 18px -12px rgba(3, 0, 14, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 8px 14px -10px rgba(255, 255, 255, 0.12),
+    inset -4px -6px 12px -8px rgba(3, 0, 14, 0.55);
+  /* Pressed in: a field, a track, the groove a switch slides in. */
+  --v-well: inset 0 2px 7px rgba(3, 0, 14, 0.55), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  /* Gold, as a raised pill. */
+  --v-gold: linear-gradient(180deg, #fae3ad 0%, #f1c46f 46%, #d99a4c 100%);
+  --v-gold-shadow:
+    0 12px 22px -12px rgba(217, 154, 76, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -5px 10px -3px rgba(140, 82, 18, 0.45);
+  /* Glass, for what floats over the page. Tinted enough to stay readable on
+     its own: Safari has been known to drop a backdrop blur for a frame while
+     the element holding it fades in, and text over unblurred cards must not
+     turn to soup when it does. */
+  --v-glass: rgba(32, 24, 62, 0.74);
+  --v-glass-edge: rgba(255, 255, 255, 0.11);
+  --v-blur: blur(24px) saturate(175%);
+
+  /* Categories: the dark set, which was made for surfaces this deep. */
+  --cat-default-bg: #3a3f46;         --cat-default-fg: #c9cdd6;
+  --cat-uncategorised-bg: #7c2d12;   --cat-uncategorised-fg: #fdba74;
+  --cat-family-bg: #7a2e58;          --cat-family-fg: #f9a8d4;
+  --cat-donations-bg: #78350f;       --cat-donations-fg: #fcd34d;
+  --cat-groceries-bg: #14532d;       --cat-groceries-fg: #86efac;
+  --cat-food-dining-bg: #78502a;     --cat-food-dining-fg: #fde68a;
+  --cat-car-bg: #1e3a8a;             --cat-car-fg: #93c5fd;
+  --cat-tech-bg: #075985;            --cat-tech-fg: #7dd3fc;
+  --cat-shopping-bg: #881337;        --cat-shopping-fg: #fda4af;
+  --cat-personal-care-bg: #581c87;   --cat-personal-care-fg: #d8b4fe;
+  --cat-entertainment-bg: #701a75;   --cat-entertainment-fg: #f5d0fe;
+  --cat-medical-bg: #7f1d1d;         --cat-medical-fg: #fca5a5;
+  --cat-subscriptions-bg: #312e81;   --cat-subscriptions-fg: #a5b4fc;
+  --cat-investment-bg: #064e3b;      --cat-investment-fg: #6ee7b7;
+  --cat-rent-bg: #4c1d95;            --cat-rent-fg: #c4b5fd;
+  --cat-bills-utilities-bg: #134e4a; --cat-bills-utilities-fg: #5eead4;
+}
+
+:root[data-theme="velvet"] ::selection {
+  background: rgba(243, 205, 125, 0.32);
+}
+
+/* ---------- the scene behind everything ---------- */
+/* Three lit spheres in a deep room - violet far off, orchid nearer, gold
+   nearest - all out of focus behind the app. They drift on long loops, and
+   the gold one also swells and shrinks as it moves, which is what reads as
+   coming toward you and going away. Where the browser
+   can tie animation to scrolling, each moves at its own pace as the page
+   scrolls - the far one least - which is the parallax that gives the room its
+   depth.
+
+   The body's own background is taken away so the scene shows; the html
+   element behind it keeps the page colour, so the overscroll at the edges is
+   the same night. */
+.velvet-scene {
+  display: none;
+}
+:root[data-theme="velvet"] body {
+  background: transparent;
+}
+:root[data-theme="velvet"] .velvet-scene {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(110% 70% at 50% -12%, #2b1d5c 0%, rgba(43, 29, 92, 0) 62%),
+    radial-gradient(80% 60% at 110% 105%, #251348 0%, rgba(37, 19, 72, 0) 70%),
+    var(--page);
+}
+:root[data-theme="velvet"] .velvet-scene i {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  will-change: transform;
+}
+/* Far: violet, soft at the edge. */
+:root[data-theme="velvet"] .velvet-scene i:nth-child(1) {
+  width: 78vmax;
+  height: 78vmax;
+  top: -34vmax;
+  right: -30vmax;
+  background: radial-gradient(
+    circle at 36% 32%,
+    rgba(186, 168, 255, 0.5) 0%,
+    rgba(123, 92, 255, 0.38) 22%,
+    rgba(76, 46, 201, 0.26) 46%,
+    rgba(42, 24, 115, 0.1) 64%,
+    rgba(42, 24, 115, 0) 72%
+  );
+  animation: velvet-drift-far 46s ease-in-out infinite alternate;
+}
+/* Nearer: orchid. */
+:root[data-theme="velvet"] .velvet-scene i:nth-child(2) {
+  width: 64vmax;
+  height: 64vmax;
+  bottom: -30vmax;
+  left: -28vmax;
+  background: radial-gradient(
+    circle at 40% 34%,
+    rgba(255, 150, 214, 0.3) 0%,
+    rgba(214, 92, 186, 0.22) 26%,
+    rgba(120, 40, 140, 0.12) 50%,
+    rgba(120, 40, 140, 0) 70%
+  );
+  animation: velvet-drift-mid 58s ease-in-out infinite alternate;
+}
+/* Nearest: gold, lit from the top left like everything else. Soft-edged
+   like the others - a hard-edged sphere showing between opaque cards reads as
+   something left behind on the page, not as an object in the room. */
+:root[data-theme="velvet"] .velvet-scene i:nth-child(3) {
+  width: 36vmax;
+  height: 36vmax;
+  top: 46%;
+  right: -6vmax;
+  background: radial-gradient(
+    circle at 36% 32%,
+    rgba(255, 236, 190, 0.34) 0%,
+    rgba(232, 178, 96, 0.22) 24%,
+    rgba(160, 100, 40, 0.1) 48%,
+    rgba(160, 100, 40, 0) 68%
+  );
+  animation: velvet-drift-near 34s ease-in-out infinite alternate;
+}
+/* A fine grain over the room, so the gradients read as a lit surface and not
+   as banding. Drawn once and never animated. */
+:root[data-theme="velvet"] .velvet-scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@keyframes velvet-drift-far {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(-8vmax, 10vmax, 0) scale(1.08);
+  }
+}
+@keyframes velvet-drift-mid {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  to {
+    transform: translate3d(10vmax, -8vmax, 0) scale(0.95);
+  }
+}
+@keyframes velvet-drift-near {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-24vw, -18vh, 0) scale(0.8);
+  }
+  100% {
+    transform: translate3d(-58vw, 6vh, 0) scale(1.12);
+  }
+}
+/* Scroll parallax, on the separate translate property so it adds to the drift
+   above instead of replacing it. Browsers without scroll-linked animation
+   simply leave the spheres drifting. */
+@supports (animation-timeline: scroll()) {
+  :root[data-theme="velvet"] .velvet-scene i:nth-child(1) {
+    animation: velvet-drift-far 46s ease-in-out infinite alternate, velvet-depth-far linear both;
+    animation-timeline: auto, scroll(root);
+  }
+  :root[data-theme="velvet"] .velvet-scene i:nth-child(2) {
+    animation: velvet-drift-mid 58s ease-in-out infinite alternate, velvet-depth-mid linear both;
+    animation-timeline: auto, scroll(root);
+  }
+  :root[data-theme="velvet"] .velvet-scene i:nth-child(3) {
+    animation: velvet-drift-near 34s ease-in-out infinite alternate, velvet-depth-near linear both;
+    animation-timeline: auto, scroll(root);
+  }
+}
+@keyframes velvet-depth-far {
+  to {
+    translate: 0 -6vh;
+  }
+}
+@keyframes velvet-depth-mid {
+  to {
+    translate: 0 -14vh;
+  }
+}
+@keyframes velvet-depth-near {
+  to {
+    translate: 0 -30vh;
+  }
+}
+
+/* ---------- surfaces ---------- */
+:root[data-theme="velvet"] .card {
+  background: var(--v-clay);
+  border-color: rgba(255, 255, 255, 0.05);
+  border-radius: 26px;
+}
+/* A card of rows stays one flat colour: each row in it is opaque - it has to
+   be, to hide the delete button behind it until it is swiped - and a gradient
+   behind opaque rows shows as stripes. The clay is in its edges instead. */
+:root[data-theme="velvet"] .list-card {
+  background: var(--surface);
+  border-color: rgba(255, 255, 255, 0.05);
+  border-radius: 26px;
+}
+:root[data-theme="velvet"] .list-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+/* Inside a raised card, a tile is pressed into it. */
+:root[data-theme="velvet"] .tile {
+  background: rgba(8, 4, 22, 0.32);
+  border-color: rgba(255, 255, 255, 0.05);
+  box-shadow: var(--v-well);
+}
+/* The rounded square behind a category emoji: a small clay button. Its colour
+   is the category's, set on the element itself; only the light is added. */
+:root[data-theme="velvet"] .icon-tile {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 10px 14px -10px rgba(255, 255, 255, 0.22),
+    inset -3px -5px 10px -5px rgba(3, 0, 14, 0.45),
+    0 8px 14px -10px rgba(3, 0, 14, 0.8);
+}
+:root[data-theme="velvet"] .skeleton {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ---------- the summary panel at the top of every section ---------- */
+/* The deepest piece of clay in the app, and the one that moves most. It leans
+   toward a mouse and gives under a finger (lib/velvet-motion.ts writes --rx,
+   --ry and --press), a soft light follows the pointer across it, the amount
+   floats above it, and every few seconds a highlight slides over it the way
+   light catches a glazed surface as it turns. */
+:root[data-theme="velvet"] .hero-panel {
+  background:
+    radial-gradient(130% 90% at 0% 0%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 46%),
+    linear-gradient(152deg, #4a35a0 0%, #33247a 38%, #22185a 70%, #170f3d 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 30px;
+  box-shadow:
+    0 34px 60px -28px rgba(6, 1, 24, 1),
+    0 14px 34px -14px rgba(91, 63, 224, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 22px 34px -22px rgba(255, 255, 255, 0.16),
+    inset -14px -20px 36px -18px rgba(5, 1, 20, 0.6);
+  /* Keeps the moving highlight clipped to the rounded corners in Safari,
+     which otherwise lets a composited child spill past them. */
+  isolation: isolate;
+}
+/* The light that follows the pointer. At rest it is where the glow always
+   was, in the top corner. */
+:root[data-theme="velvet"] .hero-panel::after {
+  background: radial-gradient(closest-side, rgba(243, 205, 125, 0.2), rgba(143, 123, 255, 0.16) 55%, transparent);
+  transform: translate3d(var(--glx, 0px), var(--gly, 0px), 0);
+  transition: transform 700ms var(--ease-press);
+}
+/* The highlight that slides across. */
+:root[data-theme="velvet"] .hero-panel::before {
+  content: "";
+  position: absolute;
+  inset: -40% -80%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 42%,
+    rgba(255, 255, 255, 0.06) 47%,
+    rgba(255, 244, 220, 0.13) 50%,
+    rgba(255, 255, 255, 0.05) 53%,
+    transparent 58%
+  );
+  transform: translate3d(-45%, 0, 0);
+  animation: velvet-sheen 9s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+@keyframes velvet-sheen {
+  0%,
+  64% {
+    transform: translate3d(-45%, 0, 0);
+  }
+  100% {
+    transform: translate3d(45%, 0, 0);
+  }
+}
+/* The amount: ivory, standing up off the clay, with the currency in gold. */
+:root[data-theme="velvet"] .hero-panel .tabular > .leading-none {
+  color: #fffaf0;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.3),
+    0 2px 1px rgba(16, 6, 46, 0.5),
+    0 12px 26px rgba(5, 1, 20, 0.55);
+}
+:root[data-theme="velvet"] .hero-panel .tabular > .hero-muted {
+  color: var(--accent);
+}
+:root[data-theme="velvet"] .hero-panel .tabular {
+  transform: translate3d(var(--px, 0px), var(--py, 0px), 0);
+  transition: transform 640ms var(--ease-press);
+}
+
+/* ---------- leaning and pressing ---------- */
+/* What tilts. The custom properties are written by lib/velvet-motion.ts on
+   the one surface under the pointer; everywhere else they are unset and the
+   transform is the identity. Following the pointer is quick, coming back is
+   the app's own press spring, so a surface let go settles with a little give. */
+:root[data-theme="velvet"] :is(.hero-panel, a.card, .theme-card) {
+  transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--press, 1));
+  transition: transform 640ms var(--ease-press);
+}
+:root[data-theme="velvet"] :is(.hero-panel, a.card, .theme-card)[data-tilting],
+:root[data-theme="velvet"] .hero-panel[data-tilting] :is(.tabular),
+:root[data-theme="velvet"] .hero-panel[data-tilting]::after {
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Clay gives under a finger: a press squashes it a little wider and shorter,
+   and the release springs it back past where it was before it settles - the
+   app's press curve already carries that overshoot. Nothing here is slower
+   than the press it answers. */
+:root[data-theme="velvet"] .btn:not(:disabled):active {
+  transform: scale(1.03, 0.93);
+}
+:root[data-theme="velvet"] :is(.segmented button, .cat-pill):active {
+  transform: scale(1.04, 0.92);
+}
+:root[data-theme="velvet"] .list-row:active {
+  transform: scale(0.985, 0.965);
+}
+:root[data-theme="velvet"] .tab:active {
+  transform: scale(0.94, 0.88);
+}
+:root[data-theme="velvet"] :is(.chat-round, .chat-send):not(:disabled):active {
+  transform: scale(1.08, 0.9);
+}
+:root[data-theme="velvet"] .tab-fab:active {
+  transform: scale(1.1, 0.88);
+}
+
+/* ---------- arriving ---------- */
+/* Cards stand up as a page arrives: each starts tipped back and a little low,
+   and rises to face you, one just after another. Fully drawn the whole time -
+   only the angle changes - so nothing ever looks like it is still loading. */
+:root[data-theme="velvet"] .rise {
+  animation: velvet-rise 480ms var(--ease-enter) backwards;
+}
+:root[data-theme="velvet"] .rise:nth-child(2) {
+  animation-delay: 35ms;
+}
+:root[data-theme="velvet"] .rise:nth-child(3) {
+  animation-delay: 70ms;
+}
+:root[data-theme="velvet"] .rise:nth-child(4) {
+  animation-delay: 105ms;
+}
+:root[data-theme="velvet"] .rise:nth-child(5) {
+  animation-delay: 140ms;
+}
+:root[data-theme="velvet"] .rise:nth-child(n + 6) {
+  animation-delay: 175ms;
+}
+@keyframes velvet-rise {
+  from {
+    transform: perspective(900px) translate3d(0, 18px, 0) rotateX(14deg) scale(0.97);
+  }
+  to {
+    transform: perspective(900px) translate3d(0, 0, 0) rotateX(0deg) scale(1);
+  }
+}
+
+/* ---------- controls ---------- */
+/* A segmented control is a groove; the chosen option is a gold pill in it. */
+:root[data-theme="velvet"] .segmented {
+  background: rgba(8, 4, 22, 0.42);
+  border-color: rgba(255, 255, 255, 0.05);
+  box-shadow: var(--v-well);
+}
+:root[data-theme="velvet"] .segmented button[aria-pressed="true"] {
+  background: var(--v-gold);
+  color: var(--on-accent);
+  box-shadow: var(--v-gold-shadow);
+}
+
+:root[data-theme="velvet"] .field {
+  background: var(--field-bg);
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow: var(--v-well);
+}
+:root[data-theme="velvet"] .field:focus {
+  border-color: rgba(243, 205, 125, 0.7);
+  box-shadow: var(--v-well), 0 0 0 4px var(--accent-soft);
+}
+
+/* Buttons: gold for the main action, clay for the rest, each lit the same way. */
+:root[data-theme="velvet"] .btn-primary {
+  background: var(--v-gold);
+  color: var(--on-accent);
+  box-shadow: var(--v-gold-shadow);
+}
+:root[data-theme="velvet"] .btn-ghost {
+  background: var(--v-clay-raised);
+  border-color: rgba(255, 255, 255, 0.07);
+  color: var(--ink-2);
+  box-shadow: var(--v-clay-sm);
+}
+:root[data-theme="velvet"] .btn-ghost:hover {
+  background: linear-gradient(180deg, #382e6a 0%, #2a2150 100%);
+}
+/* The coloured actions keep their colour and gain the clay's light. Where
+   white text on the base theme's lighter end fell short of AA, the text is
+   dark instead - the same way the gold ones are. */
+:root[data-theme="velvet"] .btn-good {
+  background: linear-gradient(180deg, #8ff3cb 0%, #49d3a0 48%, #24a97b 100%);
+  color: #052a1e;
+  box-shadow:
+    0 12px 22px -12px rgba(47, 185, 138, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -5px 10px -3px rgba(8, 90, 60, 0.45);
+}
+:root[data-theme="velvet"] .btn-expense {
+  background: linear-gradient(180deg, #ffd089 0%, #f6a94a 48%, #dd8128 100%);
+  color: #2b1500;
+  box-shadow:
+    0 12px 22px -12px rgba(221, 129, 40, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -5px 10px -3px rgba(120, 60, 0, 0.45);
+}
+:root[data-theme="velvet"] .btn-danger {
+  background: linear-gradient(180deg, #f2708a 0%, #d23d5d 50%, #a52646 100%);
+  box-shadow:
+    0 12px 22px -12px rgba(210, 61, 93, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -5px 10px -3px rgba(80, 0, 25, 0.45);
+}
+:root[data-theme="velvet"] .btn-admin {
+  background: linear-gradient(180deg, #a993ff 0%, #7a5cff 48%, #5b3fe0 100%);
+  box-shadow:
+    0 12px 22px -12px rgba(91, 63, 224, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -5px 10px -3px rgba(30, 10, 90, 0.45);
+}
+
+:root[data-theme="velvet"] :is(.pill-link, .cat-pill) {
+  background: var(--v-clay-raised);
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow: var(--v-clay-sm);
+}
+:root[data-theme="velvet"] .cat-pill[data-on] {
+  background: var(--v-gold);
+  border-color: transparent;
+  color: var(--on-accent);
+  box-shadow: var(--v-gold-shadow);
+}
+
+/* The on/off switch: a groove with a clay knob that slides along it, gold
+   when it is on. Drawn with backgrounds rather than pseudo-elements, which a
+   checkbox does not have in every browser. */
+:root[data-theme="velvet"] .switch-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 48px;
+  height: 28px;
+  margin-top: 0;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 40% 34%, #ffffff 0, #efeaff 3px, #c9bfea 8px, #9d92c6 10px, rgba(157, 146, 198, 0) 10.5px)
+      no-repeat 3px 3px / 22px 22px,
+    rgba(8, 4, 22, 0.55);
+  box-shadow: var(--v-well);
+  transition:
+    background-position var(--dur-press) var(--ease-press),
+    background-color var(--dur-quick) ease;
+}
+:root[data-theme="velvet"] .switch-input:checked {
+  background:
+    radial-gradient(circle at 40% 34%, #ffffff 0, #fffaf0 3px, #f6ead0 7px, #b98a45 10px, rgba(185, 138, 69, 0) 10.5px)
+      no-repeat 23px 3px / 22px 22px,
+    linear-gradient(180deg, #f6d68f 0%, #e3ad5e 55%, #c98a3e 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -3px 6px rgba(120, 70, 10, 0.35),
+    0 6px 14px -8px rgba(217, 154, 76, 0.8);
+}
+:root[data-theme="velvet"] .switch-input:disabled {
+  opacity: 0.5;
+}
+
+:root[data-theme="velvet"] .wordmark {
+  background: linear-gradient(100deg, #fae3ad 0%, #e9b866 45%, #b9a8ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* ---------- the tab bar: glass ---------- */
+/* Frosted over the room behind it - the spheres pass under it as soft colour.
+   The bar keeps its exact size and place; only its material changes. */
+:root[data-theme="velvet"] .tabbar {
+  background: var(--tabbar);
+  -webkit-backdrop-filter: var(--v-blur);
+  backdrop-filter: var(--v-blur);
+  border-color: var(--v-glass-edge);
+  box-shadow:
+    0 26px 50px -20px rgba(3, 0, 14, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -14px 26px -18px rgba(143, 123, 255, 0.4);
+}
+/* The tab you are on lifts out of the bar: its icon swings up from flat and
+   turns gold, with a gold bar beneath it. */
+:root[data-theme="velvet"] .tab[aria-current="page"] svg {
+  color: var(--accent);
+  filter: drop-shadow(0 3px 8px rgba(243, 205, 125, 0.45));
+  animation: velvet-tab-up 560ms var(--ease-enter) both;
+}
+:root[data-theme="velvet"] .tab[aria-current="page"]::after {
+  bottom: 0;
+  width: 16px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--v-gold);
+  box-shadow: 0 0 10px rgba(243, 205, 125, 0.7);
+}
+@keyframes velvet-tab-up {
+  from {
+    transform: perspective(240px) translate3d(0, 6px, 0) rotateX(70deg) scale(0.8);
+  }
+  to {
+    transform: perspective(240px) translate3d(0, 0, 0) rotateX(0deg) scale(1);
+  }
+}
+
+/* The assistant's button: a glass marble in violet, lit from the top left,
+   with a glint that travels slowly round it. */
+:root[data-theme="velvet"] .tab-fab {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: radial-gradient(circle at 32% 26%, #e4ddff 0%, #ab9bff 15%, #7a5cff 38%, #4f30d0 66%, #2c1a86 100%);
+  box-shadow:
+    0 0 0 6px rgba(17, 12, 34, 0.88),
+    0 18px 30px -10px rgba(91, 63, 224, 0.75),
+    inset 0 -8px 16px rgba(20, 6, 70, 0.45),
+    inset 0 2px 2px rgba(255, 255, 255, 0.35);
+}
+:root[data-theme="velvet"] .tab-fab::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 200deg,
+    rgba(255, 255, 255, 0) 0deg,
+    rgba(255, 255, 255, 0) 200deg,
+    rgba(255, 255, 255, 0.3) 245deg,
+    rgba(255, 255, 255, 0) 290deg
+  );
+  animation: spin 7s linear infinite;
+}
+:root[data-theme="velvet"] .tab-fab svg {
+  filter: drop-shadow(0 2px 4px rgba(20, 6, 70, 0.55));
+}
+
+/* ---------- glass that drops from the header ---------- */
+:root[data-theme="velvet"] :is(.account-menu, .bell-pop, .chat-menu) {
+  background: var(--v-glass);
+  -webkit-backdrop-filter: var(--v-blur);
+  backdrop-filter: var(--v-blur);
+  border-color: var(--v-glass-edge);
+  box-shadow:
+    0 34px 70px -24px rgba(3, 0, 14, 1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.13);
+}
+/* The caret is the same glass, so it reads as part of the panel. */
+:root[data-theme="velvet"] :is(.account-menu, .bell-pop)::before {
+  background: var(--v-glass);
+  -webkit-backdrop-filter: var(--v-blur);
+  backdrop-filter: var(--v-blur);
+  border-color: var(--v-glass-edge);
+}
+:root[data-theme="velvet"] :is(.account-menu-item, .chat-menu-item, .bell-pop-link):hover,
+:root[data-theme="velvet"] .account-menu-item:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+:root[data-theme="velvet"] :is(.account-menu-icon, .chat-menu-icon) {
+  background: var(--v-clay-raised);
+  box-shadow: var(--v-clay-sm);
+}
+:root[data-theme="velvet"] .account-menu-leave .account-menu-icon {
+  background: var(--bad-soft);
+}
+
+/* ---------- sheets and dialogs ---------- */
+:root[data-theme="velvet"] .sheet-backdrop {
+  background: rgba(6, 2, 18, 0.62);
+}
+:root[data-theme="velvet"] :is(.sheet-panel, .pop-panel) {
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(143, 123, 255, 0.14), rgba(143, 123, 255, 0) 60%),
+    linear-gradient(180deg, #221a43 0%, #18112f 46%, #130d27 100%);
+  box-shadow:
+    0 -24px 60px -12px rgba(3, 0, 14, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+:root[data-theme="velvet"] .pop-panel {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="velvet"] .sheet-grip {
+  background: rgba(255, 255, 255, 0.2);
+}
+/* A sheet rises standing up: it starts tipped back on its bottom edge and
+   straightens as it arrives, like a card lifted to face you.
+
+   The tilt is the separate rotate property, played only when a sheet first
+   appears (@starting-style), never a different animation. Giving the sheet
+   another animation-name under this theme restarted its entrance whenever the
+   theme changed with a sheet open - and the theme is chosen from one. The
+   slide itself is untouched, so dragging and closing are exactly as before.
+   The depth comes from the backdrop, which is fixed and full-screen, so it
+   holds nothing that its perspective could move. */
+:root[data-theme="velvet"] .sheet-backdrop {
+  perspective: 1400px;
+  perspective-origin: 50% 100%;
+}
+:root[data-theme="velvet"] :is(.sheet-panel, .pop-panel) {
+  rotate: x 0deg;
+  transition: rotate 520ms var(--ease-sheet);
+}
+:root[data-theme="velvet"] .sheet-panel {
+  transform-origin: 50% 100%;
+}
+@media (min-width: 640px) {
+  :root[data-theme="velvet"] .sheet-backdrop {
+    perspective-origin: 50% 50%;
+  }
+  :root[data-theme="velvet"] .sheet-panel {
+    transform-origin: 50% 50%;
+  }
+}
+/* Not the copy a closing sheet leaves behind to slide away (it is marked
+   aria-hidden): that one must leave exactly as it was. */
+@starting-style {
+  :root[data-theme="velvet"] .sheet-backdrop:not([aria-hidden="true"]) > .sheet-panel {
+    rotate: x 14deg;
+  }
+  :root[data-theme="velvet"] .sheet-backdrop:not([aria-hidden="true"]) > .pop-panel {
+    rotate: x 10deg;
+  }
+}
+
+/* ---------- the assistant ---------- */
+/* The room shows through the conversation: no backdrop of its own, only a
+   faint violet glow where the reply appears. The bars above and below it no
+   longer need to fade content out - it scrolls in its own box between them. */
+:root[data-theme="velvet"] .chat-screen {
+  background: radial-gradient(60% 40% at 50% 38%, rgba(143, 123, 255, 0.14), transparent 70%);
+}
+:root[data-theme="velvet"] :is(.chat-topbar, .chat-dock) {
+  background: transparent;
+}
+:root[data-theme="velvet"] .chat-composer {
+  background: var(--v-glass);
+  -webkit-backdrop-filter: var(--v-blur);
+  backdrop-filter: var(--v-blur);
+  border-color: var(--v-glass-edge);
+  box-shadow:
+    0 24px 50px -20px rgba(3, 0, 14, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+:root[data-theme="velvet"] .chat-round {
+  background: var(--v-clay-raised);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+:root[data-theme="velvet"] .chat-send {
+  background: var(--v-gold);
+  color: var(--on-accent);
+  box-shadow: var(--v-gold-shadow);
+}
+:root[data-theme="velvet"] .chat-bubble-user {
+  background: linear-gradient(160deg, #8a73ff 0%, #6a4ff0 55%, #5b3fe0 100%);
+  box-shadow:
+    0 12px 22px -12px rgba(91, 63, 224, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -4px 10px -4px rgba(30, 10, 90, 0.4);
+}
+:root[data-theme="velvet"] .chat-bubble-bot {
+  background: var(--v-clay);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+:root[data-theme="velvet"] .chat-glow-card {
+  background:
+    radial-gradient(70% 80% at 50% 60%, rgba(143, 123, 255, 0.24), transparent 75%),
+    var(--v-clay);
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow:
+    var(--glass-shadow),
+    0 30px 80px -20px rgba(91, 63, 224, 0.4);
+}
+:root[data-theme="velvet"] .chat-chip {
+  background: var(--v-clay-raised);
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow: var(--v-clay-sm);
+}
+:root[data-theme="velvet"] .reply-facts {
+  background: rgba(8, 4, 22, 0.32);
+  box-shadow: var(--v-well);
+}
+
+/* ---------- small things ---------- */
+/* The logo's badge is drawn from the theme's accent colours, which here would
+   make it gold running into green with a white K on the gold. Under Velvet it
+   is violet instead, like the assistant's marble. */
+:root[data-theme="velvet"] #lg-badge stop:nth-child(1) {
+  stop-color: #b3a3ff;
+}
+:root[data-theme="velvet"] #lg-badge stop:nth-child(2) {
+  stop-color: #7a5cff;
+}
+:root[data-theme="velvet"] #lg-badge stop:nth-child(3) {
+  stop-color: #43308c;
+}
+:root[data-theme="velvet"] .swipe-circle {
+  box-shadow:
+    0 10px 18px -10px rgba(3, 0, 14, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+:root[data-theme="velvet"] .bell-dot {
+  box-shadow: 0 0 8px rgba(243, 205, 125, 0.7);
+}

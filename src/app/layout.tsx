@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Nunito } from "next/font/google";
 import Script from "next/script";
+import { THEME_INIT_SCRIPT } from "@/lib/themes";
 import "./globals.css";
+import "./velvet.css";
 
 // Nunito has a variable font, which covers every weight in one file. Asking
 // for four fixed weights downloaded four files - 137 KB before the app had
@@ -49,8 +51,16 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <Script id="theme-init" strategy="beforeInteractive">
-          {"try{var t=localStorage.getItem('khata-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}"}
+          {THEME_INIT_SCRIPT}
         </Script>
+        {/* Velvet's backdrop: lit spheres drifting behind the app. Under every
+            other theme it is display:none - no layout, no painting, nothing
+            animating - so it costs them nothing. */}
+        <div className="velvet-scene" aria-hidden>
+          <i />
+          <i />
+          <i />
+        </div>
         {children}
       </body>
     </html>

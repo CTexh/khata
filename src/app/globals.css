@@ -1573,3 +1573,268 @@ button.chip {
     font-size: 10px;
   }
 }
+
+/* ---- themes: the gallery from the profile picture ---- */
+/* Every theme as a card that shows it. The drawings use each theme's own
+   colours, fixed here, so they look the same whichever theme is on - a
+   preview has to show what you would get, not what you have. */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.theme-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 8px 12px;
+  border-radius: 24px;
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  box-shadow: var(--glass-shadow);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--dur-press) var(--ease-press),
+    box-shadow var(--dur-quick) ease;
+}
+.theme-card:active {
+  transform: scale(0.97);
+}
+.theme-card[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--accent), var(--glass-shadow);
+}
+.theme-preview {
+  position: relative;
+  display: block;
+  height: 118px;
+  border-radius: 17px;
+  overflow: hidden;
+  isolation: isolate;
+}
+/* System: light and dark, divided on the diagonal. */
+.theme-preview-half {
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+.theme-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 6px;
+}
+.theme-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 800;
+}
+.theme-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #1c1233;
+  background: linear-gradient(180deg, #fae3ad, #e2ad5c);
+}
+.theme-tagline {
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+.theme-check {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: none;
+  place-items: center;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+}
+.theme-card[aria-pressed="true"] .theme-check {
+  display: grid;
+  animation: swipe-pop 260ms var(--ease-enter) backwards;
+}
+
+/* The drawing: a summary card, two cards, the tab bar. */
+.mini {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 0;
+  background: var(--mv-page);
+}
+.mini-hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  height: 40px;
+  padding: 0 9px;
+  border-radius: 11px;
+  background: var(--mv-hero);
+  box-shadow: var(--mv-hero-shadow, none);
+}
+.mini-line {
+  width: 38%;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.45);
+}
+.mini-amount {
+  width: 62%;
+  height: 9px;
+  border-radius: 5px;
+  background: var(--mv-amount);
+}
+.mini-row {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.mini-card {
+  height: 26px;
+  border-radius: 9px;
+  background: var(--mv-surface);
+  border: 1px solid var(--mv-edge);
+  box-shadow: var(--mv-card-shadow, none);
+}
+.mini-bar {
+  position: absolute;
+  z-index: 1;
+  left: 10px;
+  right: 10px;
+  bottom: 7px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  border-radius: 10px;
+  background: var(--mv-bar);
+  border: 1px solid var(--mv-edge);
+  box-shadow: var(--mv-bar-shadow, none);
+}
+.mini-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--mv-dot);
+}
+.mini-pill {
+  width: 18px;
+  height: 10px;
+  border-radius: 6px;
+  background: var(--mv-accent);
+}
+.mini[data-preview="light"] {
+  --mv-page: #eef1f9;
+  --mv-surface: #ffffff;
+  --mv-edge: rgba(11, 13, 20, 0.06);
+  --mv-hero: linear-gradient(140deg, #121833, #1f2a5c);
+  --mv-amount: rgba(255, 255, 255, 0.92);
+  --mv-bar: #ffffff;
+  --mv-dot: rgba(11, 13, 20, 0.2);
+  --mv-accent: linear-gradient(135deg, #2a78d6, #6d5df0);
+  --mv-card-shadow: 0 2px 6px rgba(31, 45, 90, 0.08);
+  --mv-bar-shadow: 0 3px 8px rgba(31, 45, 90, 0.12);
+}
+.mini[data-preview="dark"] {
+  --mv-page: #0a0b12;
+  --mv-surface: #151823;
+  --mv-edge: rgba(255, 255, 255, 0.07);
+  --mv-hero: linear-gradient(140deg, #161c3a, #26306a);
+  --mv-amount: rgba(255, 255, 255, 0.9);
+  --mv-bar: #151823;
+  --mv-dot: rgba(255, 255, 255, 0.25);
+  --mv-accent: linear-gradient(135deg, #4a94f0, #8b7bff);
+}
+.mini[data-preview="velvet"] {
+  --mv-page: radial-gradient(120% 80% at 50% -10%, #2b1d5c 0%, #110c22 62%);
+  --mv-surface: linear-gradient(162deg, #2d2456, #1d1638);
+  --mv-edge: rgba(255, 255, 255, 0.07);
+  --mv-hero: linear-gradient(152deg, #4a35a0 0%, #2c1f6a 50%, #170f3d 100%);
+  --mv-hero-shadow:
+    0 8px 14px -8px rgba(5, 1, 20, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 8px 12px -8px rgba(255, 255, 255, 0.2);
+  --mv-amount: #fff6e3;
+  --mv-bar: rgba(34, 26, 64, 0.62);
+  --mv-dot: rgba(255, 255, 255, 0.28);
+  --mv-accent: linear-gradient(180deg, #fae3ad, #f1c46f 46%, #d99a4c);
+  --mv-card-shadow:
+    0 6px 10px -6px rgba(3, 0, 14, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 6px 8px -6px rgba(255, 255, 255, 0.14),
+    inset -2px -3px 6px -3px rgba(3, 0, 14, 0.6);
+  --mv-bar-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+.mini[data-preview="velvet"] .mini-bar {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.mini-orb {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.mini-orb:nth-child(1) {
+  width: 120px;
+  height: 120px;
+  top: -50px;
+  right: -40px;
+  background: radial-gradient(circle at 36% 32%, rgba(186, 168, 255, 0.6), rgba(123, 92, 255, 0.4) 24%, rgba(76, 46, 201, 0.22) 48%, transparent 70%);
+}
+.mini-orb:nth-child(2) {
+  width: 100px;
+  height: 100px;
+  bottom: -44px;
+  left: -36px;
+  background: radial-gradient(circle at 40% 34%, rgba(255, 150, 214, 0.38), rgba(214, 92, 186, 0.24) 28%, transparent 68%);
+}
+/* The marble floats in front of the drawing - the one thing in any preview
+   that moves, because moving is what this theme does. */
+.mini-marble {
+  position: absolute;
+  z-index: 2;
+  top: 62px;
+  right: 14px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #fff6dc, #f7d48c 16%, #e0a752 42%, #9c6224 74%, #5e3510);
+  box-shadow: 0 6px 10px -4px rgba(217, 154, 76, 0.55);
+  animation: mini-bob 3.6s ease-in-out infinite alternate;
+}
+@keyframes mini-bob {
+  from {
+    transform: translate3d(0, 2px, 0) scale(0.96);
+  }
+  to {
+    transform: translate3d(-6px, -6px, 0) scale(1.06);
+  }
+}
+
+/* Switching theme from its card: the new one is revealed in a widening circle
+   (see switchTheme). The browser's own crossfade is turned off so the circle
+   is the only movement - and only for this, as the class is on the page just
+   for the length of that one transition. */
+:root.theme-reveal::view-transition-old(root),
+:root.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
