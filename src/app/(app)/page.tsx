@@ -257,7 +257,7 @@ export default function Home() {
               {view.categories} {view.categories === 1 ? "category" : "categories"}
             </span>
           </div>
-          <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full gap-[2px]" style={{ background: "var(--hairline)" }} aria-hidden>
+          <div className="spend-bar mt-3 flex h-2 w-full overflow-hidden rounded-full gap-[2px]" style={{ background: "var(--hairline)" }} aria-hidden>
             {view.breakdown.map((b) => (
               <span
                 key={b.category}

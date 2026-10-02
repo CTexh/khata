@@ -60,6 +60,40 @@ export function tiltAt(clientX: number, clientY: number, box: Box, maxDeg: numbe
   };
 }
 
+/* ---------- numbers that count up ---------- */
+
+// An amount as it is shown - "6,174", "Rs 23,000" - split into what is around
+// the number and the number itself, so it can be shown at any value in
+// between exactly as the page would have written it.
+export type Amount = { prefix: string; value: number; decimals: number; suffix: string };
+
+export function parseAmount(text: string | null | undefined): Amount | null {
+  const m = /^(\D*?)(\d{1,3}(?:,\d{2,3})*|\d+)(?:\.(\d+))?(\D*)$/.exec(text ?? "");
+  if (!m) return null;
+  const value = Number(`${m[2].replace(/,/g, "")}${m[3] ? `.${m[3]}` : ""}`);
+  if (!Number.isFinite(value)) return null;
+  return { prefix: m[1], value, decimals: m[3]?.length ?? 0, suffix: m[4] };
+}
+
+// The same formatting the app uses for money (format.ts), at any value.
+export function formatAmount(a: Amount, value: number): string {
+  const n = value.toLocaleString("en-PK", {
+    minimumFractionDigits: a.decimals,
+    maximumFractionDigits: a.decimals,
+  });
+  return `${a.prefix}${n}${a.suffix}`;
+}
+
+// Where a count is after t (0..1) of its run: quick off the mark and easing
+// into the final figure, the way an odometer settles. Rounded to what the
+// amount can show, and never past either end.
+export function countAt(from: number, to: number, t: number, decimals = 0): number {
+  const k = t <= 0 ? 0 : t >= 1 ? 1 : 1 - Math.pow(2, -10 * t);
+  const scale = 10 ** decimals;
+  const v = Math.round((from + (to - from) * k) * scale) / scale;
+  return to >= from ? Math.min(Math.max(v, from), to) : Math.max(Math.min(v, from), to);
+}
+
 /* ---------- the page ---------- */
 
 // The surfaces that lean: the summary at the top of every section, the cards
@@ -90,7 +124,22 @@ function settle(el: HTMLElement | null) {
 const surfaceOf = (target: EventTarget | null) =>
   target instanceof Element ? target.closest<HTMLElement>(SURFACES) : null;
 
-export function startVelvetMotion(): () => void {
+// The amounts that count: the big figure on each section's summary, and the
+// figures on the cards that open something.
+const AMOUNTS = ".hero-panel .tabular > .leading-none, a.card .tabular";
+// How long a count runs, and when it starts after a page arrives - as its
+// figure lands, not before (velvet.css drops the summary first and lets its
+// contents fall onto it).
+const COUNT_MS = { hero: 1250, card: 1000 };
+const COUNT_AFTER_ARRIVAL_MS = { hero: 560, card: 520 };
+
+export type VelvetMotion = {
+  /** A new page has arrived: count its figures up as they land. */
+  arrive(): void;
+  stop(): void;
+};
+
+export function startVelvetMotion(): VelvetMotion {
   // The mouse: whichever surface is under it leans, once a frame.
   let hovered: HTMLElement | null = null;
   // Measured flat, as the pointer arrives. The box of a tilted surface changes
@@ -173,16 +222,134 @@ export function startVelvetMotion(): () => void {
   root.addEventListener("pointerleave", leave, passive);
   window.addEventListener("scroll", onScroll, { passive: true, capture: true });
 
-  return () => {
-    document.removeEventListener("pointermove", onMove);
-    document.removeEventListener("pointerdown", onDown);
-    document.removeEventListener("pointerup", onUp);
-    document.removeEventListener("pointercancel", onUp);
-    root.removeEventListener("pointerleave", leave);
-    window.removeEventListener("scroll", onScroll, { capture: true });
-    if (frame) cancelAnimationFrame(frame);
-    leave();
-    settle(pressed);
-    pressed = null;
+  /* ---------- counting ---------- */
+  //
+  // The figure is React's text, and React keeps a hold of the very text node
+  // it wrote. So the count writes to that same node - never replacing it -
+  // and stops the instant anything else writes there: React showing a new
+  // value takes over at once, and the count then rolls from wherever it had
+  // got to toward the new figure. Every count ends by writing back exactly
+  // what React wrote, so the page is never left showing a figure of ours.
+  type Count = { frame: number; timer: number; final: string; region: Element | null };
+  const counts = new Map<Text, Count>();
+  // The last thing written to each figure by a count, to tell our own writes
+  // apart from React's when the observer reports them.
+  const written = new WeakMap<Text, string>();
+  const watched = new Set<Element>();
+  const arrived = new WeakSet<Text>();
+  let scans: number[] = [];
+
+  const textOf = (el: Element): Text | null =>
+    el.childNodes.length === 1 && el.firstChild?.nodeType === Node.TEXT_NODE ? (el.firstChild as Text) : null;
+  const put = (node: Text, value: string) => {
+    written.set(node, value);
+    node.nodeValue = value;
+  };
+
+  const finish = (node: Text, restore: boolean) => {
+    const c = counts.get(node);
+    if (!c) return;
+    cancelAnimationFrame(c.frame);
+    window.clearTimeout(c.timer);
+    counts.delete(node);
+    if (restore && node.isConnected && node.nodeValue === written.get(node)) put(node, c.final);
+    // The summary is a live region; it was told to wait while the figure ran
+    // so a screen reader announces the result once, not every step.
+    if (c.region && ![...counts.values()].some((o) => o.region === c.region)) c.region.removeAttribute("aria-busy");
+  };
+
+  const count = (el: Element, node: Text, from: number, delay: number) => {
+    const final = node.nodeValue ?? "";
+    const amount = parseAmount(final);
+    finish(node, false);
+    if (!amount || amount.value === from) return;
+    const hero = el.closest(".hero-panel");
+    const ms = hero ? COUNT_MS.hero : COUNT_MS.card;
+    const region = el.closest("[aria-live]");
+    region?.setAttribute("aria-busy", "true");
+    // A figure is money, and must never be left showing anything but itself.
+    // So nothing is written until the first frame actually runs - a page whose
+    // frames never come (hidden, suspended) keeps the real figure - and should
+    // the frames stall part-way, this puts the real figure back regardless.
+    const timer = window.setTimeout(() => finish(node, true), delay + ms + 400);
+    const c: Count = { frame: 0, timer, final, region };
+    counts.set(node, c);
+    let started = false;
+    const begin = performance.now() + delay;
+    const step = (now: number) => {
+      // Gone, or written by someone else - React showing a new figure before
+      // the count began, or during it: that value stands.
+      const changed = started ? node.nodeValue !== written.get(node) : node.nodeValue !== final;
+      if (!node.isConnected || changed) {
+        finish(node, false);
+        return;
+      }
+      started = true;
+      const t = (now - begin) / ms;
+      if (t >= 1) {
+        finish(node, true);
+        return;
+      }
+      put(node, formatAmount(amount, t > 0 ? countAt(from, amount.value, t, amount.decimals) : from));
+      c.frame = requestAnimationFrame(step);
+    };
+    c.frame = requestAnimationFrame(step);
+  };
+
+  const observer = new MutationObserver((records) => {
+    for (const r of records) {
+      const el = (r.target.nodeType === Node.TEXT_NODE ? r.target.parentElement : (r.target as Element))?.closest(AMOUNTS);
+      if (!el) continue;
+      const node = textOf(el);
+      if (!node || node.nodeValue === written.get(node)) continue;
+      // React has shown a new figure. Roll to it from whatever was showing -
+      // the old figure, a count part-way, or nothing at all (a skeleton).
+      const before = r.type === "characterData" ? parseAmount(r.oldValue)?.value ?? 0 : 0;
+      arrived.add(node);
+      count(el, node, before, 0);
+    }
+  });
+
+  const scan = (delayed: boolean) => {
+    for (const el of document.querySelectorAll(AMOUNTS)) {
+      if (!watched.has(el)) {
+        watched.add(el);
+        observer.observe(el, { childList: true, characterData: true, characterDataOldValue: true, subtree: true });
+      }
+      const node = textOf(el);
+      if (!node || arrived.has(node)) continue;
+      arrived.add(node);
+      const hero = el.closest(".hero-panel");
+      count(el, node, 0, delayed ? (hero ? COUNT_AFTER_ARRIVAL_MS.hero : COUNT_AFTER_ARRIVAL_MS.card) : 0);
+    }
+  };
+
+  const arrive = () => {
+    scans.forEach((t) => window.clearTimeout(t));
+    // Once the page has rendered, and twice more for figures whose sections
+    // only appear when their data does.
+    scans = [0, 300, 900].map((ms, i) => window.setTimeout(() => scan(i === 0), ms));
+  };
+  arrive();
+
+  return {
+    arrive,
+    stop() {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      root.removeEventListener("pointerleave", leave);
+      window.removeEventListener("scroll", onScroll, { capture: true });
+      if (frame) cancelAnimationFrame(frame);
+      leave();
+      settle(pressed);
+      pressed = null;
+      scans.forEach((t) => window.clearTimeout(t));
+      observer.disconnect();
+      // Any figure part-way through a count is put back to the real one.
+      for (const node of [...counts.keys()]) finish(node, true);
+      watched.clear();
+    },
   };
 }

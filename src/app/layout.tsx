@@ -53,13 +53,17 @@ export default function RootLayout({
         <Script id="theme-init" strategy="beforeInteractive">
           {THEME_INIT_SCRIPT}
         </Script>
-        {/* Velvet's backdrop: lit spheres drifting behind the app. Under every
-            other theme it is display:none - no layout, no painting, nothing
-            animating - so it costs them nothing. */}
+        {/* Velvet's backdrop: lit spheres drifting behind the app, and gold
+            dust rising through it. Under every other theme it is
+            display:none - no layout, no painting, nothing animating - so it
+            costs them nothing. */}
         <div className="velvet-scene" aria-hidden>
           <i />
           <i />
           <i />
+          {Array.from({ length: 14 }, (_, n) => (
+            <b key={n} />
+          ))}
         </div>
         {children}
       </body>

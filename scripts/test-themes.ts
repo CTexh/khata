@@ -10,7 +10,8 @@ import {
   parseTheme,
   revealRadius,
 } from "../src/lib/themes.ts";
-import { MAX_TILT, PRESS_TILT, tiltAt } from "../src/lib/velvet-motion.ts";
+import { MAX_TILT, PRESS_TILT, countAt, formatAmount, parseAmount, tiltAt } from "../src/lib/velvet-motion.ts";
+import { landingAt } from "../src/lib/velvet-stage.ts";
 
 let pass = 0;
 let fail = 0;
@@ -119,6 +120,52 @@ check(
 );
 check("values are kept short for the style string", at(0.333, 0.777).ry, 2.34);
 check("never negative zero", Object.is(at(0.5, 0.5).ry, -0), false);
+
+/* ---------- figures that count up ---------- */
+
+check("a bare figure", parseAmount("6,174"), { prefix: "", value: 6174, decimals: 0, suffix: "" });
+check("with the currency in front", parseAmount("Rs 23,000"), { prefix: "Rs ", value: 23000, decimals: 0, suffix: "" });
+check("negative, as the app writes it", parseAmount("−Rs 500"), { prefix: "−Rs ", value: 500, decimals: 0, suffix: "" });
+check("with paisa", parseAmount("Rs 1,234.50"), { prefix: "Rs ", value: 1234.5, decimals: 2, suffix: "" });
+check("no separators", parseAmount("23000"), { prefix: "", value: 23000, decimals: 0, suffix: "" });
+check("zero", parseAmount("0")?.value, 0);
+check("a word is not a figure", parseAmount("All paid"), null);
+check("nor is nothing", parseAmount(""), null);
+check("nor is a missing text", parseAmount(null), null);
+check("two figures are not one", parseAmount("3 of 4"), null);
+
+const rs = parseAmount("Rs 23,000")!;
+check("shown as the app shows money", formatAmount(rs, 23000), "Rs 23,000");
+check("at any value in between", formatAmount(rs, 1234), "Rs 1,234");
+check("from nothing", formatAmount(rs, 0), "Rs 0");
+check("paisa kept to the places shown", formatAmount(parseAmount("1,234.50")!, 617.25), "617.25");
+// It must end on exactly what the page wrote, or a count would leave the
+// page showing a figure of its own.
+for (const text of ["6,174", "Rs 23,000", "Rs 3,379", "492,325", "Rs 1,234.50", "0"]) {
+  const a = parseAmount(text)!;
+  check(`round trip: ${text}`, formatAmount(a, a.value), text);
+}
+
+check("a count starts where it starts", countAt(0, 6174, 0), 0);
+check("and ends exactly on the figure", countAt(0, 6174, 1), 6174);
+check("before the start is the start", countAt(0, 6174, -0.5), 0);
+check("after the end is the end", countAt(0, 6174, 1.7), 6174);
+check("quick off the mark", countAt(0, 1000, 0.1) > 400, true);
+check("and slow into the figure", countAt(0, 1000, 0.9) > 995, true);
+check("whole rupees while counting", Number.isInteger(countAt(0, 6174, 0.37)), true);
+check("never past the figure on the way up", countAt(0, 10, 0.999), 10);
+check("counting down works too", countAt(24523, 6174, 1), 6174);
+check("never past the figure on the way down", countAt(24523, 6174, 0.6) >= 6174, true);
+check("and paisa where there are paisa", countAt(0, 10.5, 1, 1), 10.5);
+
+/* ---------- when each card lands ---------- */
+
+check("the top of the screen lands first", landingAt(0, 0, 800, 400), 0.04);
+check("further down lands later", landingAt(400, 0, 800, 400) > landingAt(100, 0, 800, 400), true);
+check("left before right on the same row", landingAt(400, 0, 800, 400) < landingAt(400, 200, 800, 400), true);
+check("far below the fold does not wait for ever", landingAt(9000, 0, 800, 400), landingAt(1040, 0, 800, 400));
+check("something scrolled past lands at once", landingAt(-500, 0, 800, 400), 0.04);
+check("no screen size to measure is not an error", Number.isFinite(landingAt(100, 10, 0, 0)), true);
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

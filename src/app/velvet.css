@@ -16,9 +16,11 @@
      makes an element the containing block for everything fixed inside it -
      the bug that once unpinned the assistant's composer. The surfaces that
      tilt here (summary panels, cards that open something) hold nothing fixed.
-   - Nothing that arrives with a page is faded in. Content that starts faint
-     reads as a blink, as it did once; cards here move and are fully drawn
-     throughout.
+   - Arrivals are choreographed, never a fade on its own. A page assembles
+     the way the Chattha Technologies card does: the summary drops from
+     right in front of you onto its own shadow, then everything on it falls
+     into place, out of focus and settling. What once read as a blink was
+     content appearing faint with no movement to explain it.
    - Reduce Motion turns all of it off: the global rule in globals.css ends
      every animation, and lib/velvet-motion.ts never starts.
 
@@ -199,6 +201,57 @@
   );
   animation: velvet-drift-near 34s ease-in-out infinite alternate;
 }
+/* Gold dust, rising through the room on its own slow currents - each mote
+   with its own size, speed, sway and brightness, and started part-way through
+   so the room is already full when the app opens. Each is a few pixels across
+   and moves by transform and opacity alone. */
+:root[data-theme="velvet"] .velvet-scene b {
+  position: absolute;
+  bottom: -12px;
+  left: var(--x, 50%);
+  width: var(--s, 4px);
+  height: var(--s, 4px);
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff7df 0%, #f3cd7d 45%, rgba(243, 205, 125, 0) 72%);
+  box-shadow: 0 0 10px rgba(243, 205, 125, 0.55);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: velvet-dust var(--d, 20s) linear var(--o, 0s) infinite;
+}
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(1) { --x: 6%; --s: 4px; --d: 19s; --o: -2s; --sw1: 18px; --sw2: -10px; --a: 0.8; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(2) { --x: 14%; --s: 3px; --d: 23s; --o: -11s; --sw1: -14px; --sw2: 22px; --a: 0.6; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(3) { --x: 22%; --s: 5px; --d: 17s; --o: -6s; --sw1: 10px; --sw2: 30px; --a: 0.9; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(4) { --x: 31%; --s: 2.5px; --d: 26s; --o: -18s; --sw1: -20px; --sw2: 8px; --a: 0.5; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(5) { --x: 39%; --s: 4px; --d: 21s; --o: -4s; --sw1: 16px; --sw2: -24px; --a: 0.75; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(6) { --x: 47%; --s: 3px; --d: 18s; --o: -13s; --sw1: -8px; --sw2: 18px; --a: 0.7; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(7) { --x: 55%; --s: 6px; --d: 24s; --o: -9s; --sw1: 22px; --sw2: 4px; --a: 0.85; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(8) { --x: 63%; --s: 3px; --d: 20s; --o: -16s; --sw1: -16px; --sw2: -6px; --a: 0.6; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(9) { --x: 70%; --s: 4.5px; --d: 16s; --o: -3s; --sw1: 8px; --sw2: 26px; --a: 0.9; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(10) { --x: 77%; --s: 2.5px; --d: 22s; --o: -12s; --sw1: -22px; --sw2: 10px; --a: 0.55; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(11) { --x: 84%; --s: 5px; --d: 19s; --o: -7s; --sw1: 14px; --sw2: -18px; --a: 0.8; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(12) { --x: 90%; --s: 3.5px; --d: 25s; --o: -20s; --sw1: -10px; --sw2: 20px; --a: 0.65; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(13) { --x: 95%; --s: 2.5px; --d: 18s; --o: -1s; --sw1: 6px; --sw2: -14px; --a: 0.6; }
+:root[data-theme="velvet"] .velvet-scene b:nth-of-type(14) { --x: 50%; --s: 3px; --d: 28s; --o: -24s; --sw1: -26px; --sw2: 14px; --a: 0.5; }
+@keyframes velvet-dust {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+  }
+  10% {
+    opacity: var(--a, 0.8);
+  }
+  50% {
+    transform: translate3d(var(--sw1, 12px), -56vh, 0);
+  }
+  88% {
+    opacity: var(--a, 0.8);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--sw2, -12px), -112vh, 0);
+  }
+}
+
 /* A fine grain over the room, so the gradients read as a lit surface and not
    as banding. Drawn once and never animated. */
 :root[data-theme="velvet"] .velvet-scene::after {
@@ -414,34 +467,441 @@
   transform: scale(1.1, 0.88);
 }
 
-/* ---------- arriving ---------- */
-/* Cards stand up as a page arrives: each starts tipped back and a little low,
-   and rises to face you, one just after another. Fully drawn the whole time -
-   only the angle changes - so nothing ever looks like it is still loading. */
+/* ---------- arriving: the drop ---------- */
+/* Modelled on the Chattha Technologies card. A page arrives as a scene: the
+   summary falls from right in front of you, turning as it comes, and lands
+   with a bounce on its own shadow; the cards below land after it, top to
+   bottom; then everything on them falls into place - big and soft at first,
+   as if close to the eye, settling with a little squash. The figures count up
+   as they land (lib/velvet-motion.ts) and the bar of spending fills.
+
+   --v-at is when a card lands, set from where it sits on the screen by
+   components/VelvetMotion before the first frame; its contents take their
+   moment from it. Anything that appears later - a card waiting on its data -
+   simply lands when it arrives. */
+
+/* The plain themes' page slide gives way to the choreography. */
+:root[data-theme="velvet"] .page-enter > * {
+  animation: none;
+}
+
 :root[data-theme="velvet"] .rise {
-  animation: velvet-rise 480ms var(--ease-enter) backwards;
+  transform-origin: 50% 100%;
+  animation: velvet-land 820ms var(--v-at, 0s) backwards;
 }
-:root[data-theme="velvet"] .rise:nth-child(2) {
-  animation-delay: 35ms;
+:root[data-theme="velvet"] .rise:nth-child(even) {
+  --v-tilt: 3deg;
 }
-:root[data-theme="velvet"] .rise:nth-child(3) {
-  animation-delay: 70ms;
+:root[data-theme="velvet"] .hero-panel.rise {
+  transform-origin: 50% 50%;
+  animation: velvet-drop 980ms var(--v-at, 0.05s) backwards;
 }
-:root[data-theme="velvet"] .rise:nth-child(4) {
-  animation-delay: 105ms;
+
+/* What falls onto a card, in order. */
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(1) { --v-i: 0; }
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(2) { --v-i: 1; }
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(3) { --v-i: 2; }
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(4) { --v-i: 3; }
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(5) { --v-i: 4; }
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(6) { --v-i: 5; }
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(7) { --v-i: 6; }
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(8) { --v-i: 7; }
+:root[data-theme="velvet"] :is(.rise, .hero-panel, .sheet-body, .theme-grid, .account-menu, .chat-empty, .page-title, .day-group ul) > :nth-child(n + 9) { --v-i: 8; }
+
+/* Onto the summary: the heading, then the currency, then the figure itself,
+   which comes down hardest and flashes gold as it lands. */
+:root[data-theme="velvet"] .hero-panel > :not(.hero-deco, .tabular),
+:root[data-theme="velvet"] .hero-panel > .tabular > * {
+  animation: velvet-fall 760ms calc(var(--v-at, 0.05s) + 0.42s + var(--v-i, 0) * 75ms) backwards;
 }
-:root[data-theme="velvet"] .rise:nth-child(5) {
-  animation-delay: 140ms;
+:root[data-theme="velvet"] .hero-panel > .tabular > .hero-muted {
+  --v-i: 1.4;
 }
-:root[data-theme="velvet"] .rise:nth-child(n + 6) {
-  animation-delay: 175ms;
+:root[data-theme="velvet"] .hero-panel > .tabular > .leading-none {
+  --v-i: 2;
+  --v-fs: 1.75;
+  animation-name: velvet-slam;
+  animation-duration: 860ms;
 }
-@keyframes velvet-rise {
+/* The fine lines across Home's summary draw themselves in. */
+:root[data-theme="velvet"] .hero-deco path {
+  stroke-dasharray: 640;
+  stroke-dashoffset: 0;
+  animation: velvet-draw 1.6s calc(var(--v-at, 0.05s) + 0.5s) cubic-bezier(0.65, 0, 0.35, 1) backwards;
+}
+:root[data-theme="velvet"] .hero-deco path:nth-child(2) {
+  animation-delay: calc(var(--v-at, 0.05s) + 0.62s);
+}
+:root[data-theme="velvet"] .hero-deco path:nth-child(3) {
+  animation-delay: calc(var(--v-at, 0.05s) + 0.74s);
+}
+
+/* Onto every other card. */
+:root[data-theme="velvet"] .rise:not(.hero-panel) > * {
+  animation: velvet-fall 680ms calc(var(--v-at, 0s) + 0.34s + var(--v-i, 0) * 65ms) backwards;
+}
+/* A card's icon spins in and pops, rather than falling. */
+:root[data-theme="velvet"] .rise:not(.hero-panel) > .icon-tile {
+  animation-name: velvet-pop;
+  animation-duration: 760ms;
+}
+/* A list's rows tip down into place one after another; the rows of the
+   first days in Mera Khata do the same. No blur on these: they are wide, and
+   there can be many. */
+:root[data-theme="velvet"] .list-card.rise > *,
+:root[data-theme="velvet"] .day-group > :first-child,
+:root[data-theme="velvet"] .day-group ul > li {
+  animation: velvet-row 640ms calc(var(--v-at, 0s) + 0.24s + var(--v-i, 0) * 60ms) backwards;
+}
+/* The bar of where the money went fills, a category at a time. */
+:root[data-theme="velvet"] .spend-bar > :nth-child(1) { --v-i: 0; }
+:root[data-theme="velvet"] .spend-bar > :nth-child(2) { --v-i: 1; }
+:root[data-theme="velvet"] .spend-bar > :nth-child(3) { --v-i: 2; }
+:root[data-theme="velvet"] .spend-bar > :nth-child(4) { --v-i: 3; }
+:root[data-theme="velvet"] .spend-bar > :nth-child(n + 5) { --v-i: 4; }
+:root[data-theme="velvet"] .spend-bar > * {
+  transform-origin: 0 50%;
+  animation: velvet-grow 900ms calc(var(--v-at, 0s) + 0.55s + var(--v-i, 0) * 90ms) var(--ease-enter) backwards;
+}
+
+/* The smaller things on a page fall in after the cards around them: the
+   filters, the category pills, the headings over lists and their links, and
+   each page's add button, which spins in like an icon. */
+:root[data-theme="velvet"] :is(.segmented, .section-head) > :nth-child(1),
+:root[data-theme="velvet"] .cat-pill:nth-child(1) { --v-i: 0; }
+:root[data-theme="velvet"] :is(.segmented, .section-head) > :nth-child(2),
+:root[data-theme="velvet"] .cat-pill:nth-child(2) { --v-i: 1; }
+:root[data-theme="velvet"] :is(.segmented, .section-head) > :nth-child(3),
+:root[data-theme="velvet"] .cat-pill:nth-child(3) { --v-i: 2; }
+:root[data-theme="velvet"] :is(.segmented, .section-head) > :nth-child(4),
+:root[data-theme="velvet"] .cat-pill:nth-child(4) { --v-i: 3; }
+:root[data-theme="velvet"] .cat-pill:nth-child(5) { --v-i: 4; }
+:root[data-theme="velvet"] .cat-pill:nth-child(6) { --v-i: 5; }
+:root[data-theme="velvet"] .cat-pill:nth-child(n + 7) { --v-i: 6; }
+:root[data-theme="velvet"] :is(.segmented > button, .section-head > *, .cat-pill) {
+  animation: velvet-fall 600ms calc(0.3s + var(--v-i, 0) * 50ms) backwards;
+}
+:root[data-theme="velvet"] .tab-fab:not(.tabbar > *) {
+  animation: velvet-pop 860ms 0.4s backwards;
+}
+
+/* The page's title drops in with it. The bell and profile picture, which stay
+   from page to page, drop in once when the app opens. */
+:root[data-theme="velvet"] .page-title > * {
+  animation: velvet-fall 640ms calc(var(--v-i, 0) * 70ms) backwards;
+}
+:root[data-theme="velvet"] header > :last-child > * {
+  animation: velvet-fall 640ms calc(0.12s + var(--v-i, 0) * 70ms) backwards;
+}
+:root[data-theme="velvet"] header > :last-child > :nth-child(2) {
+  --v-i: 1;
+}
+
+/* The tab bar rises into place when the app opens, and its tabs drop onto it. */
+:root[data-theme="velvet"] .tabbar {
+  animation: velvet-dock 900ms 0.08s backwards;
+}
+:root[data-theme="velvet"] .tabbar > :nth-child(1) { --v-i: 0; }
+:root[data-theme="velvet"] .tabbar > :nth-child(2) { --v-i: 1; }
+:root[data-theme="velvet"] .tabbar > :nth-child(3) { --v-i: 2; }
+:root[data-theme="velvet"] .tabbar > :nth-child(4) { --v-i: 3; }
+:root[data-theme="velvet"] .tabbar > :nth-child(5) { --v-i: 4; }
+:root[data-theme="velvet"] .tabbar > :nth-child(6) { --v-i: 5; }
+:root[data-theme="velvet"] .tabbar > .tab {
+  animation: velvet-fall 620ms calc(0.34s + var(--v-i, 0) * 55ms) backwards;
+}
+:root[data-theme="velvet"] .tabbar > .tab-fab {
+  animation: velvet-pop 900ms calc(0.34s + var(--v-i, 0) * 55ms) backwards;
+}
+
+/* Sheets: what is in one drops in as it rises. The theme cards land like the
+   cards on a page. */
+:root[data-theme="velvet"] .sheet-body > * {
+  animation: velvet-row 600ms calc(0.1s + var(--v-i, 0) * 55ms) backwards;
+}
+:root[data-theme="velvet"] .theme-grid > * {
+  animation: velvet-land 760ms calc(0.16s + var(--v-i, 0) * 70ms) backwards;
+}
+:root[data-theme="velvet"] .theme-grid > :nth-child(even) {
+  --v-tilt: 3deg;
+}
+
+/* A closing sheet leaves a copy of itself behind to slide away (Sheet.tsx),
+   and a copy is new to the page - every entrance inside it would play again
+   from invisible, and the sheet would empty itself as it left. The copy is
+   marked aria-hidden; nothing in it moves except the slide. */
+:root[data-theme="velvet"] .sheet-backdrop[aria-hidden="true"] * {
+  animation: none !important;
+}
+
+/* The menus from the header: their items fall in behind them. */
+:root[data-theme="velvet"] .account-menu > * {
+  animation: velvet-fall 520ms calc(0.05s + var(--v-i, 0) * 40ms) backwards;
+}
+:root[data-theme="velvet"] .bell-pop-list > li {
+  animation: velvet-row 520ms calc(0.06s + var(--v-i, 0) * 45ms) backwards;
+}
+:root[data-theme="velvet"] .bell-pop-list > li:nth-child(1) { --v-i: 0; }
+:root[data-theme="velvet"] .bell-pop-list > li:nth-child(2) { --v-i: 1; }
+:root[data-theme="velvet"] .bell-pop-list > li:nth-child(3) { --v-i: 2; }
+:root[data-theme="velvet"] .bell-pop-list > li:nth-child(4) { --v-i: 3; }
+:root[data-theme="velvet"] .bell-pop-list > li:nth-child(n + 5) { --v-i: 4; }
+
+/* The assistant: the welcome card lands, the suggestions drop after it, and
+   each new message falls into the conversation. Only the newest - opening a
+   conversation never replays the whole of it. */
+:root[data-theme="velvet"] .chat-empty > * {
+  animation: velvet-land 820ms calc(0.12s + var(--v-i, 0) * 90ms) backwards;
+}
+:root[data-theme="velvet"] .chat-chip {
+  animation: velvet-fall 600ms 0.5s backwards;
+}
+:root[data-theme="velvet"] .chat-chip:nth-child(2) { animation-delay: 0.56s; }
+:root[data-theme="velvet"] .chat-chip:nth-child(3) { animation-delay: 0.62s; }
+:root[data-theme="velvet"] .chat-chip:nth-child(4) { animation-delay: 0.68s; }
+:root[data-theme="velvet"] .chat-chip:nth-child(n + 5) { animation-delay: 0.74s; }
+:root[data-theme="velvet"] .chat-body > :last-child:not(.chat-empty) {
+  animation: velvet-fall 620ms backwards;
+}
+
+/* The shadow the summary lands on: on the floor beneath it, not on the card,
+   so it stays put while the card falls - wide and faint while the card is
+   high, tight and dark at the moment it hits, then settling. Placed with
+   anchor positioning; where the browser has none, there is simply no floor. */
+.velvet-floor {
+  display: none;
+}
+@supports (anchor-name: --a) {
+  :root[data-theme="velvet"] .hero-panel {
+    anchor-name: --velvet-summary;
+  }
+  :root[data-theme="velvet"] body:has(.hero-panel) .velvet-floor {
+    display: block;
+    position: absolute;
+    z-index: -1;
+    position-anchor: --velvet-summary;
+    left: calc(anchor(left) + 16px);
+    right: calc(anchor(right) + 16px);
+    top: calc(anchor(bottom) - 34px);
+    height: 64px;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(3, 0, 14, 0.9), rgba(3, 0, 14, 0.45) 55%, rgba(3, 0, 14, 0));
+    animation: velvet-floor 980ms var(--v-at, 0.05s) backwards;
+  }
+}
+
+/* ---------- the keyframes ---------- */
+
+/* The summary: from close to the eye, turning as it falls; it hits a little
+   low, bounces, settles. Timed for gravity - slow to start, fastest at the
+   bottom - rather than as one smooth curve. */
+@keyframes velvet-drop {
+  0% {
+    opacity: 0;
+    transform: perspective(1000px) translate3d(0, -64px, 250px) rotateX(-22deg) rotateY(9deg) rotateZ(-5deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.8, 0.45);
+  }
+  14% {
+    opacity: 1;
+  }
+  58% {
+    transform: perspective(1000px) translate3d(0, 5px, 0) rotateX(2.5deg) rotateY(0deg) rotateZ(0.4deg);
+    animation-timing-function: cubic-bezier(0.25, 0.6, 0.4, 1);
+  }
+  80% {
+    transform: perspective(1000px) translate3d(0, -3px, 0) rotateX(-0.8deg) rotateY(0deg) rotateZ(-0.1deg);
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(1000px) translate3d(0, 0, 0) rotateX(0deg) rotateY(0deg) rotateZ(0deg);
+  }
+}
+
+/* Its shadow, on the same beat. */
+@keyframes velvet-floor {
+  0% {
+    opacity: 0;
+    transform: scale(1.6, 2.2);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.8, 0.45);
+  }
+  58% {
+    opacity: 1;
+    transform: scale(0.94, 0.82);
+    animation-timing-function: cubic-bezier(0.25, 0.6, 0.4, 1);
+  }
+  80% {
+    transform: scale(1.03, 1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Every other card: a shorter fall, tipped and turned a little, alternately
+   one way and the other so a row of them does not move as one block. */
+@keyframes velvet-land {
+  0% {
+    opacity: 0;
+    transform: perspective(900px) translate3d(0, -42px, 130px) rotateX(-18deg) rotateZ(var(--v-tilt, -3deg));
+    animation-timing-function: cubic-bezier(0.5, 0, 0.8, 0.45);
+  }
+  16% {
+    opacity: 1;
+  }
+  60% {
+    transform: perspective(900px) translate3d(0, 4px, 0) rotateX(2deg) rotateZ(0.3deg);
+    animation-timing-function: cubic-bezier(0.25, 0.6, 0.4, 1);
+  }
+  82% {
+    transform: perspective(900px) translate3d(0, -2px, 0) rotateX(-0.6deg) rotateZ(-0.08deg);
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(900px) translate3d(0, 0, 0) rotateX(0deg) rotateZ(0deg);
+  }
+}
+
+/* What lands on a card: bigger and out of focus at first, as if close to the
+   eye, then down with a small settle. */
+@keyframes velvet-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -14px, 0) rotate(var(--v-fr, 0deg)) scale(var(--v-fs, 1.12));
+    filter: blur(4px);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.8, 0.4);
+  }
+  30% {
+    opacity: 1;
+  }
+  56% {
+    transform: translate3d(0, 1px, 0) rotate(0deg) scale(0.97);
+    filter: blur(0);
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.45, 1);
+  }
+  78% {
+    transform: translate3d(0, -0.5px, 0) rotate(0deg) scale(1.012);
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+/* The figure on the summary: from higher and bigger, landing hard, with a
+   flash of gold at the moment it hits - the way the logo lands on the card. */
+@keyframes velvet-slam {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -26px, 0) scale(var(--v-fs, 1.75));
+    filter: blur(6px) drop-shadow(0 0 0 rgba(243, 205, 125, 0));
+    animation-timing-function: cubic-bezier(0.45, 0, 0.8, 0.4);
+  }
+  28% {
+    opacity: 1;
+  }
+  54% {
+    transform: translate3d(0, 2px, 0) scale(0.95);
+    filter: blur(0) drop-shadow(0 0 22px rgba(243, 205, 125, 0.85));
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.45, 1);
+  }
+  76% {
+    transform: translate3d(0, -1px, 0) scale(1.02);
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0) drop-shadow(0 0 0 rgba(243, 205, 125, 0));
+  }
+}
+
+/* An icon: spun in from small, overshooting before it settles. */
+@keyframes velvet-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) rotate(-70deg);
+    animation-timing-function: cubic-bezier(0.3, 0, 0.6, 1);
+  }
+  40% {
+    opacity: 1;
+  }
+  62% {
+    transform: scale(1.14) rotate(8deg);
+  }
+  82% {
+    transform: scale(0.95) rotate(-3deg);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A row: tipped down from above into its place, like a card dealt face up. */
+@keyframes velvet-row {
+  0% {
+    opacity: 0;
+    transform: perspective(700px) translate3d(0, -18px, 40px) rotateX(-40deg);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.8, 0.4);
+  }
+  35% {
+    opacity: 1;
+  }
+  62% {
+    transform: perspective(700px) translate3d(0, 2px, 0) rotateX(5deg);
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.45, 1);
+  }
+  84% {
+    transform: perspective(700px) translate3d(0, -1px, 0) rotateX(-1.5deg);
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(700px) translate3d(0, 0, 0) rotateX(0deg);
+  }
+}
+
+@keyframes velvet-grow {
   from {
-    transform: perspective(900px) translate3d(0, 18px, 0) rotateX(14deg) scale(0.97);
+    transform: scaleX(0);
   }
   to {
-    transform: perspective(900px) translate3d(0, 0, 0) rotateX(0deg) scale(1);
+    transform: none;
+  }
+}
+
+@keyframes velvet-draw {
+  from {
+    stroke-dashoffset: 640;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The tab bar: up from below the screen, tipped back, settling flat. It keeps
+   the translate that centres it in every frame. */
+@keyframes velvet-dock {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) perspective(800px) translate3d(0, 70px, 0) rotateX(42deg);
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  25% {
+    opacity: 1;
+  }
+  62% {
+    transform: translateX(-50%) perspective(800px) translate3d(0, -5px, 0) rotateX(-3deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) perspective(800px) translate3d(0, 0, 0) rotateX(0deg);
   }
 }
 
@@ -610,7 +1070,6 @@
 :root[data-theme="velvet"] .tab-fab {
   position: relative;
   isolation: isolate;
-  overflow: hidden;
   background: radial-gradient(circle at 32% 26%, #e4ddff 0%, #ab9bff 15%, #7a5cff 38%, #4f30d0 66%, #2c1a86 100%);
   box-shadow:
     0 0 0 6px rgba(17, 12, 34, 0.88),
@@ -635,6 +1094,29 @@
 }
 :root[data-theme="velvet"] .tab-fab svg {
   filter: drop-shadow(0 2px 4px rgba(20, 6, 70, 0.55));
+}
+/* And it is alive: a ring of violet light leaves it every few seconds. Only
+   the one in the tab bar - the add buttons on the pages share its look, and
+   two things pulsing on one screen is noise, not life. */
+:root[data-theme="velvet"] .tabbar > .tab-fab::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -2;
+  border-radius: 50%;
+  border: 2px solid rgba(171, 155, 255, 0.6);
+  pointer-events: none;
+  animation: velvet-pulse 2.8s cubic-bezier(0.2, 0.7, 0.3, 1) 1.2s infinite;
+}
+@keyframes velvet-pulse {
+  0% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
 }
 
 /* ---------- glass that drops from the header ---------- */

@@ -339,7 +339,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         {!chat && (
         <header className="flex items-center justify-between gap-3 min-h-12">
-          <div className="min-w-0">
+          {/* Keyed by section, so the title is a new element on each page and
+              Velvet can drop it in with the rest; elsewhere it changes nothing. */}
+          <div className="min-w-0 page-title" key={section}>
             {home ? (
               <>
                 <p className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
@@ -474,6 +476,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main id="main-content" className={chat ? "chat-enter" : "contents page-enter"}>
           {children}
         </main>
+
+        {/* Velvet only: the shadow a section's summary lands on, set on the
+            floor beneath it (velvet.css). A new one for every page, so the
+            landing plays each time. display:none under every other theme. */}
+        <span key={pathname} className="velvet-floor" aria-hidden />
       </div>
 
       {!chat && (
@@ -510,7 +517,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Velvet's depth: starts and stops itself with the theme. */}
-      <VelvetMotion />
+      <VelvetMotion pathname={pathname} />
 
       {tourOpen && user && <WelcomeTour withAssistant={Boolean(user.aiAccess)} onClose={closeTour} />}
 
