@@ -10,6 +10,7 @@ import { invalidate, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
 import { LoadError } from "@/components/LoadError";
 import { CoinsIcon } from "@/components/CategoryIcon";
+import { PencilIcon } from "@/components/icons";
 
 /* ---------- small components ---------- */
 
@@ -372,8 +373,20 @@ function PersonSheet({
             Reach out by
           </span>
           {editingDue ? null : (
-            <button type="button" className="text-[15px] font-bold" style={{ color: "var(--accent)" }} onClick={() => setEditingDue(true)}>
+            // A pencil, not just coloured text, so it unmistakably reads as
+            // editable - and the same control whichever date is showing,
+            // never shown unset or shown stuck.
+            <button
+              type="button"
+              // min-h-11 px-2 -mx-2: a real 44px tap target without widening
+              // what the row actually shows - the padding is matched by a
+              // negative margin, so the text sits exactly where it did.
+              className="inline-flex items-center gap-1.5 min-h-11 px-2 -mx-2 text-[15px] font-bold"
+              style={{ color: "var(--accent)" }}
+              onClick={() => setEditingDue(true)}
+            >
               {person.due_date ? fmtDateLabel(person.due_date) : "Set date"}
+              <PencilIcon size={15} />
             </button>
           )}
         </div>

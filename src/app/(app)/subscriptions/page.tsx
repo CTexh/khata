@@ -7,6 +7,7 @@ import { SwipeRow } from "@/components/SwipeRow";
 import { invalidate, useCached } from "@/lib/swr";
 import { send } from "@/lib/submit";
 import { CheckIcon, ClockIcon, RecurringIcon } from "@/components/CategoryIcon";
+import { PencilIcon } from "@/components/icons";
 
 function Spinner() {
   return (
@@ -197,6 +198,7 @@ function SubscriptionDetail({
   onCancelDelete,
   onDelete,
   onToggleActive,
+  onSaved,
 }: {
   sub: Subscription;
   confirmDelete: boolean;
@@ -208,6 +210,9 @@ function SubscriptionDetail({
   onCancelDelete: () => void;
   onDelete: () => void;
   onToggleActive: () => void;
+  // Refreshes the list after a name, amount or due-day change - the server is
+  // the source of truth for the realigned due dates (realignUnpaidDueDates).
+  onSaved: () => Promise<void>;
 }) {
   const chip = chipFor(sub);
   const nextPaymentDate = sub.paid_this_period
@@ -219,9 +224,147 @@ function SubscriptionDetail({
   const earliestPeriod = sub.history[sub.history.length - 1]?.period ?? sub.current_period;
   const span = fmtSpan(monthsBetween(earliestPeriod, sub.current_period));
 
+  // Name, amount and due day, in one small form - the counterpart to the
+  // "New subscription" sheet. The backend already moves every unpaid month to
+  // the new due day when it changes (realignUnpaidDueDates); this just has to
+  // ask for the three fields and show what the server says if it refuses.
+  const [editing, setEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState(sub.name);
+  const [amountDraft, setAmountDraft] = useState(String(sub.amount));
+  const [dayDraft, setDayDraft] = useState(String(sub.due_day));
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState("");
+
+  const startEdit = () => {
+    setNameDraft(sub.name);
+    setAmountDraft(String(sub.amount));
+    setDayDraft(String(sub.due_day));
+    setEditError("");
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditError("");
+  };
+
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = nameDraft.trim();
+    const amount = Number(amountDraft);
+    const due_day = Number(dayDraft);
+    if (!name) {
+      setEditError("Name is required");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setEditError("Amount must be a positive number");
+      return;
+    }
+    if (!Number.isInteger(due_day) || due_day < 1 || due_day > 31) {
+      setEditError("Due day must be between 1 and 31");
+      return;
+    }
+    setEditBusy(true);
+    setEditError("");
+    const sent = await send(`/api/subscriptions/${sub.id}`, {
+      method: "PATCH",
+      body: { name, amount, due_day },
+    });
+    setEditBusy(false);
+    if (!sent.ok) {
+      setEditError(sent.error);
+      return;
+    }
+    setEditing(false);
+    await onSaved();
+  };
+
+  if (editing) {
+    return (
+      <Sheet title={`Edit ${sub.name}`} onClose={onClose} dirty>
+        <form onSubmit={saveEdit} className="card p-4 flex flex-col gap-3">
+          <div className="flex gap-3 items-end">
+            <Avatar id={sub.id} name={nameDraft || sub.name} logoUrl={sub.logo_url} size="sm" />
+            <label className="flex-1 flex flex-col gap-1.5">
+              <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+                Name
+              </span>
+              <input
+                type="text"
+                className="field w-full"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                required
+                autoFocus
+              />
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+                Amount (Rs)
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                className="field tabular"
+                value={amountDraft}
+                onChange={(e) => setAmountDraft(e.target.value)}
+                required
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+                Due day
+              </span>
+              <input
+                type="number"
+                inputMode="numeric"
+                step="1"
+                min="1"
+                max="31"
+                className="field tabular"
+                value={dayDraft}
+                onChange={(e) => setDayDraft(e.target.value)}
+                required
+              />
+            </label>
+          </div>
+          <p className="text-[12.5px] -mt-1" style={{ color: "var(--muted)" }}>
+            Day of the month it&apos;s due, 1–31. Any month not yet paid moves to the new day; paid months keep theirs.
+          </p>
+          {editError && (
+            <p className="text-[13px]" style={{ color: "var(--bad)" }} role="alert">
+              {editError}
+            </p>
+          )}
+          <div className="form-actions mt-1">
+            <button type="button" onClick={cancelEdit} className="btn btn-ghost">
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={editBusy}>
+              {editBusy ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      </Sheet>
+    );
+  }
+
   return (
     <Sheet title={sub.name} onClose={onClose}>
-      <div className="card p-5 flex flex-col items-center text-center">
+      <div className="card p-5 flex flex-col items-center text-center" style={{ position: "relative" }}>
+        <button
+          type="button"
+          onClick={startEdit}
+          disabled={actionLoading}
+          aria-label={`Edit ${sub.name}`}
+          className="btn btn-ghost !absolute !top-3 !right-3 !p-0 !w-10 !h-10 !min-w-0 !min-h-0"
+        >
+          <PencilIcon size={17} />
+        </button>
         <Avatar id={sub.id} name={sub.name} logoUrl={sub.logo_url} size="lg" />
         <span className="chip mt-3 inline-flex items-center gap-1" style={chip.style}>
           {justPaid ? (
@@ -682,6 +825,7 @@ export default function Subscriptions() {
           onCancelDelete={() => setConfirmDeleteId(null)}
           onDelete={() => handleDelete(open.id)}
           onToggleActive={() => handleToggleActive(open.id, !open.active)}
+          onSaved={loadSubscriptions}
         />
       )}
 

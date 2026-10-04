@@ -142,3 +142,12 @@ export function PaletteIcon({ size = 24, className }: IconProps) {
     </svg>
   );
 }
+
+export function PencilIcon({ size = 24, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden>
+      <path {...base} d="M4 20l.9-3.6a2 2 0 0 1 .53-.94L15.6 5.3a1.5 1.5 0 0 1 2.12 0l1 1a1.5 1.5 0 0 1 0 2.12L8.5 18.56a2 2 0 0 1-.94.53L4 20z" />
+      <path {...base} d="M13.8 7.1l3.1 3.1" />
+    </svg>
+  );
+}
